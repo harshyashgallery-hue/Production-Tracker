@@ -13,7 +13,6 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap');
 
-/* ── GLOBAL ── */
 html, body, [class*="css"] {
     font-family: 'Nunito', sans-serif !important;
     background: #f0f2f6 !important;
@@ -22,25 +21,30 @@ html, body, [class*="css"] {
 #MainMenu, footer, header { visibility: hidden !important; }
 [data-testid="collapsedControl"] { display: none !important; }
 section[data-testid="stSidebar"] { display: none !important; }
-.block-container { padding: 0 !important; max-width: 100% !important; }
 
-/* ── APP SHELL ── */
-.app-shell {
-    display: flex;
-    min-height: 100vh;
+/* Remove default padding */
+.block-container {
+    padding: 0 0 0 0 !important;
+    max-width: 100% !important;
 }
 
-/* ── LEFT NAV ── */
+/* Push ALL streamlit content right of nav */
+[data-testid="stAppViewContainer"] > section:last-child {
+    padding-left: 235px !important;
+    padding-right: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* ── LEFT NAV (fixed position) ── */
 .leftnav {
     width: 220px;
-    min-width: 220px;
     background: #1e2a35;
-    display: flex;
-    flex-direction: column;
     position: fixed;
     top: 0; left: 0; bottom: 0;
-    z-index: 100;
+    z-index: 999;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 .ln-brand {
     background: linear-gradient(135deg, #875A7B, #5e3260);
@@ -54,168 +58,142 @@ section[data-testid="stSidebar"] { display: none !important; }
     background: rgba(255,255,255,0.15);
     border-radius: 9px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 19px;
+    font-size: 19px; flex-shrink: 0;
 }
-.ln-brand-text { line-height: 1.2; }
 .ln-brand-title { font-size: 0.95rem; font-weight: 800; color: #fff; }
-.ln-brand-sub   { font-size: 0.65rem; color: rgba(255,255,255,0.55); }
+.ln-brand-sub   { font-size: 0.63rem; color: rgba(255,255,255,0.5); margin-top: 1px; }
 
-.ln-section {
-    padding: 18px 14px 6px;
-    font-size: 0.58rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: #4a6070;
+.ln-sec {
+    padding: 16px 14px 5px;
+    font-size: 0.57rem; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: #3d5568;
 }
 .ln-item {
-    margin: 2px 8px;
+    margin: 1px 8px;
     padding: 9px 12px;
     border-radius: 8px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    display: flex; align-items: center; gap: 10px;
     cursor: pointer;
     transition: background 0.15s;
-    text-decoration: none;
 }
-.ln-item:hover { background: rgba(255,255,255,0.07); }
-.ln-item.active { background: rgba(135,90,123,0.35); }
-.ln-item .ico { font-size: 17px; width: 22px; text-align: center; }
-.ln-item .txt { font-size: 0.82rem; font-weight: 700; color: #8fa8bc; }
-.ln-item.active .txt { color: #fff; }
-.ln-item:hover .txt { color: #c8d8e4; }
-
+.ln-item:hover    { background: rgba(255,255,255,0.07); }
+.ln-item.active   { background: rgba(135,90,123,0.4); }
+.ln-ico { font-size: 16px; width: 20px; text-align: center; }
+.ln-txt { font-size: 0.8rem; font-weight: 700; color: #7a97ab; flex: 1; }
+.ln-item.active .ln-txt { color: #fff; }
+.ln-item:hover  .ln-txt { color: #c0d0db; }
 .ln-badge {
-    margin-left: auto;
     background: rgba(135,90,123,0.5);
-    color: #e8c5e0;
-    font-size: 0.6rem;
-    font-weight: 800;
-    padding: 2px 7px;
-    border-radius: 10px;
+    color: #e0b8d8;
+    font-size: 0.56rem; font-weight: 800;
+    padding: 2px 6px; border-radius: 8px;
 }
-
 .ln-footer {
     margin-top: auto;
-    padding: 14px 16px;
-    border-top: 1px solid rgba(255,255,255,0.06);
-    font-size: 0.65rem;
-    color: #3d5468;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    font-size: 0.62rem;
+    color: #3a5060;
     text-align: center;
 }
 
-/* ── MAIN CONTENT ── */
-.main-wrap {
-    margin-left: 220px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-}
-
-/* ── TOPBAR ── */
+/* ── TOP BAR ── */
 .topbar {
     background: #fff;
     border-bottom: 1.5px solid #e4e8ee;
     padding: 0 28px;
-    height: 54px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
     box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    position: sticky;
-    top: 0;
-    z-index: 50;
+    margin-bottom: 0;
 }
-.tb-left { display: flex; align-items: center; gap: 8px; }
-.tb-crumb { font-size: 0.78rem; color: #95a5a6; font-weight: 600; }
+.tb-crumb { font-size: 0.76rem; color: #95a5a6; font-weight: 600; }
 .tb-crumb b { color: #875A7B; }
-.tb-right { font-size: 0.75rem; color: #95a5a6; font-weight: 600; }
+.tb-date  { font-size: 0.74rem; color: #95a5a6; font-weight: 600; }
 
-/* ── PAGE BODY ── */
-.page-body { padding: 26px 30px 40px; }
-.pg-title { font-size: 1.4rem; font-weight: 800; color: #1a252f; margin-bottom: 3px; }
-.pg-sub   { font-size: 0.83rem; color: #7f8c8d; margin-bottom: 22px; }
+/* ── PAGE ── */
+.pg-wrap  { padding: 24px 28px 40px; }
+.pg-title { font-size: 1.35rem; font-weight: 800; color: #1a252f; margin-bottom: 2px; }
+.pg-sub   { font-size: 0.82rem; color: #7f8c8d; margin-bottom: 20px; }
 
-/* ── UPLOAD SECTION ── */
-.upload-bar {
+/* ── UPLOAD CARD ── */
+.up-card {
     background: #fff;
     border-radius: 12px;
     border: 1px solid #e4e8ee;
-    padding: 16px 20px;
-    margin-bottom: 20px;
+    padding: 14px 18px 6px;
+    margin-bottom: 18px;
     box-shadow: 0 1px 4px rgba(0,0,0,0.04);
 }
-.upload-bar-title {
-    font-size: 0.68rem; font-weight: 800;
+.up-title {
+    font-size: 0.65rem; font-weight: 800;
     text-transform: uppercase; letter-spacing: 1.6px;
     color: #7f8c8d; margin-bottom: 12px;
 }
 
-/* ── SEARCH ── */
+/* ── INPUTS ── */
 .stTextInput > div > div > input {
     border: 1.5px solid #d8dde4 !important;
     border-radius: 8px !important;
-    padding: 10px 16px !important;
+    padding: 10px 14px !important;
     font-family: 'Nunito', sans-serif !important;
-    font-size: 0.95rem !important;
+    font-size: 0.94rem !important;
     background: #fff !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
-    transition: all 0.2s !important;
+    transition: all 0.18s !important;
 }
 .stTextInput > div > div > input:focus {
     border-color: #875A7B !important;
-    box-shadow: 0 0 0 3px rgba(135,90,123,0.12) !important;
+    box-shadow: 0 0 0 3px rgba(135,90,123,0.11) !important;
     outline: none !important;
 }
 .stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #875A7B, #6c4765) !important;
+    background: linear-gradient(135deg,#875A7B,#6c4765) !important;
     color: #fff !important; border: none !important;
-    border-radius: 8px !important; padding: 11px 20px !important;
-    font-family: 'Nunito', sans-serif !important;
+    border-radius: 8px !important; padding: 10px 18px !important;
+    font-family: 'Nunito',sans-serif !important;
     font-weight: 700 !important; font-size: 0.88rem !important;
     box-shadow: 0 3px 10px rgba(135,90,123,0.3) !important;
     transition: all 0.18s !important;
 }
 .stButton > button[kind="primary"]:hover {
     transform: translateY(-1px) !important;
-    box-shadow: 0 5px 16px rgba(135,90,123,0.42) !important;
+    box-shadow: 0 5px 16px rgba(135,90,123,0.4) !important;
 }
 
-/* ── KPI CARDS ── */
+/* ── KPI ── */
 .kpi {
-    background: #fff; border-radius: 12px;
-    padding: 18px 18px 14px;
-    border: 1px solid #e4e8ee;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    position: relative; overflow: hidden;
-    transition: transform 0.15s, box-shadow 0.15s;
+    background:#fff; border-radius:12px;
+    padding:17px 18px 13px;
+    border:1px solid #e4e8ee;
+    box-shadow:0 1px 4px rgba(0,0,0,0.05);
+    position:relative; overflow:hidden;
+    transition:transform 0.15s, box-shadow 0.15s;
 }
-.kpi:hover { transform: translateY(-2px); box-shadow: 0 5px 16px rgba(0,0,0,0.09); }
+.kpi:hover { transform:translateY(-2px); box-shadow:0 5px 16px rgba(0,0,0,0.09); }
 .kpi::after {
     content:''; position:absolute;
     bottom:0; left:0; right:0; height:3px;
-    border-radius: 0 0 12px 12px;
+    border-radius:0 0 12px 12px;
 }
-.kp::after { background: linear-gradient(90deg,#875A7B,#b386a8); }
-.kg::after { background: linear-gradient(90deg,#1abc9c,#27ae60); }
-.ka::after { background: linear-gradient(90deg,#f39c12,#e67e22); }
-.kb::after { background: linear-gradient(90deg,#3498db,#2980b9); }
-.kpi-em  { font-size:1.4rem; margin-bottom:8px; display:block; }
-.kpi-val { font-size:1.85rem; font-weight:800; color:#1a252f; font-family:'IBM Plex Mono',monospace; line-height:1; margin-bottom:4px; }
-.kpi-lbl { font-size:0.67rem; font-weight:700; text-transform:uppercase; letter-spacing:0.9px; color:#95a5a6; }
+.kp::after { background:linear-gradient(90deg,#875A7B,#b386a8); }
+.kg::after { background:linear-gradient(90deg,#1abc9c,#27ae60); }
+.ka::after { background:linear-gradient(90deg,#f39c12,#e67e22); }
+.kb::after { background:linear-gradient(90deg,#3498db,#2980b9); }
+.kpi-em  { font-size:1.35rem; margin-bottom:7px; display:block; }
+.kpi-val { font-size:1.8rem; font-weight:800; color:#1a252f; font-family:'IBM Plex Mono',monospace; line-height:1; margin-bottom:4px; }
+.kpi-lbl { font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.9px; color:#95a5a6; }
 
 /* ── PIPELINE ── */
 .pipeline {
     background:#fff; border-radius:12px;
-    border:1px solid #e4e8ee;
-    box-shadow:0 1px 4px rgba(0,0,0,0.05);
-    padding:18px 26px; margin:18px 0;
+    border:1px solid #e4e8ee; box-shadow:0 1px 4px rgba(0,0,0,0.05);
+    padding:18px 24px; margin:18px 0;
 }
-.pl-lbl { font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:1.8px; color:#95a5a6; margin-bottom:18px; }
+.pl-lbl { font-size:0.63rem; font-weight:800; text-transform:uppercase; letter-spacing:1.8px; color:#95a5a6; margin-bottom:18px; }
 .pl-track { display:flex; align-items:flex-start; }
-.pl-step { flex:1; display:flex; flex-direction:column; align-items:center; position:relative; }
+.pl-step  { flex:1; display:flex; flex-direction:column; align-items:center; position:relative; }
 .pl-step::after { content:''; position:absolute; top:15px; left:50%; width:100%; height:3px; z-index:0; }
 .pl-step:last-child::after { display:none; }
 .pld::after { background:#1abc9c; }
@@ -233,62 +211,62 @@ section[data-testid="stSidebar"] { display: none !important; }
     0%,100%{box-shadow:0 0 0 3px rgba(230,126,34,.2)}
     50%{box-shadow:0 0 0 8px rgba(230,126,34,.04)}
 }
-.pl-name { font-size:0.63rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; text-align:center; margin-top:7px; color:#b2bec3; }
+.pl-name { font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; text-align:center; margin-top:7px; color:#b2bec3; }
 .pld .pl-name { color:#1abc9c; }
 .pla .pl-name { color:#e67e22; }
 
 /* ── STAGE CARDS ── */
 .sc { background:#fff; border-radius:12px; border:1px solid #e4e8ee; box-shadow:0 1px 4px rgba(0,0,0,0.05); margin-bottom:12px; overflow:hidden; transition:box-shadow 0.15s; }
 .sc:hover { box-shadow:0 4px 16px rgba(0,0,0,0.09); }
-.sc-hd { padding:12px 18px; display:flex; align-items:center; justify-content:space-between; background:#fafbfc; border-bottom:1px solid #f0f3f6; }
+.sc-hd { padding:11px 18px; display:flex; align-items:center; justify-content:space-between; background:#fafbfc; border-bottom:1px solid #f0f3f6; }
 .sc-ico { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px; margin-right:11px; flex-shrink:0; }
-.sc-nm { font-size:0.9rem; font-weight:800; color:#1a252f; }
-.sc-sb { font-size:0.68rem; color:#95a5a6; margin-top:1px; }
-.badge { padding:3px 10px; border-radius:20px; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
+.sc-nm  { font-size:0.88rem; font-weight:800; color:#1a252f; }
+.sc-sb  { font-size:0.67rem; color:#95a5a6; margin-top:1px; }
+.badge  { padding:3px 10px; border-radius:20px; font-size:0.64rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; }
 .bd { background:#e8faf4; color:#1a8a5e; border:1px solid #a3dfc7; }
 .ba { background:#fef8ec; color:#b7740a; border:1px solid #f8d99b; }
 .bp { background:#f2f4f6; color:#95a5a6; border:1px solid #dde1e6; }
 .sc-bd { padding:14px 18px; }
-.irow { display:grid; grid-template-columns:repeat(5,1fr); gap:11px; margin-bottom:14px; }
-.il { font-size:0.59rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#95a5a6; margin-bottom:2px; }
-.iv { font-size:0.84rem; font-weight:700; color:#2c3e50; }
-.im { font-family:'IBM Plex Mono',monospace; font-size:0.78rem; }
+.irow  { display:grid; grid-template-columns:repeat(5,1fr); gap:11px; margin-bottom:14px; }
+.il    { font-size:0.58rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#95a5a6; margin-bottom:2px; }
+.iv    { font-size:0.83rem; font-weight:700; color:#2c3e50; }
+.im    { font-family:'IBM Plex Mono',monospace; font-size:0.77rem; }
 .szrow { display:flex; flex-wrap:wrap; gap:6px; }
-.szc { background:#f4f6f9; border:1px solid #e0e4ea; border-radius:7px; padding:4px 8px; text-align:center; min-width:42px; }
-.szc .s { font-size:0.56rem; font-weight:700; color:#95a5a6; text-transform:uppercase; display:block; }
-.szc .q { font-size:0.87rem; font-weight:800; color:#2c3e50; font-family:'IBM Plex Mono',monospace; display:block; }
-.szon { background:#f3eaf6 !important; border-color:#c89ddb !important; }
+.szc   { background:#f4f6f9; border:1px solid #e0e4ea; border-radius:7px; padding:4px 8px; text-align:center; min-width:42px; }
+.szc .s { font-size:0.55rem; font-weight:700; color:#95a5a6; text-transform:uppercase; display:block; }
+.szc .q { font-size:0.86rem; font-weight:800; color:#2c3e50; font-family:'IBM Plex Mono',monospace; display:block; }
+.szon   { background:#f3eaf6 !important; border-color:#c89ddb !important; }
 .szon .s { color:#875A7B !important; }
 .szon .q { color:#5e3268 !important; }
-.sztot { background:linear-gradient(135deg,#875A7B,#6c4765) !important; border:none !important; min-width:50px; }
+.sztot  { background:linear-gradient(135deg,#875A7B,#6c4765) !important; border:none !important; min-width:50px; }
 .sztot .s { color:rgba(255,255,255,0.7) !important; }
 .sztot .q { color:#fff !important; }
 
 /* ── TABLE ── */
 .tbl-box { background:#fff; border-radius:12px; border:1px solid #e4e8ee; box-shadow:0 1px 4px rgba(0,0,0,0.05); overflow:hidden; margin-bottom:18px; }
-.tbl-hd  { padding:11px 18px; background:#fafbfc; border-bottom:1px solid #e4e8ee; font-size:0.66rem; font-weight:800; text-transform:uppercase; letter-spacing:1.6px; color:#7f8c8d; }
+.tbl-hd  { padding:11px 18px; background:#fafbfc; border-bottom:1px solid #e4e8ee; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:1.6px; color:#7f8c8d; }
 
-/* ── EXPORT BUTTONS ── */
+/* ── DOWNLOAD BUTTONS ── */
 .stDownloadButton > button {
     background:#fff !important; color:#875A7B !important;
     border:1.5px solid #875A7B !important; border-radius:8px !important;
-    font-family:'Nunito',sans-serif !important; font-weight:700 !important; font-size:0.82rem !important;
+    font-family:'Nunito',sans-serif !important; font-weight:700 !important; font-size:0.81rem !important;
     transition:all 0.18s !important;
 }
 .stDownloadButton > button:hover { background:#875A7B !important; color:#fff !important; }
 
 /* ── EMPTY STATE ── */
-.empty { background:#fff; border-radius:12px; border:1.5px dashed #d8dde4; padding:60px 32px; text-align:center; margin-top:8px; }
-.empty .ei { font-size:3rem; margin-bottom:12px; }
-.empty h3  { font-size:1rem; font-weight:800; color:#7f8c8d; margin-bottom:5px; }
-.empty p   { font-size:0.8rem; color:#b2bec3; }
+.empty { background:#fff; border-radius:12px; border:1.5px dashed #d8dde4; padding:56px 32px; text-align:center; margin-top:8px; }
+.empty .ei { font-size:2.8rem; margin-bottom:12px; }
+.empty h3  { font-size:0.98rem; font-weight:800; color:#7f8c8d; margin-bottom:5px; }
+.empty p   { font-size:0.79rem; color:#b2bec3; }
 
-.divider { border:none; border-top:1px solid #e4e8ee; margin:18px 0; }
-.sec-hdr { font-size:0.73rem; font-weight:800; text-transform:uppercase; letter-spacing:1.2px; color:#7f8c8d; margin-bottom:12px; }
+.divider { border:none; border-top:1px solid #e4e8ee; margin:16px 0; }
+.sec-hdr { font-size:0.71rem; font-weight:800; text-transform:uppercase; letter-spacing:1.2px; color:#7f8c8d; margin-bottom:11px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 SIZES  = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"]
 STAGES = [
     ("cutting",   "Cutting",          "✂️",  "#875A7B"),
@@ -342,52 +320,52 @@ def gstatus(info, sizes):
     if hi: return "active"
     return "pending"
 
-# ── LEFT NAV (HTML — permanent, no toggle) ───────────────────────────────────
+# ─── LEFT NAV ────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="leftnav">
   <div class="ln-brand">
     <div class="ln-brand-icon">🏭</div>
-    <div class="ln-brand-text">
+    <div>
       <div class="ln-brand-title">Prod. Tracker</div>
       <div class="ln-brand-sub">Garment Management</div>
     </div>
   </div>
 
-  <div class="ln-section">Main Menu</div>
+  <div class="ln-sec">Main Menu</div>
   <div class="ln-item active">
-    <span class="ico">📋</span>
-    <span class="txt">Production Status</span>
+    <span class="ln-ico">📋</span>
+    <span class="ln-txt">Production Status</span>
   </div>
 
-  <div class="ln-section" style="margin-top:8px">Coming Soon</div>
+  <div class="ln-sec" style="margin-top:6px">Coming Soon</div>
   <div class="ln-item">
-    <span class="ico">📦</span>
-    <span class="txt">Order Management</span>
+    <span class="ln-ico">📦</span>
+    <span class="ln-txt">Order Management</span>
     <span class="ln-badge">Soon</span>
   </div>
   <div class="ln-item">
-    <span class="ico">✂️</span>
-    <span class="txt">Cutting Dept.</span>
+    <span class="ln-ico">✂️</span>
+    <span class="ln-txt">Cutting Dept.</span>
     <span class="ln-badge">Soon</span>
   </div>
   <div class="ln-item">
-    <span class="ico">🧵</span>
-    <span class="txt">Stitching Dept.</span>
+    <span class="ln-ico">🧵</span>
+    <span class="ln-txt">Stitching Dept.</span>
     <span class="ln-badge">Soon</span>
   </div>
   <div class="ln-item">
-    <span class="ico">✨</span>
-    <span class="txt">Finishing Dept.</span>
+    <span class="ln-ico">✨</span>
+    <span class="ln-txt">Finishing Dept.</span>
     <span class="ln-badge">Soon</span>
   </div>
   <div class="ln-item">
-    <span class="ico">📊</span>
-    <span class="txt">Reports</span>
+    <span class="ln-ico">📊</span>
+    <span class="ln-txt">Reports</span>
     <span class="ln-badge">Soon</span>
   </div>
   <div class="ln-item">
-    <span class="ico">🧶</span>
-    <span class="txt">Fabric Stock</span>
+    <span class="ln-ico">🧶</span>
+    <span class="ln-txt">Fabric Stock</span>
     <span class="ln-badge">Soon</span>
   </div>
 
@@ -395,29 +373,24 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── MAIN CONTENT WRAPPER ──────────────────────────────────────────────────────
-st.markdown("""<div class="main-wrap">""", unsafe_allow_html=True)
-
-# Topbar
+# ─── TOP BAR ─────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="topbar">
-  <div class="tb-left">
-    <span class="tb-crumb">Production › <b>Style Tracking</b></span>
-  </div>
-  <div class="tb-right">📅 {date.today().strftime("%d %B %Y")}</div>
+  <div class="tb-crumb">Production › <b>Style Tracking</b></div>
+  <div class="tb-date">📅 {date.today().strftime("%d %B %Y")}</div>
 </div>
 """, unsafe_allow_html=True)
 
-# Page body starts
-st.markdown("""<div class="page-body">""", unsafe_allow_html=True)
+# ─── PAGE BODY ───────────────────────────────────────────────────────────────
+st.markdown("""<div class="pg-wrap">""", unsafe_allow_html=True)
 
 st.markdown("""
 <div class="pg-title">Production Order Tracker</div>
 <div class="pg-sub">Style number daalo — saari stages ka status ek jagah dikhe</div>
 """, unsafe_allow_html=True)
 
-# ── FILE UPLOADS ──────────────────────────────────────────────────────────────
-st.markdown("<div class='upload-bar'><div class='upload-bar-title'>📂 Excel Files Upload Karo</div></div>", unsafe_allow_html=True)
+# ─── FILE UPLOADS ────────────────────────────────────────────────────────────
+st.markdown("<div class='up-card'><div class='up-title'>📂 Excel Files Upload Karo</div></div>", unsafe_allow_html=True)
 
 u1, u2, u3, u4 = st.columns(4)
 with u1: f_cut = st.file_uploader("✂️ Cutting",          type=["xlsx","xls"], key="c")
@@ -425,11 +398,10 @@ with u2: f_sti = st.file_uploader("🧵 Stitching",        type=["xlsx","xls"], 
 with u3: f_hnd = st.file_uploader("🖐️ Hand Work / Kaaz", type=["xlsx","xls"], key="h")
 with u4: f_fin = st.file_uploader("✨ Finishing",         type=["xlsx","xls"], key="f")
 
-# Sample download
 sdf = pd.DataFrame({
-    "Style No":["1557YKRED","2341BKBLU"], "CH No":["CH-001","CH-002"],
+    "Style No":["1557YKRED","2341BKBLU"],"CH No":["CH-001","CH-002"],
     "Vendor Name":["ABC Stitching","XYZ Tailor"],
-    "I. Date":["01-Jan-2025","05-Jan-2025"], "R. Date":["10-Jan-2025",""],
+    "I. Date":["01-Jan-2025","05-Jan-2025"],"R. Date":["10-Jan-2025",""],
     "Delivery Date":["15-Jan-2025","20-Jan-2025"],
     "XS":[10,5],"S":[20,10],"M":[30,15],"L":[25,12],
     "XL":[20,8],"XXL":[10,5],"3XL":[5,2],"4XL":[3,1],
@@ -442,12 +414,12 @@ st.download_button("⬇️ Sample Excel Format", sb.getvalue(),
 
 st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-# ── SEARCH ────────────────────────────────────────────────────────────────────
-sc1, sc2 = st.columns([5, 1])
-with sc1:
+# ─── SEARCH ──────────────────────────────────────────────────────────────────
+s1, s2 = st.columns([5, 1])
+with s1:
     style_input = st.text_input("", placeholder="🔍  Style number daalo — jaise: 1557YKRED",
                                  label_visibility="collapsed").strip().upper()
-with sc2:
+with s2:
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("🔎 Search", type="primary", use_container_width=True)
 
@@ -458,10 +430,9 @@ if not style_input:
       <h3>Koi style search nahi kiya abhi</h3>
       <p>Upar style number daalo aur Excel files upload karo</p>
     </div>""", unsafe_allow_html=True)
-    st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
-# ── LOAD DATA ─────────────────────────────────────────────────────────────────
+# ─── LOAD DATA ───────────────────────────────────────────────────────────────
 dfs = {
     "cutting":   safe_read(f_cut) if f_cut else pd.DataFrame(),
     "stitching": safe_read(f_sti) if f_sti else pd.DataFrame(),
@@ -482,22 +453,21 @@ if not any(stage_data[sk][0] for sk, *_ in STAGES):
       <h3>Style <b>{style_input}</b> nahi mila</h3>
       <p>Style number check karo ya Excel files upload karo</p>
     </div>""", unsafe_allow_html=True)
-    st.markdown("</div></div>", unsafe_allow_html=True)
     st.stop()
 
-# ── KPI ───────────────────────────────────────────────────────────────────────
+# ─── KPI ─────────────────────────────────────────────────────────────────────
 cut_sizes = stage_data["cutting"][1]
 total_qty = sum(cut_sizes.values())
 done_n    = sum(1 for sk,*_ in STAGES if gstatus(*stage_data[sk]) == "done")
 active_n  = sum(1 for sk,*_ in STAGES if gstatus(*stage_data[sk]) == "active")
 pct       = int(done_n / 4 * 100)
 
-k1, k2, k3, k4 = st.columns(4)
+k1,k2,k3,k4 = st.columns(4)
 for col, val, lbl, em, cls in [
-    (k1, total_qty or "—", "Total Order Qty",  "📦", "kp"),
-    (k2, f"{done_n}/4",    "Stages Complete",   "✅", "kg"),
-    (k3, active_n,         "In Progress",       "🔄", "ka"),
-    (k4, f"{pct}%",        "Overall Progress",  "📊", "kb"),
+    (k1, total_qty or "—", "Total Order Qty", "📦", "kp"),
+    (k2, f"{done_n}/4",    "Stages Complete",  "✅", "kg"),
+    (k3, active_n,         "In Progress",      "🔄", "ka"),
+    (k4, f"{pct}%",        "Overall Progress", "📊", "kb"),
 ]:
     with col:
         st.markdown(f"""
@@ -507,7 +477,7 @@ for col, val, lbl, em, cls in [
           <div class='kpi-lbl'>{lbl}</div>
         </div>""", unsafe_allow_html=True)
 
-# ── PIPELINE ──────────────────────────────────────────────────────────────────
+# ─── PIPELINE ────────────────────────────────────────────────────────────────
 di = {"done":"✓","active":"⟳","pending":"○"}
 steps = ""
 for sk, sl, icon, _ in STAGES:
@@ -521,9 +491,8 @@ st.markdown(f"""
   <div class='pl-track'>{steps}</div>
 </div>""", unsafe_allow_html=True)
 
-# ── STAGE CARDS ───────────────────────────────────────────────────────────────
+# ─── STAGE CARDS ─────────────────────────────────────────────────────────────
 st.markdown("<div class='sec-hdr'>Stage-wise Details</div>", unsafe_allow_html=True)
-
 bmap = {
     "done":    "<span class='badge bd'>✓ Complete</span>",
     "active":  "<span class='badge ba'>⟳ In Progress</span>",
@@ -556,31 +525,27 @@ for sk, sl, icon, color in STAGES:
 
     body = ""
     if info:
-        body = f"""
-        <div class='sc-bd'>
+        body = f"""<div class='sc-bd'>
           <div class='irow'>{ihtml}</div>
-          <div class='il' style='margin-bottom:9px'>Size-wise Quantity</div>
-          <div class='szrow'>{chips if chips else "<span style='color:#b2bec3;font-size:.82rem'>Data nahi mila</span>"}</div>
+          <div class='il' style='margin-bottom:8px'>Size-wise Quantity</div>
+          <div class='szrow'>{chips if chips else "<span style='color:#b2bec3;font-size:.8rem'>Data nahi mila</span>"}</div>
         </div>"""
     else:
-        body = "<div class='sc-bd' style='color:#b2bec3;font-size:.82rem'>File upload nahi hui ya style nahi mila.</div>"
+        body = "<div class='sc-bd' style='color:#b2bec3;font-size:.8rem'>File upload nahi hui ya style nahi mila.</div>"
 
     st.markdown(f"""
     <div class='sc'>
       <div class='sc-hd'>
         <div style='display:flex;align-items:center'>
           <div class='sc-ico' style='background:{color}22'>{icon}</div>
-          <div>
-            <div class='sc-nm'>{sl}</div>
-            <div class='sc-sb'>Total: {total if total else "—"} pieces</div>
-          </div>
+          <div><div class='sc-nm'>{sl}</div><div class='sc-sb'>Total: {total if total else "—"} pieces</div></div>
         </div>
         {bmap[s]}
       </div>
       {body}
     </div>""", unsafe_allow_html=True)
 
-# ── SUMMARY TABLE ─────────────────────────────────────────────────────────────
+# ─── SUMMARY TABLE ───────────────────────────────────────────────────────────
 rows = []
 for sk, sl, icon, _ in STAGES:
     _, sizes = stage_data[sk]
@@ -591,14 +556,12 @@ for sk, sl, icon, _ in STAGES:
         rows.append(r)
 
 if rows:
-    st.markdown("""
-    <div class='tbl-box'>
-      <div class='tbl-hd'>📐 Size-wise Summary — All Stages</div>""",
-    unsafe_allow_html=True)
+    st.markdown("""<div class='tbl-box'><div class='tbl-hd'>📐 Size-wise Summary — All Stages</div>""",
+        unsafe_allow_html=True)
     st.dataframe(pd.DataFrame(rows).set_index("Stage"), use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ── EXPORT ────────────────────────────────────────────────────────────────────
+# ─── EXPORT ──────────────────────────────────────────────────────────────────
 st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 st.markdown("<div class='sec-hdr'>📤 Export</div>", unsafe_allow_html=True)
 
@@ -627,7 +590,6 @@ with e2:
             use_container_width=True)
 
 st.markdown("""
-<div style='text-align:center;color:#b2bec3;font-size:0.68rem;padding:20px 0 6px'>
+<div style='text-align:center;color:#b2bec3;font-size:0.67rem;padding:18px 0 4px'>
   Production Tracker v1.0 &nbsp;•&nbsp; Data sirf aapki Excel files se &nbsp;•&nbsp; Koi data server pe save nahi hota
-</div>
-</div></div>""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
