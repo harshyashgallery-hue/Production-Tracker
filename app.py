@@ -410,7 +410,7 @@ with tab3:
                     'Mix_MI','Mix_MR','Total_MI','Total_MR','Total_BAL']
 
     st.write(f"**{len(raw):,} records**")
-    st.dataframe(raw[display_cols].sort_values(['Design','Process','Size_order']),
+    st.dataframe(raw[display_cols].sort_values(['Design','Process']),
                  use_container_width=True, hide_index=True)
 
     # Download
