@@ -1,615 +1,418 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
-import io
+from html.parser import HTMLParser
+from io import StringIO
 
 st.set_page_config(
-    page_title="Production Tracker",
-    page_icon="🏭",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Yash Gallery - Style Tracking",
+    page_icon="👗",
+    layout="wide"
 )
 
+# ── Custom CSS ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Nunito', sans-serif !important;
-    background: #f0f4f8 !important;
-    color: #2c3e50 !important;
-}
-#MainMenu, footer, header { visibility: hidden !important; }
-[data-testid="collapsedControl"] { display: none !important; }
-
-/* ── SIDEBAR ── */
-[data-testid="stSidebar"] {
-    background: #1a2332 !important;
-    min-width: 260px !important;
-    max-width: 260px !important;
-}
-[data-testid="stSidebar"] > div:first-child {
-    padding-top: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-}
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span,
-[data-testid="stSidebar"] div,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] small {
-    color: #7a95a8 !important;
-    font-family: 'Nunito', sans-serif !important;
-}
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {
-    color: #ffffff !important;
-}
-[data-testid="stSidebar"] [data-testid="stFileUploader"] {
-    background: rgba(255,255,255,0.04) !important;
-    border: 1.5px dashed rgba(255,255,255,0.12) !important;
-    border-radius: 8px !important;
-}
-[data-testid="stSidebar"] .stDownloadButton > button {
-    background: rgba(135,90,123,0.25) !important;
-    color: #d4a8c7 !important;
-    border: 1px solid rgba(135,90,123,0.4) !important;
-    border-radius: 7px !important;
-    font-family: 'Nunito', sans-serif !important;
-    font-weight: 700 !important;
-    width: 100%;
-    transition: all 0.2s !important;
-}
-[data-testid="stSidebar"] .stDownloadButton > button:hover {
-    background: #875A7B !important;
-    color: white !important;
-}
-
-/* ── MAIN AREA ── */
-.block-container {
-    padding: 1.5rem 2rem 3rem 2rem !important;
-    max-width: 100% !important;
-}
-
-/* ── PAGE HEADER CARD ── */
-.page-header {
-    background: linear-gradient(135deg, #875A7B 0%, #5e3260 100%);
-    border-radius: 14px;
-    padding: 22px 28px;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    box-shadow: 0 4px 20px rgba(135,90,123,0.35);
-}
-.ph-left h1 {
-    font-size: 1.5rem !important;
-    font-weight: 800 !important;
-    color: #fff !important;
-    margin: 0 0 4px 0 !important;
-}
-.ph-left p { font-size: 0.83rem; color: rgba(255,255,255,0.65); margin: 0; }
-.ph-right  { font-size: 0.8rem; color: rgba(255,255,255,0.55); font-weight: 600; text-align: right; }
-.ph-date   { font-size: 1.1rem; font-weight: 800; color: rgba(255,255,255,0.9); }
-
-/* ── SECTION LABEL ── */
-.sec-label {
-    font-size: 0.68rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 1.8px;
-    color: #95a5a6;
-    margin: 20px 0 10px;
-}
-
-/* ── SEARCH BOX ── */
-.stTextInput > div > div > input {
-    border: 1.5px solid #d0d7e2 !important;
-    border-radius: 10px !important;
-    padding: 11px 16px !important;
-    font-family: 'Nunito', sans-serif !important;
-    font-size: 1rem !important;
-    background: #ffffff !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
-    transition: all 0.2s !important;
-}
-.stTextInput > div > div > input:focus {
-    border-color: #875A7B !important;
-    box-shadow: 0 0 0 3px rgba(135,90,123,0.12) !important;
-}
-.stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #875A7B, #6c4765) !important;
-    color: white !important; border: none !important;
-    border-radius: 10px !important; padding: 11px 24px !important;
-    font-family: 'Nunito', sans-serif !important;
-    font-weight: 700 !important; font-size: 0.92rem !important;
-    box-shadow: 0 3px 12px rgba(135,90,123,0.3) !important;
-    transition: all 0.2s !important;
-    width: 100%;
-}
-.stButton > button[kind="primary"]:hover {
-    transform: translateY(-1px) !important;
-    box-shadow: 0 6px 18px rgba(135,90,123,0.4) !important;
-}
-
-/* ── KPI CARDS ── */
-.kcard {
-    background: #ffffff;
-    border-radius: 12px;
-    padding: 20px 20px 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    position: relative; overflow: hidden;
-    transition: transform 0.18s, box-shadow 0.18s;
-}
-.kcard:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
-.kcard::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; height: 4px;
-    border-radius: 12px 12px 0 0;
-}
-.kc1::before { background: linear-gradient(90deg, #875A7B, #c084b0); }
-.kc2::before { background: linear-gradient(90deg, #059669, #34d399); }
-.kc3::before { background: linear-gradient(90deg, #d97706, #fbbf24); }
-.kc4::before { background: linear-gradient(90deg, #2563eb, #60a5fa); }
-.kcard-icon { font-size: 1.6rem; margin-bottom: 10px; display: block; }
-.kcard-val  { font-size: 2rem; font-weight: 800; color: #1a202c; font-family: 'IBM Plex Mono', monospace; line-height: 1; margin-bottom: 5px; }
-.kcard-lbl  { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; }
-
-/* ── PIPELINE ── */
-.pipeline-wrap {
-    background: #ffffff;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    padding: 20px 28px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    margin-bottom: 20px;
-}
-.pipe-title {
-    font-size: 0.67rem; font-weight: 800;
-    text-transform: uppercase; letter-spacing: 1.8px;
-    color: #94a3b8; margin-bottom: 20px;
-}
-.pipe-track { display: flex; align-items: flex-start; }
-.pipe-step  { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; }
-.pipe-step::after { content: ''; position: absolute; top: 16px; left: 50%; width: 100%; height: 3px; z-index: 0; }
-.pipe-step:last-child::after { display: none; }
-.ps-done::after   { background: #059669; }
-.ps-active::after { background: linear-gradient(90deg, #d97706 50%, #e2e8f0 50%); }
-.ps-pending::after{ background: #e2e8f0; }
-.pipe-dot {
-    width: 32px; height: 32px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 800;
-    position: relative; z-index: 1; border: 3px solid;
-}
-.ps-done   .pipe-dot { background: #059669; border-color: #059669; color: white; }
-.ps-active .pipe-dot { background: white; border-color: #d97706; color: #d97706; animation: pulse 1.5s infinite; }
-.ps-pending .pipe-dot{ background: #f8fafc; border-color: #cbd5e1; color: #cbd5e1; }
-@keyframes pulse {
-    0%,100% { box-shadow: 0 0 0 3px rgba(217,119,6,0.2); }
-    50%      { box-shadow: 0 0 0 8px rgba(217,119,6,0.04); }
-}
-.pipe-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; text-align: center; margin-top: 8px; color: #cbd5e1; }
-.ps-done   .pipe-label { color: #059669; }
-.ps-active .pipe-label { color: #d97706; }
-
-/* ── STAGE CARDS ── */
-.scard {
-    background: #ffffff;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    margin-bottom: 14px;
-    overflow: hidden;
-    transition: box-shadow 0.18s;
-}
-.scard:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.1); }
-.scard-head {
-    padding: 13px 20px;
-    display: flex; align-items: center; justify-content: space-between;
-    background: #f8fafc;
-    border-bottom: 1px solid #e2e8f0;
-}
-.scard-ico  { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 16px; margin-right: 12px; flex-shrink: 0; }
-.scard-name { font-size: 0.92rem; font-weight: 800; color: #1a202c; }
-.scard-sub  { font-size: 0.7rem; color: #94a3b8; margin-top: 1px; }
-.badge      { padding: 3px 11px; border-radius: 20px; font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; }
-.b-done     { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
-.b-active   { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-.b-pending  { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
-.scard-body { padding: 16px 20px; }
-.info-grid  { display: grid; grid-template-columns: repeat(5,1fr); gap: 14px; margin-bottom: 16px; }
-.info-label { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 3px; }
-.info-value { font-size: 0.86rem; font-weight: 700; color: #2d3748; }
-.info-mono  { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; }
-.size-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.sz {
-    background: #f1f5f9; border: 1px solid #e2e8f0;
-    border-radius: 8px; padding: 4px 9px;
-    text-align: center; min-width: 44px;
-}
-.sz .sl { font-size: 0.56rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; display: block; }
-.sz .sq { font-size: 0.9rem; font-weight: 800; color: #2d3748; font-family: 'IBM Plex Mono', monospace; display: block; }
-.sz.on  { background: #fdf4ff; border-color: #d8b4fe; }
-.sz.on .sl { color: #7c3aed; }
-.sz.on .sq { color: #4c1d95; }
-.sz.tot { background: linear-gradient(135deg,#875A7B,#6c4765); border: none; min-width: 52px; }
-.sz.tot .sl { color: rgba(255,255,255,0.7); }
-.sz.tot .sq { color: white; }
-
-/* ── SUMMARY TABLE ── */
-.tbl-wrap { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 20px; }
-.tbl-top  { padding: 13px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 0.67rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.8px; color: #64748b; }
-
-/* ── DOWNLOAD BUTTONS ── */
-.stDownloadButton > button {
-    background: #ffffff !important;
-    color: #875A7B !important;
-    border: 1.5px solid #875A7B !important;
-    border-radius: 8px !important;
-    font-family: 'Nunito', sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 0.84rem !important;
-    transition: all 0.18s !important;
-}
-.stDownloadButton > button:hover {
-    background: #875A7B !important;
-    color: white !important;
-}
-
-/* ── EMPTY STATE ── */
-.empty-state {
-    background: #ffffff;
-    border-radius: 14px;
-    border: 2px dashed #e2e8f0;
-    padding: 64px 32px;
-    text-align: center;
-    margin-top: 8px;
-}
-.empty-state .ei   { font-size: 3.2rem; margin-bottom: 14px; }
-.empty-state h3    { font-size: 1.05rem; font-weight: 800; color: #64748b; margin-bottom: 6px; }
-.empty-state p     { font-size: 0.82rem; color: #94a3b8; }
-
-hr.divider { border: none; border-top: 1px solid #e2e8f0; margin: 18px 0; }
+    .main-header {
+        background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+        color: white;
+        padding: 18px 24px;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    .section-title {
+        background: #e3f2fd;
+        border-left: 5px solid #1565c0;
+        padding: 8px 16px;
+        font-weight: 700;
+        font-size: 15px;
+        margin: 16px 0 8px 0;
+        border-radius: 4px;
+        color: #1a237e;
+    }
+    .metric-box {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    }
+    .metric-val { font-size: 26px; font-weight: 800; color: #1565c0; }
+    .metric-lbl { font-size: 12px; color: #666; margin-top: 4px; }
+    .bal-neg  { color: #c62828; font-weight: 700; }
+    .bal-pos  { color: #2e7d32; font-weight: 700; }
+    .bal-zero { color: #f57f17; font-weight: 700; }
+    div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
+    .stSelectbox > div { border-radius: 6px; }
+    .process-tag {
+        display: inline-block;
+        background: #e8f5e9;
+        border: 1px solid #a5d6a7;
+        border-radius: 12px;
+        padding: 2px 10px;
+        font-size: 12px;
+        margin: 2px;
+        color: #2e7d32;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-SIZES  = ["XS","S","M","L","XL","XXL","3XL","4XL","5XL","6XL","7XL","8XL"]
-STAGES = [
-    ("cutting",   "Cutting",          "✂️",  "#875A7B"),
-    ("stitching", "Stitching",        "🧵",  "#2563eb"),
-    ("handwork",  "Hand Work / Kaaz", "🖐️",  "#d97706"),
-    ("finishing", "Finishing",        "✨",  "#059669"),
-]
 
-def safe_read(f):
-    try:
-        df = pd.read_excel(f)
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
-    except: return pd.DataFrame()
+# ── HTML Parser ─────────────────────────────────────────────────────────────
+class TableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.rows, self.current_row, self.current_cell, self.in_td = [], [], '', False
 
-def fcol(df, *cands):
-    m = {c.lower(): c for c in df.columns}
-    for c in cands:
-        if c.lower() in m: return m[c.lower()]
-    return None
+    def handle_starttag(self, tag, attrs):
+        if tag == 'tr':
+            self.current_row = []
+        elif tag == 'td':
+            self.in_td, self.current_cell = True, ''
 
-def get_sizes(df, style):
-    sc = fcol(df,"style no","style","order no","order")
-    if sc is None or df.empty: return {}
-    row = df[df[sc].astype(str).str.upper() == style.upper()]
-    if row.empty: return {}
-    row = row.iloc[0]
-    return {s: int(row[fcol(df,s)]) if fcol(df,s) and pd.notna(row.get(fcol(df,s))) else 0 for s in SIZES}
+    def handle_endtag(self, tag):
+        if tag == 'tr' and self.current_row:
+            self.rows.append(self.current_row)
+        elif tag == 'td':
+            self.in_td = False
+            self.current_row.append(self.current_cell.strip())
 
-def get_info(df, style):
-    sc = fcol(df,"style no","style","order no","order")
-    if sc is None or df.empty: return {}
-    row = df[df[sc].astype(str).str.upper() == style.upper()]
-    if row.empty: return {}
-    row = row.iloc[0]; info = {}
-    for key, *cands in [
-        ("challan",  "ch no","challan no","ch. no","challan"),
-        ("vendor",   "vendor name","vendor","party"),
-        ("i_date",   "issue date","i. date","i date","idate"),
-        ("r_date",   "receive date","r. date","r date","rdate","received date"),
-        ("del_date", "delivery date","del date","delivery"),
-    ]:
-        col = fcol(df, *cands)
-        info[key] = str(row[col]) if col and pd.notna(row.get(col)) else "—"
-    return info
+    def handle_data(self, data):
+        if self.in_td:
+            self.current_cell += data
 
-def gstatus(info, sizes):
-    hr = info.get("r_date","—") not in ("—","nan","NaT","")
-    hi = info.get("i_date","—") not in ("—","nan","NaT","")
-    if hr and sum(sizes.values()) > 0: return "done"
-    if hi: return "active"
-    return "pending"
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    # Brand
-    st.markdown("""
-    <div style='background:linear-gradient(135deg,#875A7B,#5e3260);
-                padding:20px 16px 18px; margin:-1rem -1rem 0; margin-bottom:16px'>
-      <div style='font-size:1.05rem;font-weight:800;color:#fff;margin-bottom:3px'>🏭 Prod. Tracker</div>
-      <div style='font-size:0.68rem;color:rgba(255,255,255,0.5)'>Garment Production System</div>
-    </div>
-    """, unsafe_allow_html=True)
+# ── Load data ───────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner="Loading Excel data…")
+def load_data(file_bytes):
+    content = file_bytes.decode('utf-8', errors='ignore')
+    parser = TableParser()
+    parser.feed(content)
 
-    # Nav items
-    st.markdown("""
-    <div style='padding:0 4px'>
-      <div style='font-size:0.58rem;font-weight:800;text-transform:uppercase;
-                  letter-spacing:2px;color:#374a5a;padding:4px 8px 8px'>Main Menu</div>
-      <div style='background:rgba(135,90,123,0.3);border-radius:8px;padding:9px 12px;
-                  display:flex;align-items:center;gap:10px;margin-bottom:2px'>
-        <span style='font-size:16px'>📋</span>
-        <span style='font-size:0.82rem;font-weight:700;color:#fff'>Production Status</span>
-      </div>
+    headers = ['JONo', 'JODate', 'SONo', 'SODate', 'Karigar',
+               'IssueNo', 'IssueDate', 'Process', 'Design', 'Size',
+               'NoColour_MI', 'NoColour_MR', 'NoColour_BAL',
+               'Mix_MI', 'Mix_MR', 'Mix_BAL']
 
-      <div style='font-size:0.58rem;font-weight:800;text-transform:uppercase;
-                  letter-spacing:2px;color:#374a5a;padding:14px 8px 8px;
-                  border-top:1px solid rgba(255,255,255,0.05);margin-top:8px'>Coming Soon</div>
-    """, unsafe_allow_html=True)
+    data_rows = parser.rows[2:]  # skip title & header rows
+    records = []
+    for row in data_rows:
+        if len(row) >= 10 and row[0].strip() and row[8].strip():
+            r = {}
+            for i, h in enumerate(headers):
+                r[h] = row[i].strip() if i < len(row) else ''
+            records.append(r)
 
-    for ico, name in [("📦","Order Management"),("✂️","Cutting Dept."),
-                      ("🧵","Stitching Dept."),("✨","Finishing Dept."),
-                      ("📊","Reports"),("🧶","Fabric Stock")]:
-        st.markdown(f"""
-        <div style='border-radius:8px;padding:8px 12px;display:flex;align-items:center;
-                    gap:10px;margin-bottom:2px;cursor:pointer;
-                    transition:background 0.15s' 
-             onmouseover="this.style.background='rgba(255,255,255,0.06)'"
-             onmouseout="this.style.background='transparent'">
-          <span style='font-size:15px'>{ico}</span>
-          <span style='font-size:0.79rem;font-weight:700;color:#566f80;flex:1'>{name}</span>
-          <span style='background:rgba(135,90,123,0.3);color:#c49aba;
-                       font-size:0.55rem;font-weight:800;padding:2px 6px;
-                       border-radius:8px'>Soon</span>
-        </div>""", unsafe_allow_html=True)
+    df = pd.DataFrame(records)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Numeric columns
+    for col in ['NoColour_MI', 'NoColour_MR', 'NoColour_BAL', 'Mix_MI', 'Mix_MR', 'Mix_BAL']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    # Upload section
-    st.markdown("""
-    <hr style='border:none;border-top:1px solid rgba(255,255,255,0.06);margin:12px 0'>
-    <div style='font-size:0.58rem;font-weight:800;text-transform:uppercase;
-                letter-spacing:2px;color:#374a5a;padding:4px 4px 10px'>
-      📂 Excel Files Upload
-    </div>
-    """, unsafe_allow_html=True)
+    # Date cleanup
+    df['IssueDate'] = df['IssueDate'].str.lstrip("'")
+    df['JODate']    = df['JODate'].str.lstrip("'")
 
-    f_cut = st.file_uploader("✂️ Cutting",          type=["xlsx","xls"], key="c")
-    f_sti = st.file_uploader("🧵 Stitching",        type=["xlsx","xls"], key="s")
-    f_hnd = st.file_uploader("🖐️ Hand Work / Kaaz", type=["xlsx","xls"], key="h")
-    f_fin = st.file_uploader("✨ Finishing",         type=["xlsx","xls"], key="f")
+    # Total MI / MR / BAL across both colour types
+    df['Total_MI']  = df['NoColour_MI'] + df['Mix_MI']
+    df['Total_MR']  = df['NoColour_MR'] + df['Mix_MR']
+    df['Total_BAL'] = df['Total_MI'] - df['Total_MR']
 
-    st.markdown("""
-    <div style='font-size:0.65rem;color:#374a5a;padding:8px 4px 6px'>
-      Column names: Style No • CH No • Vendor Name<br>
-      I. Date • R. Date • Delivery Date<br>
-      XS S M L XL XXL 3XL 4XL 5XL 6XL 7XL 8XL
-    </div>
-    """, unsafe_allow_html=True)
+    # Style code = Design name
+    df['StyleCode'] = df['Design']
 
-    sdf = pd.DataFrame({
-        "Style No":["1557YKRED","2341BKBLU"],"CH No":["CH-001","CH-002"],
-        "Vendor Name":["ABC Stitching","XYZ Tailor"],
-        "I. Date":["01-Jan-2025","05-Jan-2025"],"R. Date":["10-Jan-2025",""],
-        "Delivery Date":["15-Jan-2025","20-Jan-2025"],
-        "XS":[10,5],"S":[20,10],"M":[30,15],"L":[25,12],
-        "XL":[20,8],"XXL":[10,5],"3XL":[5,2],"4XL":[3,1],
-        "5XL":[2,0],"6XL":[1,0],"7XL":[0,0],"8XL":[0,0],
-    })
-    sb = io.BytesIO(); sdf.to_excel(sb, index=False)
-    st.download_button("⬇️ Sample Excel Download", sb.getvalue(),
-        file_name="sample.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True)
+    SIZE_ORDER = ['XS','S','S-M','S-M-L','M','L','L-XL','L-XL-XXL',
+                  'XL','XL-XXL','XL-XXL-3XL','XXL','XXL-3XL',
+                  '3XL','3XL-4XL','4XL','4XL-5XL','5XL','5XL-6XL',
+                  '6XL','7XL','7XL-8XL','8XL','Free Size','Mix',
+                  '7 -8 Years','9 -10 Years','11 -12 Years','13 -14 Years']
+    df['Size_order'] = df['Size'].apply(lambda s: SIZE_ORDER.index(s) if s in SIZE_ORDER else 999)
 
-    st.markdown(f"""
-    <div style='text-align:center;color:#2a3d4e;font-size:0.62rem;padding:16px 0 4px;
-                border-top:1px solid rgba(255,255,255,0.05);margin-top:12px'>
-      v1.0 &nbsp;•&nbsp; {date.today().strftime("%d %b %Y")}
-    </div>""", unsafe_allow_html=True)
+    return df
 
-# ── MAIN CONTENT ──────────────────────────────────────────────────────────────
 
-# Page header banner
-st.markdown(f"""
-<div class='page-header'>
-  <div class='ph-left'>
-    <h1>🏭 Production Order Tracker</h1>
-    <p>Style number daalo — Cutting se Finishing tak saari stages ek jagah</p>
-  </div>
-  <div class='ph-right'>
-    <div class='ph-date'>{date.today().strftime("%d %B %Y")}</div>
-    <div>Production › Style Tracking</div>
-  </div>
+# ── Sidebar – upload ─────────────────────────────────────────────────────────
+st.markdown("""
+<div class="main-header">
+    <h2 style="margin:0">👗 Yash Gallery Private Limited</h2>
+    <p style="margin:4px 0 0 0; opacity:0.85">Material Issue / Receive – Style Tracking Dashboard</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Search
-c1, c2 = st.columns([5, 1])
-with c1:
-    style_input = st.text_input("",
-        placeholder="🔍  Style number daalo — jaise: 1557YKRED",
-        label_visibility="collapsed").strip().upper()
-with c2:
-    st.button("🔎 Search", type="primary", use_container_width=True)
+with st.sidebar:
+    st.header("📂 Data Source")
+    uploaded = st.file_uploader("Upload report (.xls / .html)", type=['xls','html','htm'])
+    st.markdown("---")
+    st.markdown("**Quick Guide**")
+    st.markdown("1. Upload your report file\n2. Select Style/JO\n3. View size-wise tracking sheet")
 
-if not style_input:
-    st.markdown("""
-    <div class='empty-state'>
-      <div class='ei'>🏭</div>
-      <h3>Style number daalo aur search karo</h3>
-      <p>Sidebar mein Excel files upload karke style number search karo</p>
-    </div>""", unsafe_allow_html=True)
+if uploaded is None:
+    st.info("👈 Please upload your **Material Issue Receive** report (.xls) from the sidebar to get started.")
     st.stop()
 
-# Load data
-dfs = {
-    "cutting":   safe_read(f_cut) if f_cut else pd.DataFrame(),
-    "stitching": safe_read(f_sti) if f_sti else pd.DataFrame(),
-    "handwork":  safe_read(f_hnd) if f_hnd else pd.DataFrame(),
-    "finishing": safe_read(f_fin) if f_fin else pd.DataFrame(),
-}
-stage_data = {}
-for sk, *_ in STAGES:
-    df = dfs[sk]
-    info  = get_info(df,  style_input) if not df.empty else {}
-    sizes = get_sizes(df, style_input) if not df.empty else {}
-    stage_data[sk] = (info, sizes)
+df = load_data(uploaded.read())
 
-if not any(stage_data[sk][0] for sk,*_ in STAGES):
+# ── Tabs ─────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["📋 Style-wise Tracking Sheet", "📊 Summary Dashboard", "🔍 Raw Data"])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 – Tracking Sheet (mimics the paper form)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        styles_list = sorted(df['StyleCode'].unique())
+        selected_style = st.selectbox("🎨 Select Style / Design", styles_list)
+    with col2:
+        style_df = df[df['StyleCode'] == selected_style]
+        jos_in_style = sorted(style_df['JONo'].unique())
+        selected_jo = st.selectbox("📋 Filter by JO No.", ['All JOs'] + jos_in_style)
+    with col3:
+        processes = sorted(df['Process'].unique())
+        selected_proc = st.selectbox("⚙️ Process", ['All Processes'] + processes)
+
+    # Apply filters
+    view_df = df[df['StyleCode'] == selected_style].copy()
+    if selected_jo != 'All JOs':
+        view_df = view_df[view_df['JONo'] == selected_jo]
+    if selected_proc != 'All Processes':
+        view_df = view_df[view_df['Process'] == selected_proc]
+
+    if view_df.empty:
+        st.warning("No data found for selected filters.")
+        st.stop()
+
+    # ── Header info card ────────────────────────────────────────────────────
+    meta = view_df.iloc[0]
     st.markdown(f"""
-    <div class='empty-state'>
-      <div class='ei'>🔍</div>
-      <h3>Style <b>{style_input}</b> nahi mila</h3>
-      <p>Style number check karo ya Excel files upload karo</p>
-    </div>""", unsafe_allow_html=True)
-    st.stop()
+    <div style="background:#f5f5f5;border-radius:10px;padding:14px 20px;margin-bottom:16px;
+                border:1px solid #ddd;display:flex;flex-wrap:wrap;gap:24px">
+        <span><b>Style:</b> {selected_style}</span>
+        <span><b>JO No:</b> {meta['JONo']}</span>
+        <span><b>JO Date:</b> {meta['JODate']}</span>
+        <span><b>SO No:</b> {meta['SONo']}</span>
+        <span><b>SO Date:</b> {meta['SODate']}</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-# KPI
-cut_s  = stage_data["cutting"][1]
-total  = sum(cut_s.values())
-done_n = sum(1 for sk,*_ in STAGES if gstatus(*stage_data[sk])=="done")
-act_n  = sum(1 for sk,*_ in STAGES if gstatus(*stage_data[sk])=="active")
-pct    = int(done_n/4*100)
+    # ── Summary metrics ──────────────────────────────────────────────────────
+    total_mi  = int(view_df['Total_MI'].sum())
+    total_mr  = int(view_df['Total_MR'].sum())
+    total_bal = int(view_df['Total_BAL'].sum())
+    bal_class = 'bal-neg' if total_bal > 0 else ('bal-pos' if total_bal < 0 else 'bal-zero')
 
-st.markdown("<div class='sec-label'>📊 Overview</div>", unsafe_allow_html=True)
-k1,k2,k3,k4 = st.columns(4)
-for col,val,lbl,em,kc in [
-    (k1, total or "—", "Total Order Qty",  "📦","kc1"),
-    (k2, f"{done_n}/4","Stages Complete",  "✅","kc2"),
-    (k3, act_n,        "In Progress",      "🔄","kc3"),
-    (k4, f"{pct}%",    "Overall Progress", "📈","kc4"),
-]:
-    with col:
-        st.markdown(f"""
-        <div class='kcard {kc}'>
-          <span class='kcard-icon'>{em}</span>
-          <div class='kcard-val'>{val}</div>
-          <div class='kcard-lbl'>{lbl}</div>
+    m1, m2, m3, m4 = st.columns(4)
+    for col, val, lbl, color in [
+        (m1, total_mi,  "Total Issued (MI)",   "#1565c0"),
+        (m2, total_mr,  "Total Received (MR)", "#2e7d32"),
+        (m3, abs(total_bal), "Balance (Pending)", "#c62828" if total_bal > 0 else "#2e7d32"),
+        (m4, view_df['Process'].nunique(), "Processes", "#6a1b9a")
+    ]:
+        col.markdown(f"""
+        <div class="metric-box">
+            <div class="metric-val" style="color:{color}">{val}</div>
+            <div class="metric-lbl">{lbl}</div>
         </div>""", unsafe_allow_html=True)
 
-# Pipeline
-di = {"done":"✓","active":"⟳","pending":"○"}
-pc = {"done":"ps-done","active":"ps-active","pending":"ps-pending"}
-steps = ""
-for sk,sl,icon,_ in STAGES:
-    s = gstatus(*stage_data[sk])
-    steps += f"""<div class='pipe-step {pc[s]}'>
-      <div class='pipe-dot'>{di[s]}</div>
-      <div class='pipe-label'>{icon} {sl}</div>
-    </div>"""
+    st.markdown("<br>", unsafe_allow_html=True)
 
-st.markdown(f"""
-<div class='pipeline-wrap'>
-  <div class='pipe-title'>📍 Production Pipeline — Style: {style_input}</div>
-  <div class='pipe-track'>{steps}</div>
-</div>""", unsafe_allow_html=True)
+    # ── Process-wise sections (like the paper form) ──────────────────────────
+    all_processes = view_df['Process'].unique()
 
-# Stage Cards
-st.markdown("<div class='sec-label'>🗂️ Stage-wise Details</div>", unsafe_allow_html=True)
-bmap = {
-    "done":    "<span class='badge b-done'>✓ Complete</span>",
-    "active":  "<span class='badge b-active'>⟳ In Progress</span>",
-    "pending": "<span class='badge b-pending'>○ Pending</span>",
-}
+    for process in sorted(all_processes):
+        proc_df = view_df[view_df['Process'] == process].copy()
+        proc_df = proc_df.sort_values('Size_order')
 
-for sk,sl,icon,color in STAGES:
-    info, sizes = stage_data[sk]
-    s     = gstatus(info,sizes) if info else "pending"
-    total = sum(sizes.values())
+        st.markdown(f'<div class="section-title">⚙️ {process}</div>', unsafe_allow_html=True)
 
-    chips = ""
-    for sz in SIZES:
-        qty = sizes.get(sz,0)
-        chips += f"<div class='sz {'on' if qty else ''}'><span class='sl'>{sz}</span><span class='sq'>{qty if qty else '—'}</span></div>"
-    if total:
-        chips += f"<div class='sz tot'><span class='sl'>TOTAL</span><span class='sq'>{total}</span></div>"
+        # Pivot size-wise
+        pivot_rows = []
+        karigars = proc_df.groupby('Karigar')
 
-    ihtml = ""
-    if info:
-        for lbl,val,mono in [
-            ("CH. No",     info.get("challan","—"), "info-mono"),
-            ("Vendor",     info.get("vendor","—"),  ""),
-            ("Issue Date", info.get("i_date","—"),  "info-mono"),
-            ("Rcv. Date",  info.get("r_date","—"),  "info-mono"),
-            ("Delivery",   info.get("del_date","—"),"info-mono"),
-        ]:
-            ihtml += f"<div><div class='info-label'>{lbl}</div><div class='info-value {mono}'>{val}</div></div>"
+        for karigar_name, kg_df in karigars:
+            kg_df = kg_df.sort_values('Size_order')
+            issues = kg_df.groupby('IssueNo', sort=False)
 
-    body = f"""<div class='scard-body'>
-      <div class='info-grid'>{ihtml}</div>
-      <div class='info-label' style='margin-bottom:8px'>Size-wise Quantity</div>
-      <div class='size-strip'>{chips if chips else "<span style='color:#94a3b8;font-size:.82rem'>Data nahi mila</span>"}</div>
-    </div>""" if info else "<div class='scard-body' style='color:#94a3b8;font-size:.82rem'>File upload nahi hui ya style nahi mila.</div>"
+            for issue_no, iss_df in issues:
+                iss_df = iss_df.sort_values('Size_order')
+                issue_date = iss_df['IssueDate'].iloc[0]
 
-    st.markdown(f"""
-    <div class='scard'>
-      <div class='scard-head'>
-        <div style='display:flex;align-items:center'>
-          <div class='scard-ico' style='background:{color}18'>{icon}</div>
-          <div>
-            <div class='scard-name'>{sl}</div>
-            <div class='scard-sub'>Total: {total if total else "—"} pieces</div>
-          </div>
-        </div>
-        {bmap[s]}
-      </div>
-      {body}
-    </div>""", unsafe_allow_html=True)
+                # Build a row: one column per size
+                row_data = {
+                    'Issue Date': issue_date,
+                    'CH. NO. (Issue No)': issue_no,
+                    'Karigar': karigar_name,
+                    'Type': 'Issued (MI)'
+                }
+                for _, r in iss_df.iterrows():
+                    row_data[r['Size']] = int(r['Total_MI']) if r['Total_MI'] else ''
+                pivot_rows.append(row_data)
 
-# Summary Table
-rows = []
-for sk,sl,icon,_ in STAGES:
-    _,sizes = stage_data[sk]
-    if sizes:
-        r = {"Stage": f"{icon} {sl}"}
-        for sz in SIZES: r[sz] = sizes.get(sz,0) or ""
-        r["TOTAL"] = sum(sizes.values())
-        rows.append(r)
+                # Received row if any MR
+                if iss_df['Total_MR'].sum() > 0:
+                    rec_row = {
+                        'Issue Date': '',
+                        'CH. NO. (Issue No)': issue_no,
+                        'Karigar': karigar_name,
+                        'Type': 'Received (MR)'
+                    }
+                    for _, r in iss_df.iterrows():
+                        rec_row[r['Size']] = int(r['Total_MR']) if r['Total_MR'] else ''
+                    pivot_rows.append(rec_row)
 
-if rows:
-    st.markdown("""<div class='tbl-wrap'><div class='tbl-top'>📐 Size-wise Summary — All Stages</div>""", unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(rows).set_index("Stage"), use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+                    # Balance row
+                    bal_row = {
+                        'Issue Date': '',
+                        'CH. NO. (Issue No)': issue_no,
+                        'Karigar': karigar_name,
+                        'Type': '🔴 Balance (BAL)' if iss_df['Total_BAL'].sum() > 0 else '✅ Balance (BAL)'
+                    }
+                    for _, r in iss_df.iterrows():
+                        bal = int(r['Total_BAL'])
+                        bal_row[r['Size']] = bal if bal != 0 else ''
+                    pivot_rows.append(bal_row)
 
-# Export
-st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-st.markdown("<div class='sec-label'>📤 Export</div>", unsafe_allow_html=True)
+        if pivot_rows:
+            pv_df = pd.DataFrame(pivot_rows)
 
-def build_report(style, sd):
-    r = ""
-    for sk,sl,icon,_ in STAGES:
-        inf,szs = sd.get(sk,({},{}))
-        sc = "".join(f"<td>{szs.get(s,0) or ''}</td>" for s in SIZES)
-        r += f"<tr style='background:#f8f9fa'><td colspan='14' style='padding:8px;font-weight:700'>{icon} {sl} | CH:{inf.get('challan','—')} | Vendor:{inf.get('vendor','—')} | Issue:{inf.get('i_date','—')} | Rcvd:{inf.get('r_date','—')} | Del:{inf.get('del_date','—')}</td></tr><tr>{sc}<td><b>{sum(szs.values())}</b></td></tr>"
-    ths = "".join(f"<th>{s}</th>" for s in SIZES)
-    return f"<html><head><style>body{{font-family:Arial;font-size:11px;margin:24px}}h2{{color:#875A7B}}table{{width:100%;border-collapse:collapse;margin-top:16px}}th,td{{border:1px solid #ddd;padding:5px 8px;text-align:center}}th{{background:#875A7B;color:white;font-size:10px}}</style></head><body><h2>Production Report — {style}</h2><p style='color:#94a3b8'>Generated: {date.today()}</p><table><tr><th>Stage</th>{ths}<th>TOTAL</th></tr>{r}</table></body></html>"
+            # Size order in columns
+            SIZE_ORDER_LIST = ['XS','S','S-M','S-M-L','M','L','L-XL','L-XL-XXL',
+                               'XL','XL-XXL','XL-XXL-3XL','XXL','XXL-3XL',
+                               '3XL','3XL-4XL','4XL','4XL-5XL','5XL','5XL-6XL',
+                               '6XL','7XL','7XL-8XL','8XL','Free Size','Mix',
+                               '7 -8 Years','9 -10 Years','11 -12 Years','13 -14 Years']
+            base_cols = ['Issue Date','CH. NO. (Issue No)','Karigar','Type']
+            size_cols_present = [s for s in SIZE_ORDER_LIST if s in pv_df.columns]
+            other_size_cols = [c for c in pv_df.columns if c not in base_cols and c not in SIZE_ORDER_LIST]
+            final_cols = base_cols + size_cols_present + other_size_cols
 
-e1,e2,_ = st.columns(3)
-with e1:
-    st.download_button("🖨️ Print-Ready Report (HTML)", build_report(style_input, stage_data),
-        file_name=f"report_{style_input}_{date.today()}.html",
-        mime="text/html", use_container_width=True)
-with e2:
-    if rows:
-        xl = io.BytesIO(); pd.DataFrame(rows).to_excel(xl, index=False)
-        st.download_button("📊 Excel Summary", xl.getvalue(),
-            file_name=f"summary_{style_input}_{date.today()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True)
+            pv_df = pv_df.reindex(columns=final_cols).fillna('')
 
-st.markdown("""
-<div style='text-align:center;color:#94a3b8;font-size:0.68rem;padding:20px 0 4px'>
-  Production Tracker v1.0 &nbsp;•&nbsp; Data sirf aapki Excel files se aata hai
-</div>""", unsafe_allow_html=True)
+            # Total column
+            size_only_cols = size_cols_present + other_size_cols
+            pv_df['TOTAL'] = pv_df[size_only_cols].apply(
+                lambda row: sum(int(v) for v in row if str(v).lstrip('-').isdigit()), axis=1
+            )
+            pv_df.loc[pv_df['TOTAL'] == 0, 'TOTAL'] = ''
+
+            # Color rows
+            def style_rows(row):
+                if 'Balance' in str(row.get('Type', '')):
+                    if '🔴' in str(row.get('Type', '')):
+                        return ['background-color: #ffebee; font-weight: bold'] * len(row)
+                    else:
+                        return ['background-color: #e8f5e9; font-weight: bold'] * len(row)
+                elif 'Received' in str(row.get('Type', '')):
+                    return ['background-color: #e3f2fd'] * len(row)
+                else:
+                    return ['background-color: #fff8e1'] * len(row)
+
+            styled = pv_df.style.apply(style_rows, axis=1)
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 – Summary Dashboard
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.subheader("📊 Overall Summary")
+
+    c1, c2, c3, c4 = st.columns(4)
+    for col, val, lbl, color in [
+        (c1, df['StyleCode'].nunique(), "Total Styles",     "#1565c0"),
+        (c2, df['JONo'].nunique(),      "Total JO Numbers", "#2e7d32"),
+        (c3, df['Karigar'].nunique(),   "Total Karigars",   "#6a1b9a"),
+        (c4, int(df['Total_MI'].sum()), "Total Issued Qty", "#e65100"),
+    ]:
+        col.markdown(f"""
+        <div class="metric-box">
+            <div class="metric-val" style="color:{color}">{val:,}</div>
+            <div class="metric-lbl">{lbl}</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Style-wise summary table
+    st.markdown('<div class="section-title">📋 Style-wise Issue / Receive Summary</div>', unsafe_allow_html=True)
+
+    style_summary = df.groupby('StyleCode').agg(
+        JO_Count=('JONo', 'nunique'),
+        Process_Count=('Process', 'nunique'),
+        Total_Issued=('Total_MI', 'sum'),
+        Total_Received=('Total_MR', 'sum'),
+        Balance=('Total_BAL', 'sum')
+    ).reset_index()
+    style_summary.columns = ['Style/Design', 'JOs', 'Processes', 'Total Issued', 'Total Received', 'Balance']
+    style_summary['Balance'] = style_summary['Balance'].astype(int)
+
+    def color_balance(val):
+        if val > 0:  return 'color: #c62828; font-weight: bold'
+        elif val < 0: return 'color: #2e7d32; font-weight: bold'
+        return 'color: #f57f17; font-weight: bold'
+
+    st.dataframe(
+        style_summary.style.applymap(color_balance, subset=['Balance']),
+        use_container_width=True, hide_index=True
+    )
+
+    # Process-wise summary
+    st.markdown('<div class="section-title">⚙️ Process-wise Summary</div>', unsafe_allow_html=True)
+    proc_summary = df.groupby('Process').agg(
+        Styles=('StyleCode', 'nunique'),
+        Total_Issued=('Total_MI', 'sum'),
+        Total_Received=('Total_MR', 'sum'),
+        Balance=('Total_BAL', 'sum')
+    ).reset_index()
+    proc_summary.columns = ['Process', 'Styles', 'Total Issued', 'Total Received', 'Balance']
+    st.dataframe(
+        proc_summary.sort_values('Total Issued', ascending=False).style.applymap(color_balance, subset=['Balance']),
+        use_container_width=True, hide_index=True
+    )
+
+    # Karigar-wise
+    st.markdown('<div class="section-title">👷 Karigar-wise Summary</div>', unsafe_allow_html=True)
+    kar_summary = df.groupby('Karigar').agg(
+        Styles=('StyleCode', 'nunique'),
+        Total_Issued=('Total_MI', 'sum'),
+        Total_Received=('Total_MR', 'sum'),
+        Balance=('Total_BAL', 'sum')
+    ).reset_index()
+    kar_summary.columns = ['Karigar', 'Styles', 'Total Issued', 'Total Received', 'Balance']
+    st.dataframe(
+        kar_summary.sort_values('Balance', ascending=False).style.applymap(color_balance, subset=['Balance']),
+        use_container_width=True, hide_index=True
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 – Raw Data
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.subheader("🔍 Raw Data Explorer")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        f_style = st.multiselect("Style", sorted(df['StyleCode'].unique()))
+    with col2:
+        f_process = st.multiselect("Process", sorted(df['Process'].unique()))
+    with col3:
+        f_karigar = st.multiselect("Karigar", sorted(df['Karigar'].unique()))
+
+    raw = df.copy()
+    if f_style:   raw = raw[raw['StyleCode'].isin(f_style)]
+    if f_process: raw = raw[raw['Process'].isin(f_process)]
+    if f_karigar: raw = raw[raw['Karigar'].isin(f_karigar)]
+
+    display_cols = ['JONo','JODate','SONo','Karigar','IssueNo','IssueDate',
+                    'Process','Design','Size','NoColour_MI','NoColour_MR',
+                    'Mix_MI','Mix_MR','Total_MI','Total_MR','Total_BAL']
+
+    st.write(f"**{len(raw):,} records**")
+    st.dataframe(raw[display_cols].sort_values(['Design','Process','Size_order']),
+                 use_container_width=True, hide_index=True)
+
+    # Download
+    csv = raw[display_cols].to_csv(index=False)
+    st.download_button("⬇️ Download Filtered CSV", csv, "filtered_data.csv", "text/csv")
