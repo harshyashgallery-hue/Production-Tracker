@@ -197,7 +197,7 @@ with open(EXCEL_PATH, 'rb') as f:
     df = load_data(f.read())
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["📋 Style-wise Tracking Sheet", "📊 Summary Dashboard", "🔍 Raw Data"])
+tab1, tab2, tab3, tab4 = st.tabs(["📋 Style-wise Tracking Sheet", "📊 Summary Dashboard", "🔍 Raw Data", "⏳ Pendency Report"])
 
 PROCESS_ORDER = [
     'Modal Shout','Dyeing','Printing','Fabric Check','Re Process',
@@ -431,3 +431,176 @@ with tab3:
                  use_container_width=True, hide_index=True)
     csv = raw[display_cols].to_csv(index=False)
     st.download_button("⬇️ Download Filtered CSV", csv, "filtered_data.csv", "text/csv")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 – Pendency Report
+# ══════════════════════════════════════════════════════════════════════════════
+with tab4:
+    st.subheader("⏳ Pendency Report — Stage & Karigar Wise")
+
+    from datetime import datetime, date
+
+    # Only rows where balance > 0 (pending)
+    pend_df = df[df['Total_BAL'] > 0].copy()
+
+    if pend_df.empty:
+        st.success("🎉 Koi pendency nahi hai! Sab clear hai.")
+    else:
+        # Calculate days pending from IssueDate
+        def calc_days(issue_date_str):
+            try:
+                issue_date_str = str(issue_date_str).strip().lstrip("'")
+                for fmt in ["%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"]:
+                    try:
+                        d = datetime.strptime(issue_date_str, fmt).date()
+                        return (date.today() - d).days
+                    except:
+                        continue
+            except:
+                pass
+            return 0
+
+        pend_df['Days Pending'] = pend_df['IssueDate'].apply(calc_days)
+
+        # Aging bucket
+        def aging_bucket(days):
+            if days <= 7:   return "🟢 0-7 days"
+            elif days <= 15: return "🟡 8-15 days"
+            elif days <= 30: return "🟠 16-30 days"
+            else:            return "🔴 30+ days"
+
+        pend_df['Aging'] = pend_df['Days Pending'].apply(aging_bucket)
+
+        # ── Top filters ──────────────────────────────────────────────────────
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            p_process = st.multiselect("Process / Stage",
+                                        sorted(pend_df['Process'].unique()), key="pend_proc")
+        with f2:
+            p_karigar = st.multiselect("Karigar",
+                                        sorted(pend_df['Karigar'].unique()), key="pend_kar")
+        with f3:
+            p_aging = st.multiselect("Aging",
+                                      ["🟢 0-7 days","🟡 8-15 days","🟠 16-30 days","🔴 30+ days"],
+                                      key="pend_aging")
+        with f4:
+            p_style = st.multiselect("Style", sorted(pend_df['StyleCode'].unique()), key="pend_style")
+
+        filtered = pend_df.copy()
+        if p_process: filtered = filtered[filtered['Process'].isin(p_process)]
+        if p_karigar: filtered = filtered[filtered['Karigar'].isin(p_karigar)]
+        if p_aging:   filtered = filtered[filtered['Aging'].isin(p_aging)]
+        if p_style:   filtered = filtered[filtered['StyleCode'].isin(p_style)]
+
+        # ── Summary metrics ───────────────────────────────────────────────────
+        total_pend_pcs  = int(filtered['Total_BAL'].sum())
+        total_pend_sku  = len(filtered)
+        max_days        = int(filtered['Days Pending'].max()) if not filtered.empty else 0
+        critical_count  = int((filtered['Days Pending'] > 30).sum())
+
+        m1, m2, m3, m4 = st.columns(4)
+        for col, val, lbl, color in [
+            (m1, total_pend_pcs,  "Total Pending Pcs",    "#c62828"),
+            (m2, total_pend_sku,  "Pending SKU Lines",    "#e65100"),
+            (m3, max_days,        "Max Days Pending",     "#6a1b9a"),
+            (m4, critical_count,  "Critical (30+ days)",  "#b71c1c"),
+        ]:
+            col.markdown(f"""<div class="metric-box">
+                <div class="metric-val" style="color:{color}">{val:,}</div>
+                <div class="metric-lbl">{lbl}</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Stage-wise Pendency ───────────────────────────────────────────────
+        st.markdown('<div class="section-title">📊 Stage-wise Pendency Summary</div>',
+                    unsafe_allow_html=True)
+
+        stage_summary = filtered.groupby('Process').agg(
+            Karigar_Count=('Karigar', 'nunique'),
+            Style_Count=('StyleCode', 'nunique'),
+            Pending_Pcs=('Total_BAL', 'sum'),
+            Avg_Days=('Days Pending', 'mean'),
+            Max_Days=('Days Pending', 'max'),
+            Critical_Lines=('Days Pending', lambda x: (x > 30).sum())
+        ).reset_index()
+        stage_summary.columns = ['Process','Karigars','Styles','Pending Pcs',
+                                   'Avg Days','Max Days','Critical (30+)']
+        stage_summary['Avg Days'] = stage_summary['Avg Days'].round(1)
+        stage_summary = stage_summary.sort_values('Pending Pcs', ascending=False)
+
+        def highlight_critical(val):
+            if isinstance(val, (int, float)):
+                if val > 30: return 'color:#c62828;font-weight:bold'
+                elif val > 15: return 'color:#e65100;font-weight:bold'
+            return ''
+
+        st.dataframe(
+            stage_summary.style.applymap(highlight_critical, subset=['Max Days','Avg Days']),
+            use_container_width=True, hide_index=True
+        )
+
+        # ── Karigar-wise Pendency ─────────────────────────────────────────────
+        st.markdown('<div class="section-title">👷 Karigar-wise Pendency</div>',
+                    unsafe_allow_html=True)
+
+        kar_pend = filtered.groupby(['Karigar','Process']).agg(
+            Styles=('StyleCode','nunique'),
+            Pending_Pcs=('Total_BAL','sum'),
+            Avg_Days=('Days Pending','mean'),
+            Max_Days=('Days Pending','max'),
+            Critical=('Days Pending', lambda x: (x > 30).sum())
+        ).reset_index()
+        kar_pend.columns = ['Karigar','Process','Styles','Pending Pcs','Avg Days','Max Days','Critical (30+)']
+        kar_pend['Avg Days'] = kar_pend['Avg Days'].round(1)
+        kar_pend = kar_pend.sort_values(['Pending Pcs'], ascending=False)
+
+        st.dataframe(
+            kar_pend.style.applymap(highlight_critical, subset=['Max Days','Avg Days']),
+            use_container_width=True, hide_index=True
+        )
+
+        # ── Detailed Pendency Table ───────────────────────────────────────────
+        st.markdown('<div class="section-title">📋 Detailed Pendency — Style × Size × Karigar</div>',
+                    unsafe_allow_html=True)
+
+        detail_cols = ['SONo','JONo','IssueNo','IssueDate','Process','Karigar',
+                       'StyleCode','Size','Total_MI','Total_MR','Total_BAL',
+                       'Days Pending','Aging']
+        detail_cols = [c for c in detail_cols if c in filtered.columns]
+
+        detail_df = filtered[detail_cols].copy()
+        detail_df = detail_df.rename(columns={
+            'SONo':'SO No.', 'JONo':'JO No.', 'IssueNo':'Issue No.',
+            'IssueDate':'Issue Date', 'StyleCode':'Style',
+            'Total_MI':'Issued','Total_MR':'Received','Total_BAL':'Balance Pcs'
+        })
+        detail_df = detail_df.sort_values(['Days Pending'], ascending=False)
+
+        def color_aging(val):
+            if '🔴' in str(val): return 'background-color:#ffebee;font-weight:bold;color:#c62828'
+            elif '🟠' in str(val): return 'background-color:#fff3e0;color:#e65100'
+            elif '🟡' in str(val): return 'background-color:#fffde7;color:#f57f17'
+            elif '🟢' in str(val): return 'background-color:#e8f5e9;color:#2e7d32'
+            return ''
+
+        def color_days(val):
+            try:
+                v = int(val)
+                if v > 30: return 'color:#c62828;font-weight:bold'
+                elif v > 15: return 'color:#e65100;font-weight:bold'
+                elif v > 7: return 'color:#f57f17'
+            except: pass
+            return ''
+
+        st.dataframe(
+            detail_df.style
+                .applymap(color_aging, subset=['Aging'])
+                .applymap(color_days, subset=['Days Pending']),
+            use_container_width=True, hide_index=True
+        )
+
+        # ── Download ──────────────────────────────────────────────────────────
+        csv_pend = detail_df.to_csv(index=False)
+        st.download_button("⬇️ Download Pendency Report", csv_pend,
+                           "pendency_report.csv", "text/csv")
