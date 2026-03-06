@@ -219,9 +219,24 @@ with tab1:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Process-wise sections (like the paper form) ──────────────────────────
+    PROCESS_ORDER = [
+        'Modal Shout', 'Dyeing', 'Printing', 'Fabric Check', 'Re Process',
+        'Cutting', 'Gola Cutting', 'Embroidary', '5 Threads', 'Stitching',
+        'Alteration', 'Kaaz Button', 'Fabric Button', 'Handwork', 'Finishing',
+        'Stitch to Pack', 'Washing', 'Consume Item', 'Consine Bobin Elastic',
+        'Partchange',
+    ]
+
     all_processes = view_df['Process'].unique()
 
-    for process in sorted(all_processes):
+    def process_sort_key(p):
+        p_lower = p.strip().lower()
+        for i, op in enumerate(PROCESS_ORDER):
+            if op.lower() == p_lower:
+                return i
+        return len(PROCESS_ORDER)
+
+    for process in sorted(all_processes, key=process_sort_key):
         proc_df = view_df[view_df['Process'] == process].copy()
         proc_df = proc_df.sort_values('Size_order')
 
