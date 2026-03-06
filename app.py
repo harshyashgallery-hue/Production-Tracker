@@ -1,7 +1,11 @@
 import streamlit as st
 import pandas as pd
 from html.parser import HTMLParser
-from io import StringIO
+import base64
+import os
+import json
+import zipfile
+import io
 
 st.set_page_config(
     page_title="Yash Gallery - Style Tracking",
@@ -14,125 +18,115 @@ st.markdown("""
 <style>
     .main-header {
         background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
-        color: white;
-        padding: 18px 24px;
-        border-radius: 10px;
-        text-align: center;
-        margin-bottom: 20px;
+        color: white; padding: 18px 24px; border-radius: 10px;
+        text-align: center; margin-bottom: 20px;
     }
     .section-title {
-        background: #e3f2fd;
-        border-left: 5px solid #1565c0;
-        padding: 8px 16px;
-        font-weight: 700;
-        font-size: 15px;
-        margin: 16px 0 8px 0;
-        border-radius: 4px;
-        color: #1a237e;
+        background: #e3f2fd; border-left: 5px solid #1565c0;
+        padding: 8px 16px; font-weight: 700; font-size: 15px;
+        margin: 16px 0 8px 0; border-radius: 4px; color: #1a237e;
     }
     .metric-box {
-        background: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        padding: 12px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        background: white; border: 1px solid #e0e0e0; border-radius: 8px;
+        padding: 12px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.08);
     }
     .metric-val { font-size: 26px; font-weight: 800; color: #1565c0; }
     .metric-lbl { font-size: 12px; color: #666; margin-top: 4px; }
-    .bal-neg  { color: #c62828; font-weight: 700; }
-    .bal-pos  { color: #2e7d32; font-weight: 700; }
-    .bal-zero { color: #f57f17; font-weight: 700; }
-    div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
-    .stSelectbox > div { border-radius: 6px; }
-    .process-tag {
-        display: inline-block;
-        background: #e8f5e9;
-        border: 1px solid #a5d6a7;
-        border-radius: 12px;
-        padding: 2px 10px;
-        font-size: 12px;
-        margin: 2px;
-        color: #2e7d32;
+    .style-photo {
+        border-radius: 10px; border: 2px solid #1565c0;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-height: 220px;
+    }
+    .no-photo {
+        background: #f5f5f5; border: 2px dashed #bdbdbd; border-radius: 10px;
+        padding: 30px; text-align: center; color: #9e9e9e; font-size: 13px;
+    }
+    .upload-success {
+        background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 8px;
+        padding: 10px 14px; color: #2e7d32; font-size: 13px; margin-top: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Persistent storage paths (server-side, Streamlit Cloud safe) ────────────
+DATA_DIR = "/tmp/yash_gallery_data"
+EXCEL_PATH = os.path.join(DATA_DIR, "report.xls")
+IMAGES_DIR = os.path.join(DATA_DIR, "images")
+META_PATH  = os.path.join(DATA_DIR, "meta.json")
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(IMAGES_DIR, exist_ok=True)
+
+def save_meta(excel_name, img_count):
+    with open(META_PATH, 'w') as f:
+        json.dump({"excel_name": excel_name, "img_count": img_count}, f)
+
+def load_meta():
+    if os.path.exists(META_PATH):
+        with open(META_PATH) as f:
+            return json.load(f)
+    return None
 
 # ── HTML Parser ─────────────────────────────────────────────────────────────
 class TableParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.rows, self.current_row, self.current_cell, self.in_td = [], [], '', False
-
     def handle_starttag(self, tag, attrs):
-        if tag == 'tr':
-            self.current_row = []
-        elif tag == 'td':
-            self.in_td, self.current_cell = True, ''
-
+        if tag == 'tr': self.current_row = []
+        elif tag == 'td': self.in_td, self.current_cell = True, ''
     def handle_endtag(self, tag):
-        if tag == 'tr' and self.current_row:
-            self.rows.append(self.current_row)
+        if tag == 'tr' and self.current_row: self.rows.append(self.current_row)
         elif tag == 'td':
             self.in_td = False
             self.current_row.append(self.current_cell.strip())
-
     def handle_data(self, data):
-        if self.in_td:
-            self.current_cell += data
+        if self.in_td: self.current_cell += data
 
-
-# ── Load data ───────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner="Loading Excel data…")
+@st.cache_data(show_spinner="Loading data…")
 def load_data(file_bytes):
     content = file_bytes.decode('utf-8', errors='ignore')
     parser = TableParser()
     parser.feed(content)
-
-    headers = ['JONo', 'JODate', 'SONo', 'SODate', 'Karigar',
-               'IssueNo', 'IssueDate', 'Process', 'Design', 'Size',
-               'NoColour_MI', 'NoColour_MR', 'NoColour_BAL',
-               'Mix_MI', 'Mix_MR', 'Mix_BAL']
-
-    data_rows = parser.rows[2:]  # skip title & header rows
+    headers = ['JONo','JODate','SONo','SODate','Karigar','IssueNo','IssueDate',
+               'Process','Design','Size','NoColour_MI','NoColour_MR','NoColour_BAL',
+               'Mix_MI','Mix_MR','Mix_BAL']
     records = []
-    for row in data_rows:
+    for row in parser.rows[2:]:
         if len(row) >= 10 and row[0].strip() and row[8].strip():
-            r = {}
-            for i, h in enumerate(headers):
-                r[h] = row[i].strip() if i < len(row) else ''
+            r = {h: (row[i].strip() if i < len(row) else '') for i, h in enumerate(headers)}
             records.append(r)
-
     df = pd.DataFrame(records)
-
-    # Numeric columns
-    for col in ['NoColour_MI', 'NoColour_MR', 'NoColour_BAL', 'Mix_MI', 'Mix_MR', 'Mix_BAL']:
+    for col in ['NoColour_MI','NoColour_MR','NoColour_BAL','Mix_MI','Mix_MR','Mix_BAL']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
-    # Date cleanup
     df['IssueDate'] = df['IssueDate'].str.lstrip("'")
     df['JODate']    = df['JODate'].str.lstrip("'")
-
-    # Total MI / MR / BAL across both colour types
     df['Total_MI']  = df['NoColour_MI'] + df['Mix_MI']
     df['Total_MR']  = df['NoColour_MR'] + df['Mix_MR']
     df['Total_BAL'] = df['Total_MI'] - df['Total_MR']
-
-    # Style code = Design name
     df['StyleCode'] = df['Design']
-
-    SIZE_ORDER = ['XS','S','S-M','S-M-L','M','L','L-XL','L-XL-XXL',
-                  'XL','XL-XXL','XL-XXL-3XL','XXL','XXL-3XL',
-                  '3XL','3XL-4XL','4XL','4XL-5XL','5XL','5XL-6XL',
-                  '6XL','7XL','7XL-8XL','8XL','Free Size','Mix',
+    SIZE_ORDER = ['XS','S','S-M','S-M-L','M','L','L-XL','L-XL-XXL','XL','XL-XXL',
+                  'XL-XXL-3XL','XXL','XXL-3XL','3XL','3XL-4XL','4XL','4XL-5XL',
+                  '5XL','5XL-6XL','6XL','7XL','7XL-8XL','8XL','Free Size','Mix',
                   '7 -8 Years','9 -10 Years','11 -12 Years','13 -14 Years']
     df['Size_order'] = df['Size'].apply(lambda s: SIZE_ORDER.index(s) if s in SIZE_ORDER else 999)
-
     return df
 
+def get_style_image(style_code):
+    """Try to find image for style code with any extension."""
+    exts = ['.jpg','.jpeg','.png','.jfif','.webp','.bmp']
+    for ext in exts:
+        p = os.path.join(IMAGES_DIR, style_code + ext)
+        if os.path.exists(p):
+            return p
+        # Case-insensitive fallback
+        p2 = os.path.join(IMAGES_DIR, style_code.upper() + ext)
+        if os.path.exists(p2):
+            return p2
+        p3 = os.path.join(IMAGES_DIR, style_code.lower() + ext)
+        if os.path.exists(p3):
+            return p3
+    return None
 
-# ── Sidebar – upload ─────────────────────────────────────────────────────────
+# ── Header ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
     <h2 style="margin:0">👗 Yash Gallery Private Limited</h2>
@@ -140,25 +134,91 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("📂 Data Source")
-    uploaded = st.file_uploader("Upload report (.xls / .html)", type=['xls','html','htm'])
+
+    meta = load_meta()
+    excel_loaded = os.path.exists(EXCEL_PATH)
+    imgs_count   = len([f for f in os.listdir(IMAGES_DIR) if not f.startswith('.')])
+
+    if excel_loaded and meta:
+        st.markdown(f"""<div class="upload-success">
+            ✅ <b>Excel:</b> {meta.get('excel_name','report.xls')}<br>
+            🖼️ <b>Images:</b> {imgs_count} photos loaded
+        </div>""", unsafe_allow_html=True)
+        if st.button("🔄 Replace / Upload New Data"):
+            st.session_state['show_upload'] = True
+    else:
+        st.session_state['show_upload'] = True
+
+    if st.session_state.get('show_upload', not excel_loaded):
+        st.markdown("---")
+        st.markdown("**Step 1: Upload Excel Report**")
+        up_excel = st.file_uploader("Report file (.xls)", type=['xls','html','htm'], key="excel_up")
+        if up_excel:
+            with open(EXCEL_PATH, 'wb') as f:
+                f.write(up_excel.getvalue())
+            save_meta(up_excel.name, imgs_count)
+            st.success("✅ Excel saved!")
+            load_data.clear()
+
+        st.markdown("**Step 2: Upload Images (ZIP folder)**")
+        st.caption("Apni saari style photos ek ZIP mein dal ke upload karo.\nPhoto naam = Style code (e.g. 1557YKRED.jpg)")
+        up_zip = st.file_uploader("Images ZIP file", type=['zip'], key="zip_up")
+        if up_zip:
+            z = zipfile.ZipFile(io.BytesIO(up_zip.getvalue()))
+            count = 0
+            for name in z.namelist():
+                basename = os.path.basename(name)
+                if basename and not basename.startswith('.'):
+                    ext = os.path.splitext(basename)[1].lower()
+                    if ext in ['.jpg','.jpeg','.png','.jfif','.webp','.bmp']:
+                        with z.open(name) as src, open(os.path.join(IMAGES_DIR, basename), 'wb') as dst:
+                            dst.write(src.read())
+                        count += 1
+            imgs_count = count
+            save_meta(meta.get('excel_name','') if meta else '', count)
+            st.success(f"✅ {count} images saved!")
+            if st.button("✅ Done, close upload panel"):
+                st.session_state['show_upload'] = False
+                st.rerun()
+
     st.markdown("---")
     st.markdown("**Quick Guide**")
-    st.markdown("1. Upload your report file\n2. Select Style/JO\n3. View size-wise tracking sheet")
+    st.markdown("1. Upload Excel + ZIP of images (ek baar)\n2. Agli baar seedha open karo — data ready milega\n3. Style select karo → tracking dekho")
 
-if uploaded is None:
-    st.info("👈 Please upload your **Material Issue Receive** report (.xls) from the sidebar to get started.")
+# ── Load data ─────────────────────────────────────────────────────────────────
+if not os.path.exists(EXCEL_PATH):
+    st.info("👈 Pehle sidebar se **Excel report** aur **Images ZIP** upload karo.")
     st.stop()
 
-df = load_data(uploaded.read())
+with open(EXCEL_PATH, 'rb') as f:
+    df = load_data(f.read())
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["📋 Style-wise Tracking Sheet", "📊 Summary Dashboard", "🔍 Raw Data"])
 
+PROCESS_ORDER = [
+    'Modal Shout','Dyeing','Printing','Fabric Check','Re Process',
+    'Cutting','Gola Cutting','Embroidary','5 Threads','Stitching',
+    'Alteration','Kaaz Button','Fabric Button','Handwork','Finishing',
+    'Stitch to Pack','Washing','Consume Item','Consine Bobin Elastic','Partchange',
+]
+
+SIZE_ORDER_LIST = ['XS','S','S-M','S-M-L','M','L','L-XL','L-XL-XXL','XL','XL-XXL',
+                   'XL-XXL-3XL','XXL','XXL-3XL','3XL','3XL-4XL','4XL','4XL-5XL',
+                   '5XL','5XL-6XL','6XL','7XL','7XL-8XL','8XL','Free Size','Mix',
+                   '7 -8 Years','9 -10 Years','11 -12 Years','13 -14 Years']
+
+def process_sort_key(p):
+    p_lower = p.strip().lower()
+    for i, op in enumerate(PROCESS_ORDER):
+        if op.lower() == p_lower: return i
+    return len(PROCESS_ORDER)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 – Tracking Sheet (mimics the paper form)
+# TAB 1 – Tracking Sheet
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     col1, col2, col3 = st.columns([2, 2, 1])
@@ -173,7 +233,6 @@ with tab1:
         processes = sorted(df['Process'].unique())
         selected_proc = st.selectbox("⚙️ Process", ['All Processes'] + processes)
 
-    # Apply filters
     view_df = df[df['StyleCode'] == selected_style].copy()
     if selected_jo != 'All JOs':
         view_df = view_df[view_df['JONo'] == selected_jo]
@@ -184,25 +243,43 @@ with tab1:
         st.warning("No data found for selected filters.")
         st.stop()
 
-    # ── Header info card ────────────────────────────────────────────────────
-    meta = view_df.iloc[0]
-    st.markdown(f"""
-    <div style="background:#f5f5f5;border-radius:10px;padding:14px 20px;margin-bottom:16px;
-                border:1px solid #ddd;display:flex;flex-wrap:wrap;gap:24px">
-        <span><b>Style:</b> {selected_style}</span>
-        <span><b>JO No:</b> {meta['JONo']}</span>
-        <span><b>JO Date:</b> {meta['JODate']}</span>
-        <span><b>SO No:</b> {meta['SONo']}</span>
-        <span><b>SO Date:</b> {meta['SODate']}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    meta_row = view_df.iloc[0]
 
-    # ── Summary metrics ──────────────────────────────────────────────────────
+    # ── Header card with PHOTO ────────────────────────────────────────────────
+    img_path = get_style_image(selected_style)
+    hcol1, hcol2 = st.columns([3, 1])
+    with hcol1:
+        st.markdown(f"""
+        <div style="background:#f5f5f5;border-radius:10px;padding:16px 20px;
+                    border:1px solid #ddd;height:100%">
+            <div style="font-size:18px;font-weight:800;color:#1a237e;margin-bottom:10px">
+                {selected_style}
+            </div>
+            <table style="font-size:14px;border-collapse:collapse">
+                <tr><td style="color:#666;padding:3px 16px 3px 0">📋 JO No.</td>
+                    <td><b>{meta_row['JONo']}</b></td></tr>
+                <tr><td style="color:#666;padding:3px 16px 3px 0">📅 JO Date</td>
+                    <td><b>{meta_row['JODate']}</b></td></tr>
+                <tr><td style="color:#666;padding:3px 16px 3px 0">🧾 SO No.</td>
+                    <td><b>{meta_row['SONo']}</b></td></tr>
+                <tr><td style="color:#666;padding:3px 16px 3px 0">📅 SO Date</td>
+                    <td><b>{meta_row['SODate']}</b></td></tr>
+            </table>
+        </div>
+        """, unsafe_allow_html=True)
+    with hcol2:
+        if img_path:
+            st.image(img_path, use_container_width=True, caption=selected_style)
+        else:
+            st.markdown("""<div class="no-photo">📷<br>No photo<br>available</div>""",
+                        unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Metrics ───────────────────────────────────────────────────────────────
     total_mi  = int(view_df['Total_MI'].sum())
     total_mr  = int(view_df['Total_MR'].sum())
     total_bal = int(view_df['Total_BAL'].sum())
-    bal_class = 'bal-neg' if total_bal > 0 else ('bal-pos' if total_bal < 0 else 'bal-zero')
-
     m1, m2, m3, m4 = st.columns(4)
     for col, val, lbl, color in [
         (m1, total_mi,  "Total Issued (MI)",   "#1565c0"),
@@ -210,80 +287,39 @@ with tab1:
         (m3, abs(total_bal), "Balance (Pending)", "#c62828" if total_bal > 0 else "#2e7d32"),
         (m4, view_df['Process'].nunique(), "Processes", "#6a1b9a")
     ]:
-        col.markdown(f"""
-        <div class="metric-box">
+        col.markdown(f"""<div class="metric-box">
             <div class="metric-val" style="color:{color}">{val}</div>
             <div class="metric-lbl">{lbl}</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Process-wise sections (like the paper form) ──────────────────────────
-    PROCESS_ORDER = [
-        'Modal Shout', 'Dyeing', 'Printing', 'Fabric Check', 'Re Process',
-        'Cutting', 'Gola Cutting', 'Embroidary', '5 Threads', 'Stitching',
-        'Alteration', 'Kaaz Button', 'Fabric Button', 'Handwork', 'Finishing',
-        'Stitch to Pack', 'Washing', 'Consume Item', 'Consine Bobin Elastic',
-        'Partchange',
-    ]
-
+    # ── Process sections ──────────────────────────────────────────────────────
     all_processes = view_df['Process'].unique()
-
-    def process_sort_key(p):
-        p_lower = p.strip().lower()
-        for i, op in enumerate(PROCESS_ORDER):
-            if op.lower() == p_lower:
-                return i
-        return len(PROCESS_ORDER)
-
     for process in sorted(all_processes, key=process_sort_key):
         proc_df = view_df[view_df['Process'] == process].copy()
         proc_df = proc_df.sort_values('Size_order')
-
         st.markdown(f'<div class="section-title">⚙️ {process}</div>', unsafe_allow_html=True)
 
-        # Pivot size-wise
         pivot_rows = []
-        karigars = proc_df.groupby('Karigar')
-
-        for karigar_name, kg_df in karigars:
+        for karigar_name, kg_df in proc_df.groupby('Karigar'):
             kg_df = kg_df.sort_values('Size_order')
-            issues = kg_df.groupby('IssueNo', sort=False)
-
-            for issue_no, iss_df in issues:
+            for issue_no, iss_df in kg_df.groupby('IssueNo', sort=False):
                 iss_df = iss_df.sort_values('Size_order')
                 issue_date = iss_df['IssueDate'].iloc[0]
-
-                # Build a row: one column per size
-                row_data = {
-                    'Issue Date': issue_date,
-                    'CH. NO. (Issue No)': issue_no,
-                    'Karigar': karigar_name,
-                    'Type': 'Issued (MI)'
-                }
+                row_data = {'Issue Date': issue_date, 'CH. NO.': issue_no,
+                            'Karigar': karigar_name, 'Type': 'Issued (MI)'}
                 for _, r in iss_df.iterrows():
                     row_data[r['Size']] = int(r['Total_MI']) if r['Total_MI'] else ''
                 pivot_rows.append(row_data)
-
-                # Received row if any MR
                 if iss_df['Total_MR'].sum() > 0:
-                    rec_row = {
-                        'Issue Date': '',
-                        'CH. NO. (Issue No)': issue_no,
-                        'Karigar': karigar_name,
-                        'Type': 'Received (MR)'
-                    }
+                    rec_row = {'Issue Date': '', 'CH. NO.': issue_no,
+                               'Karigar': karigar_name, 'Type': 'Received (MR)'}
                     for _, r in iss_df.iterrows():
                         rec_row[r['Size']] = int(r['Total_MR']) if r['Total_MR'] else ''
                     pivot_rows.append(rec_row)
-
-                    # Balance row
-                    bal_row = {
-                        'Issue Date': '',
-                        'CH. NO. (Issue No)': issue_no,
-                        'Karigar': karigar_name,
-                        'Type': '🔴 Balance (BAL)' if iss_df['Total_BAL'].sum() > 0 else '✅ Balance (BAL)'
-                    }
+                    bal_row = {'Issue Date': '', 'CH. NO.': issue_no, 'Karigar': karigar_name,
+                               'Type': '🔴 Balance' if iss_df['Total_BAL'].sum() > 0 else '✅ Balance'}
                     for _, r in iss_df.iterrows():
                         bal = int(r['Total_BAL'])
                         bal_row[r['Size']] = bal if bal != 0 else ''
@@ -291,49 +327,32 @@ with tab1:
 
         if pivot_rows:
             pv_df = pd.DataFrame(pivot_rows)
-
-            # Size order in columns
-            SIZE_ORDER_LIST = ['XS','S','S-M','S-M-L','M','L','L-XL','L-XL-XXL',
-                               'XL','XL-XXL','XL-XXL-3XL','XXL','XXL-3XL',
-                               '3XL','3XL-4XL','4XL','4XL-5XL','5XL','5XL-6XL',
-                               '6XL','7XL','7XL-8XL','8XL','Free Size','Mix',
-                               '7 -8 Years','9 -10 Years','11 -12 Years','13 -14 Years']
-            base_cols = ['Issue Date','CH. NO. (Issue No)','Karigar','Type']
-            size_cols_present = [s for s in SIZE_ORDER_LIST if s in pv_df.columns]
-            other_size_cols = [c for c in pv_df.columns if c not in base_cols and c not in SIZE_ORDER_LIST]
-            final_cols = base_cols + size_cols_present + other_size_cols
-
-            pv_df = pv_df.reindex(columns=final_cols).fillna('')
-
-            # Total column
-            size_only_cols = size_cols_present + other_size_cols
-            pv_df['TOTAL'] = pv_df[size_only_cols].apply(
-                lambda row: sum(int(v) for v in row if str(v).lstrip('-').isdigit()), axis=1
-            )
+            base_cols = ['Issue Date','CH. NO.','Karigar','Type']
+            size_cols = [s for s in SIZE_ORDER_LIST if s in pv_df.columns]
+            other_cols = [c for c in pv_df.columns if c not in base_cols and c not in SIZE_ORDER_LIST]
+            pv_df = pv_df.reindex(columns=base_cols + size_cols + other_cols).fillna('')
+            all_size_cols = size_cols + other_cols
+            pv_df['TOTAL'] = pv_df[all_size_cols].apply(
+                lambda row: sum(int(v) for v in row if str(v).lstrip('-').isdigit()), axis=1)
             pv_df.loc[pv_df['TOTAL'] == 0, 'TOTAL'] = ''
 
-            # Color rows
             def style_rows(row):
                 if 'Balance' in str(row.get('Type', '')):
-                    if '🔴' in str(row.get('Type', '')):
-                        return ['background-color: #ffebee; font-weight: bold'] * len(row)
-                    else:
-                        return ['background-color: #e8f5e9; font-weight: bold'] * len(row)
+                    return ['background-color:#ffebee;font-weight:bold'
+                            if '🔴' in str(row.get('Type',''))
+                            else 'background-color:#e8f5e9;font-weight:bold'] * len(row)
                 elif 'Received' in str(row.get('Type', '')):
-                    return ['background-color: #e3f2fd'] * len(row)
-                else:
-                    return ['background-color: #fff8e1'] * len(row)
+                    return ['background-color:#e3f2fd'] * len(row)
+                return ['background-color:#fff8e1'] * len(row)
 
-            styled = pv_df.style.apply(style_rows, axis=1)
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-
+            st.dataframe(pv_df.style.apply(style_rows, axis=1),
+                         use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 – Summary Dashboard
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.subheader("📊 Overall Summary")
-
     c1, c2, c3, c4 = st.columns(4)
     for col, val, lbl, color in [
         (c1, df['StyleCode'].nunique(), "Total Styles",     "#1565c0"),
@@ -341,79 +360,58 @@ with tab2:
         (c3, df['Karigar'].nunique(),   "Total Karigars",   "#6a1b9a"),
         (c4, int(df['Total_MI'].sum()), "Total Issued Qty", "#e65100"),
     ]:
-        col.markdown(f"""
-        <div class="metric-box">
+        col.markdown(f"""<div class="metric-box">
             <div class="metric-val" style="color:{color}">{val:,}</div>
             <div class="metric-lbl">{lbl}</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Style-wise summary table
-    st.markdown('<div class="section-title">📋 Style-wise Issue / Receive Summary</div>', unsafe_allow_html=True)
-
-    style_summary = df.groupby('StyleCode').agg(
-        JO_Count=('JONo', 'nunique'),
-        Process_Count=('Process', 'nunique'),
-        Total_Issued=('Total_MI', 'sum'),
-        Total_Received=('Total_MR', 'sum'),
-        Balance=('Total_BAL', 'sum')
-    ).reset_index()
-    style_summary.columns = ['Style/Design', 'JOs', 'Processes', 'Total Issued', 'Total Received', 'Balance']
-    style_summary['Balance'] = style_summary['Balance'].astype(int)
-
     def color_balance(val):
-        if val > 0:  return 'color: #c62828; font-weight: bold'
-        elif val < 0: return 'color: #2e7d32; font-weight: bold'
-        return 'color: #f57f17; font-weight: bold'
+        if val > 0:   return 'color:#c62828;font-weight:bold'
+        elif val < 0: return 'color:#2e7d32;font-weight:bold'
+        return 'color:#f57f17;font-weight:bold'
 
-    st.dataframe(
-        style_summary.style.applymap(color_balance, subset=['Balance']),
-        use_container_width=True, hide_index=True
-    )
+    # Style summary with photos
+    st.markdown('<div class="section-title">📋 Style-wise Summary</div>', unsafe_allow_html=True)
+    style_summary = df.groupby('StyleCode').agg(
+        JOs=('JONo','nunique'), Processes=('Process','nunique'),
+        Total_Issued=('Total_MI','sum'), Total_Received=('Total_MR','sum'),
+        Balance=('Total_BAL','sum')).reset_index()
+    style_summary.columns = ['Style/Design','JOs','Processes','Total Issued','Total Received','Balance']
+    style_summary['Balance'] = style_summary['Balance'].astype(int)
+    style_summary['📷'] = style_summary['Style/Design'].apply(
+        lambda s: '✅' if get_style_image(s) else '❌')
+    st.dataframe(style_summary.style.applymap(color_balance, subset=['Balance']),
+                 use_container_width=True, hide_index=True)
 
-    # Process-wise summary
     st.markdown('<div class="section-title">⚙️ Process-wise Summary</div>', unsafe_allow_html=True)
     proc_summary = df.groupby('Process').agg(
-        Styles=('StyleCode', 'nunique'),
-        Total_Issued=('Total_MI', 'sum'),
-        Total_Received=('Total_MR', 'sum'),
-        Balance=('Total_BAL', 'sum')
-    ).reset_index()
-    proc_summary.columns = ['Process', 'Styles', 'Total Issued', 'Total Received', 'Balance']
-    st.dataframe(
-        proc_summary.sort_values('Total Issued', ascending=False).style.applymap(color_balance, subset=['Balance']),
-        use_container_width=True, hide_index=True
-    )
+        Styles=('StyleCode','nunique'), Total_Issued=('Total_MI','sum'),
+        Total_Received=('Total_MR','sum'), Balance=('Total_BAL','sum')).reset_index()
+    proc_summary.columns = ['Process','Styles','Total Issued','Total Received','Balance']
+    st.dataframe(proc_summary.sort_values('Total Issued', ascending=False)
+                 .style.applymap(color_balance, subset=['Balance']),
+                 use_container_width=True, hide_index=True)
 
-    # Karigar-wise
     st.markdown('<div class="section-title">👷 Karigar-wise Summary</div>', unsafe_allow_html=True)
     kar_summary = df.groupby('Karigar').agg(
-        Styles=('StyleCode', 'nunique'),
-        Total_Issued=('Total_MI', 'sum'),
-        Total_Received=('Total_MR', 'sum'),
-        Balance=('Total_BAL', 'sum')
-    ).reset_index()
-    kar_summary.columns = ['Karigar', 'Styles', 'Total Issued', 'Total Received', 'Balance']
-    st.dataframe(
-        kar_summary.sort_values('Balance', ascending=False).style.applymap(color_balance, subset=['Balance']),
-        use_container_width=True, hide_index=True
-    )
-
+        Styles=('StyleCode','nunique'), Total_Issued=('Total_MI','sum'),
+        Total_Received=('Total_MR','sum'), Balance=('Total_BAL','sum')).reset_index()
+    kar_summary.columns = ['Karigar','Styles','Total Issued','Total Received','Balance']
+    st.dataframe(kar_summary.sort_values('Balance', ascending=False)
+                 .style.applymap(color_balance, subset=['Balance']),
+                 use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 – Raw Data
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     st.subheader("🔍 Raw Data Explorer")
-
     col1, col2, col3 = st.columns(3)
-    with col1:
-        f_style = st.multiselect("Style", sorted(df['StyleCode'].unique()))
-    with col2:
-        f_process = st.multiselect("Process", sorted(df['Process'].unique()))
-    with col3:
-        f_karigar = st.multiselect("Karigar", sorted(df['Karigar'].unique()))
+    with col1: f_style   = st.multiselect("Style",   sorted(df['StyleCode'].unique()))
+    with col2: f_process = st.multiselect("Process", sorted(df['Process'].unique()))
+    with col3: f_karigar = st.multiselect("Karigar", sorted(df['Karigar'].unique()))
 
     raw = df.copy()
     if f_style:   raw = raw[raw['StyleCode'].isin(f_style)]
@@ -423,11 +421,8 @@ with tab3:
     display_cols = ['JONo','JODate','SONo','Karigar','IssueNo','IssueDate',
                     'Process','Design','Size','NoColour_MI','NoColour_MR',
                     'Mix_MI','Mix_MR','Total_MI','Total_MR','Total_BAL']
-
     st.write(f"**{len(raw):,} records**")
     st.dataframe(raw[display_cols].sort_values(['Design','Process']),
                  use_container_width=True, hide_index=True)
-
-    # Download
     csv = raw[display_cols].to_csv(index=False)
     st.download_button("⬇️ Download Filtered CSV", csv, "filtered_data.csv", "text/csv")
