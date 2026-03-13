@@ -220,21 +220,21 @@ hr { border-color: var(--border) !important; }
 
 # ─── Session State Init ─────────────────────────────────────────────────────────
 if "items" not in st.session_state:
-    st.session_state.items = {}
+    st.session_state["items"] = {}
 if "boms" not in st.session_state:
-    st.session_state.boms = {}
+    st.session_state["boms"] = {}
 if "merchants" not in st.session_state:
-    st.session_state.merchants = {
+    st.session_state["merchants"] = {
         "MC001": "Amit Textiles",
         "MC002": "Ravi Exports",
         "MC003": "Sharma Trading Co.",
     }
 if "buyers" not in st.session_state:
-    st.session_state.buyers = ["Myntra", "Flipkart", "Amazon", "Reliance", "Direct"]
+    st.session_state["buyers"] = ["Myntra", "Flipkart", "Amazon", "Reliance", "Direct"]
 if "processes" not in st.session_state:
-    st.session_state.processes = ["Cutting", "Printing", "Dyeing", "Stitching", "Finishing", "Packing", "Embroidery", "Washing"]
+    st.session_state["processes"] = ["Cutting", "Printing", "Dyeing", "Stitching", "Finishing", "Packing", "Embroidery", "Washing"]
 if "routings" not in st.session_state:
-    st.session_state.routings = {}
+    st.session_state["routings"] = {}
 
 ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)", 
               "Accessories", "Packing Materials", "Fuel & Lubricants"]
@@ -260,7 +260,7 @@ with st.sidebar:
     ], label_visibility="collapsed")
     
     st.markdown("---")
-    st.markdown(f'<p style="color:#888888; font-size:11px;">Items: {len(st.session_state.items)} | BOMs: {len(st.session_state.boms)}</p>', unsafe_allow_html=True)
+    st.markdown(f'<p style="color:#888888; font-size:11px;">Items: {len(st.session_state["items"])} | BOMs: {len(st.session_state["boms"])}</p>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
@@ -271,13 +271,13 @@ if nav == "📊 Dashboard":
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
     items_by_type = {}
-    for item in st.session_state.items.values():
+    for item in st.session_state["items"].values():
         t = item.get("item_type", "Unknown")
         items_by_type[t] = items_by_type.get(t, 0) + 1
     
     with col1:
         st.markdown(f'''<div class="metric-box">
-            <div class="metric-value">{len(st.session_state.items)}</div>
+            <div class="metric-value">{len(st.session_state["items"])}</div>
             <div class="metric-label">Total Items</div>
         </div>''', unsafe_allow_html=True)
     with col2:
@@ -288,11 +288,11 @@ if nav == "📊 Dashboard":
         </div>''', unsafe_allow_html=True)
     with col3:
         st.markdown(f'''<div class="metric-box">
-            <div class="metric-value">{len(st.session_state.boms)}</div>
+            <div class="metric-value">{len(st.session_state["boms"])}</div>
             <div class="metric-label">BOMs Created</div>
         </div>''', unsafe_allow_html=True)
     with col4:
-        certified = sum(1 for b in st.session_state.boms.values() if b.get("status") == "Certified")
+        certified = sum(1 for b in st.session_state["boms"].values() if b.get("status") == "Certified")
         st.markdown(f'''<div class="metric-box">
             <div class="metric-value">{certified}</div>
             <div class="metric-label">Certified BOMs</div>
@@ -380,13 +380,13 @@ elif nav == "➕ Create Item":
             item_type = st.selectbox("Item Category *", ITEM_TYPES)
             
             # Parent item
-            parent_items = {k: v["name"] for k, v in st.session_state.items.items() if v.get("item_type") == item_type}
+            parent_items = {k: v["name"] for k, v in st.session_state["items"].items() if v.get("item_type") == item_type}
             parent_options = ["None"] + [f"{k} – {v}" for k, v in parent_items.items()]
             parent_item = st.selectbox("Parent Item", parent_options)
         
         with col2:
             st.markdown("#### Commercial Details")
-            merchant_options = [f"{k} – {v}" for k, v in st.session_state.merchants.items()]
+            merchant_options = [f"{k} – {v}" for k, v in st.session_state["merchants"].items()]
             merchant = st.selectbox("Merchant Code", ["Select Merchant..."] + merchant_options)
             
             hsn = st.selectbox("HSN Code", HSN_CODES)
@@ -444,7 +444,7 @@ elif nav == "➕ Create Item":
         st.markdown('''<div class="info-box">✓ Processes ko order wise arrange karein – alag SKU ke liye alag process order define kar sakte hain</div>''', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
-        available_processes = st.session_state.processes.copy()
+        available_processes = st.session_state["processes"].copy()
         selected_route = st.multiselect("Select Processes (in order)", available_processes,
                                          default=["Cutting", "Stitching", "Finishing", "Packing"])
         
@@ -462,7 +462,7 @@ elif nav == "➕ Create Item":
         st.markdown("<br>", unsafe_allow_html=True)
         
         buyer_packaging = {}
-        for buyer in st.session_state.buyers:
+        for buyer in st.session_state["buyers"]:
             with st.expander(f"📦 {buyer} Packaging"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -510,12 +510,12 @@ elif nav == "➕ Create Item":
                     "created_at": datetime.now().isoformat(),
                 }
                 
-                st.session_state.items[item_code] = item_data
+                st.session_state["items"][item_code] = item_data
                 
                 # Auto-create size variant records
                 for sz in sizes:
                     sku = f"{item_code}-{sz}"
-                    st.session_state.items[sku] = {
+                    st.session_state["items"][sku] = {
                         **item_data,
                         "code": sku,
                         "name": f"{item_name} – {sz}",
@@ -525,7 +525,7 @@ elif nav == "➕ Create Item":
                 
                 # Save routing
                 if route:
-                    st.session_state.routings[item_code] = route
+                    st.session_state["routings"][item_code] = route
                 
                 st.success(f"✅ Item '{item_name}' saved! {len(sizes)} size variants created.")
                 st.balloons()
@@ -536,7 +536,7 @@ elif nav == "➕ Create Item":
 elif nav == "📋 Item Master List":
     st.markdown('<h1>Item Master List</h1>', unsafe_allow_html=True)
     
-    if not st.session_state.items:
+    if not st.session_state["items"]:
         st.markdown('<div class="warn-box">No items created yet. Go to "Create Item" to add items.</div>', unsafe_allow_html=True)
     else:
         # Filters
@@ -549,7 +549,7 @@ elif nav == "📋 Item Master List":
             search = st.text_input("🔍 Search by Name/Code", placeholder="Type to filter...")
         
         items_list = []
-        for code, item in st.session_state.items.items():
+        for code, item in st.session_state["items"].items():
             if filter_type != "All" and item.get("item_type") != filter_type:
                 continue
             if filter_season != "All" and item.get("season") != filter_season:
@@ -557,8 +557,8 @@ elif nav == "📋 Item Master List":
             if search and search.lower() not in code.lower() and search.lower() not in item.get("name", "").lower():
                 continue
             
-            has_bom = code in st.session_state.boms
-            bom_status = st.session_state.boms.get(code, {}).get("status", "—") if has_bom else "—"
+            has_bom = code in st.session_state["boms"]
+            bom_status = st.session_state["boms"].get(code, {}).get("status", "—") if has_bom else "—"
             
             items_list.append({
                 "Item Code": code,
@@ -579,9 +579,9 @@ elif nav == "📋 Item Master List":
         st.markdown("---")
         st.markdown("#### Item Detail View")
         selected_item_code = st.selectbox("Select item to view details", 
-                                           [""] + list(st.session_state.items.keys()))
+                                           [""] + list(st.session_state["items"].keys()))
         if selected_item_code:
-            item = st.session_state.items[selected_item_code]
+            item = st.session_state["items"][selected_item_code]
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown(f'''<div class="card card-accent">
@@ -607,7 +607,7 @@ elif nav == "📋 Item Master List":
                 </div>''', unsafe_allow_html=True)
             
             # Child SKUs
-            child_skus = [c for c, d in st.session_state.items.items() if d.get("parent") == selected_item_code]
+            child_skus = [c for c, d in st.session_state["items"].items() if d.get("parent") == selected_item_code]
             if child_skus:
                 st.markdown("**Child SKUs:**")
                 for sku in child_skus:
@@ -627,13 +627,13 @@ elif nav == "🔩 BOM Management":
         
         col1, col2 = st.columns(2)
         with col1:
-            target_item = st.selectbox("Select Item for BOM *", [""] + list(st.session_state.items.keys()))
+            target_item = st.selectbox("Select Item for BOM *", [""] + list(st.session_state["items"].keys()))
         with col2:
             bom_number = st.selectbox("BOM Number", ["BOM-1 (Default)", "BOM-2 (Alt Fabric)", "BOM-3"])
             bom_desc = st.text_input("BOM Description", placeholder="e.g. 56 inch fabric width")
         
         if target_item:
-            item_sizes = st.session_state.items[target_item].get("sizes", [])
+            item_sizes = st.session_state["items"][target_item].get("sizes", [])
             
             # BOM Type
             bom_type = st.radio("BOM Type", ["Common BOM (applies to all sizes)", "Size-wise BOM (different per size)"], horizontal=True)
@@ -642,7 +642,7 @@ elif nav == "🔩 BOM Management":
                 size_group = st.selectbox("Define BOM for size group:", item_sizes)
             
             # Copy BOM feature
-            existing_boms = list(st.session_state.boms.keys())
+            existing_boms = list(st.session_state["boms"].keys())
             if existing_boms:
                 st.markdown("#### 📋 Copy from Existing BOM")
                 copy_from = st.selectbox("Copy BOM from item:", ["— Don't copy —"] + existing_boms)
@@ -653,8 +653,8 @@ elif nav == "🔩 BOM Management":
             # BOM lines state
             bom_key = f"bom_lines_{target_item}"
             if bom_key not in st.session_state:
-                if 'copy_from' in dir() and copy_from != "— Don't copy —" and copy_from in st.session_state.boms:
-                    st.session_state[bom_key] = st.session_state.boms[copy_from].get("lines", []).copy()
+                if 'copy_from' in dir() and copy_from != "— Don't copy —" and copy_from in st.session_state["boms"]:
+                    st.session_state[bom_key] = st.session_state["boms"][copy_from].get("lines", []).copy()
                 else:
                     st.session_state[bom_key] = []
             
@@ -662,7 +662,7 @@ elif nav == "🔩 BOM Management":
             with st.expander("➕ Add BOM Line", expanded=len(st.session_state[bom_key]) == 0):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    component_items = {k: v["name"] for k, v in st.session_state.items.items() if k != target_item}
+                    component_items = {k: v["name"] for k, v in st.session_state["items"].items() if k != target_item}
                     if component_items:
                         comp_code = st.selectbox("Component Item *", 
                                                   [""] + [f"{k} – {v}" for k, v in component_items.items()],
@@ -680,7 +680,7 @@ elif nav == "🔩 BOM Management":
                     wastage = st.number_input("Wastage %", min_value=0.0, max_value=100.0, step=0.5, key="new_waste")
                 
                 with col3:
-                    processes = st.session_state.processes
+                    processes = st.session_state["processes"]
                     process_used = st.selectbox("Process Used In", ["—"] + processes, key="new_process")
                     remarks = st.text_input("Remarks", key="new_remarks")
                 
@@ -695,7 +695,7 @@ elif nav == "🔩 BOM Management":
                         line = {
                             "item_code": comp_key,
                             "item_name": comp_name,
-                            "item_type": st.session_state.items.get(comp_key, {}).get("item_type", ""),
+                            "item_type": st.session_state["items"].get(comp_key, {}).get("item_type", ""),
                             "qty": qty,
                             "unit": unit,
                             "rate": rate,
@@ -757,7 +757,7 @@ elif nav == "🔩 BOM Management":
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("💾 Save BOM (Draft)", use_container_width=True):
-                    st.session_state.boms[target_item] = {
+                    st.session_state["boms"][target_item] = {
                         "item_code": target_item,
                         "bom_number": bom_number,
                         "description": bom_desc,
@@ -775,8 +775,8 @@ elif nav == "🔩 BOM Management":
                 if st.button("✅ Certify BOM (Admin Only)", use_container_width=True):
                     # In real app, check admin role
                     admin_pass = st.session_state.get("admin_verified", False)
-                    if target_item in st.session_state.boms:
-                        st.session_state.boms[target_item]["status"] = "Certified"
+                    if target_item in st.session_state["boms"]:
+                        st.session_state["boms"][target_item]["status"] = "Certified"
                         st.success("✅ BOM Certified! Only Admin can now modify it.")
                     else:
                         st.warning("Save BOM first before certifying.")
@@ -787,11 +787,11 @@ elif nav == "🔩 BOM Management":
     
     with bom_tab2:
         st.markdown("#### All BOMs")
-        if not st.session_state.boms:
+        if not st.session_state["boms"]:
             st.markdown('<div class="warn-box">No BOMs created yet.</div>', unsafe_allow_html=True)
         else:
-            for item_code, bom in st.session_state.boms.items():
-                item_name = st.session_state.items.get(item_code, {}).get("name", item_code)
+            for item_code, bom in st.session_state["boms"].items():
+                item_name = st.session_state["items"].get(item_code, {}).get("name", item_code)
                 status = bom.get("status", "Draft")
                 badge = f'<span class="badge {"badge-certified" if status == "Certified" else "badge-pending"}">{status}</span>'
                 
@@ -817,12 +817,12 @@ elif nav == "🔩 BOM Management":
     
     with bom_tab3:
         st.markdown("#### BOM Costing Summary")
-        if not st.session_state.boms:
+        if not st.session_state["boms"]:
             st.markdown('<div class="warn-box">No BOMs available for costing.</div>', unsafe_allow_html=True)
         else:
-            selected_bom_item = st.selectbox("Select Item", list(st.session_state.boms.keys()))
+            selected_bom_item = st.selectbox("Select Item", list(st.session_state["boms"].keys()))
             if selected_bom_item:
-                bom = st.session_state.boms[selected_bom_item]
+                bom = st.session_state["boms"][selected_bom_item]
                 lines = bom.get("lines", [])
                 
                 # Categorize costs
@@ -862,20 +862,20 @@ elif nav == "🔄 Routing Master":
         st.markdown("#### Add New Process")
         new_process = st.text_input("Process Name", placeholder="e.g. Washing, Embroidery")
         if st.button("➕ Add Process"):
-            if new_process and new_process not in st.session_state.processes:
-                st.session_state.processes.append(new_process)
+            if new_process and new_process not in st.session_state["processes"]:
+                st.session_state["processes"].append(new_process)
                 st.success(f"Process '{new_process}' added!")
                 st.rerun()
     
     with col2:
         st.markdown("#### Current Process Master")
-        for i, p in enumerate(st.session_state.processes, 1):
+        for i, p in enumerate(st.session_state["processes"], 1):
             st.markdown(f'<div class="card" style="padding:8px 14px; margin:3px 0;"><span class="section-number">{i}</span> <span style="margin-left:8px;">{p}</span></div>', unsafe_allow_html=True)
     
     st.markdown("---")
     st.markdown("#### Item-wise Routing View")
-    for item_code, route in st.session_state.routings.items():
-        item_name = st.session_state.items.get(item_code, {}).get("name", item_code)
+    for item_code, route in st.session_state["routings"].items():
+        item_name = st.session_state["items"].get(item_code, {}).get("name", item_code)
         route_str = " → ".join(route)
         st.markdown(f'''<div class="card" style="margin:4px 0;">
             <span class="tag tag-accent">{item_code}</span>
@@ -901,7 +901,7 @@ elif nav == "👤 Merchant Master":
         
         if st.button("💾 Save Merchant", use_container_width=True):
             if mc_code and mc_name:
-                st.session_state.merchants[mc_code] = mc_name
+                st.session_state["merchants"][mc_code] = mc_name
                 st.success(f"Merchant '{mc_name}' ({mc_code}) added!")
                 st.rerun()
             else:
@@ -909,9 +909,9 @@ elif nav == "👤 Merchant Master":
     
     with col2:
         st.markdown("#### Merchant List")
-        if st.session_state.merchants:
+        if st.session_state["merchants"]:
             df_merchants = pd.DataFrame([
-                {"Code": k, "Name": v} for k, v in st.session_state.merchants.items()
+                {"Code": k, "Name": v} for k, v in st.session_state["merchants"].items()
             ])
             st.dataframe(df_merchants, use_container_width=True, hide_index=True)
         else:
@@ -931,18 +931,18 @@ elif nav == "📦 Buyer Packaging":
         st.markdown("#### Buyer Master")
         new_buyer = st.text_input("Add Buyer", placeholder="e.g. H&M India")
         if st.button("➕ Add Buyer"):
-            if new_buyer and new_buyer not in st.session_state.buyers:
-                st.session_state.buyers.append(new_buyer)
+            if new_buyer and new_buyer not in st.session_state["buyers"]:
+                st.session_state["buyers"].append(new_buyer)
                 st.success(f"Buyer '{new_buyer}' added!")
                 st.rerun()
         
         st.markdown("**Current Buyers:**")
-        for b in st.session_state.buyers:
+        for b in st.session_state["buyers"]:
             st.markdown(f'<span class="tag tag-accent">{b}</span>', unsafe_allow_html=True)
     
     with col2:
         st.markdown("#### View Item Packaging Definitions")
-        items_with_packaging = {k: v for k, v in st.session_state.items.items() if v.get("buyer_packaging")}
+        items_with_packaging = {k: v for k, v in st.session_state["items"].items() if v.get("buyer_packaging")}
         
         if items_with_packaging:
             for item_code, item in items_with_packaging.items():
