@@ -1584,130 +1584,245 @@ elif nav_so == "➕ Create Sales Order":
 # SO LIST & TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 elif nav_so == "📂 SO List & Tracking":
-    st.markdown('<h1>SO List & Tracking</h1>', unsafe_allow_html=True)
 
-    lt1, lt2 = st.tabs(["📋 All SOs", "🔍 SO Detail & Update"])
+    # ── Init selected SO in session state ──────────────────────────────────────
+    if "selected_so" not in st.session_state:
+        st.session_state["selected_so"] = None
 
-    with lt1:
+    # ── If a SO is open, show detail view ──────────────────────────────────────
+    if st.session_state["selected_so"] and st.session_state["selected_so"] in SS["so_list"]:
+        sel_so = st.session_state["selected_so"]
+        so     = SS["so_list"][sel_so]
+
+        # ── Top bar ────────────────────────────────────────────────────────────
+        back_col, title_col, status_col = st.columns([1, 4, 2])
+        with back_col:
+            if st.button("← Back to List"):
+                st.session_state["selected_so"] = None
+                st.rerun()
+        with title_col:
+            st.markdown(f'<h1 style="margin:0;">Sales Order — {sel_so}</h1>', unsafe_allow_html=True)
+        with status_col:
+            st.markdown(f'<div style="padding-top:12px;">{badge(so.get("status","Draft"))}</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── Header Cards ───────────────────────────────────────────────────────
+        col1, col2, col3, col4 = st.columns(4)
+        total_q = sum(l["qty"] for l in so.get("lines", []))
+        rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
+        pct_rcv = int(rcvd_q / total_q * 100) if total_q > 0 else 0
+
+        with col1:
+            st.markdown(f'''<div class="card card-left">
+                <div class="sec-label">Order Info</div>
+                <div style="font-family:JetBrains Mono,monospace;font-size:18px;font-weight:700;color:#c8a96e;">{sel_so}</div>
+                <div style="font-size:13px;margin-top:6px;">Date: <strong>{so.get("so_date","—")}</strong></div>
+                <div style="font-size:13px;">Source: <strong>{so.get("order_source","—")}</strong></div>
+                <div style="font-size:13px;">Ref #: <strong>{so.get("ref_number","—")}</strong></div>
+                <div style="font-size:13px;">Ref Date: <strong>{so.get("ref_date","—")}</strong></div>
+            </div>''', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f'''<div class="card card-left-blue">
+                <div class="sec-label">Buyer / Dispatch</div>
+                <div style="font-size:14px;font-weight:700;margin-bottom:4px;">{so.get("buyer","—")}</div>
+                <div style="font-size:13px;">Delivery: <strong>{so.get("delivery_date","—")}</strong></div>
+                <div style="font-size:13px;">Dispatch: <strong>{so.get("dispatch_date","—")}</strong></div>
+                <div style="font-size:13px;">Team: <strong>{so.get("sales_team","—")}</strong></div>
+                <div style="font-size:13px;">Payment: <strong>{so.get("payment_terms","—")}</strong></div>
+            </div>''', unsafe_allow_html=True)
+        with col3:
+            st.markdown(f'''<div class="card card-left-green">
+                <div class="sec-label">Qty Summary</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:13px;margin-top:4px;">
+                    <div>SO Qty<br><strong style="font-size:18px;">{total_q}</strong></div>
+                    <div>Received<br><strong style="font-size:18px;color:#059669;">{rcvd_q}</strong></div>
+                    <div>Pending<br><strong style="font-size:18px;color:#ef4444;">{total_q - rcvd_q}</strong></div>
+                    <div>Progress<br><strong style="font-size:18px;color:#c8a96e;">{pct_rcv}%</strong></div>
+                </div>
+                <div class="prog-wrap" style="margin-top:8px;"><div class="prog-fill prog-fill-green" style="width:{pct_rcv}%;"></div></div>
+            </div>''', unsafe_allow_html=True)
+        with col4:
+            disc = so.get("discount_pct", 0)
+            st.markdown(f'''<div class="card card-left-red">
+                <div class="sec-label">Financials</div>
+                <div style="font-size:13px;margin-top:4px;">Subtotal: <strong>₹{so.get("subtotal",0):,.2f}</strong></div>
+                <div style="font-size:13px;">Discount ({disc}%): <strong style="color:#ef4444;">- ₹{so.get("subtotal",0)*disc/100:,.2f}</strong></div>
+                <div style="font-size:13px;">GST: <strong>₹{so.get("total_gst",0):,.2f}</strong></div>
+                <div style="font-size:13px;">Shipping: <strong>₹{so.get("shipping",0):,.2f}</strong></div>
+                <div style="border-top:1px solid #e2e5ef;margin-top:6px;padding-top:6px;">
+                    Grand Total<br><strong style="font-size:20px;color:#c8a96e;">₹{so.get("grand_total",0):,.2f}</strong>
+                </div>
+            </div>''', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── Status Update ──────────────────────────────────────────────────────
+        stu1, stu2, stu3 = st.columns([2, 1, 3])
+        with stu1:
+            new_status = st.selectbox("Update Status", STATUS_LIST,
+                                       index=STATUS_LIST.index(so.get("status","Draft")),
+                                       key="so_status_update")
+        with stu2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("✅ Update Status", use_container_width=True):
+                SS["so_list"][sel_so]["status"] = new_status
+                st.success(f"Status → {new_status}")
+                st.rerun()
+        with stu3:
+            st.markdown(f'<div class="info-box" style="margin-top:8px;">Warehouse: <strong>{so.get("warehouse","—")}</strong> &nbsp;|&nbsp; Merchant: <strong>{so.get("merchant","—")}</strong> &nbsp;|&nbsp; Remarks: {so.get("remarks","—")}</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ── SO Lines Table (full detail) ───────────────────────────────────────
+        st.markdown("#### 🧵 SO Line Items")
+        lines = so.get("lines", [])
+        if lines:
+            # Full lines table
+            line_rows = []
+            for ln in lines:
+                line_rows.append({
+                    "SKU":          ln.get("sku",""),
+                    "Item Name":    ln.get("sku_name",""),
+                    "Size":         ln.get("size",""),
+                    "Priority":     ln.get("priority","Normal"),
+                    "Merchant":     ln.get("merchant","—"),
+                    "Qty":          ln.get("qty",0),
+                    "UOM":          ln.get("uom",""),
+                    "Rate (₹)":     ln.get("rate",0),
+                    "GST %":        ln.get("gst_pct",0),
+                    "Taxable (₹)":  ln.get("taxable",0),
+                    "GST Amt (₹)":  ln.get("gst_amount",0),
+                    "Line Total (₹)": ln.get("total",0),
+                    "HSN":          ln.get("hsn",""),
+                    "Delivery":     ln.get("delivery_date",""),
+                    "Produced":     ln.get("produced_qty",0),
+                    "Dispatched":   ln.get("dispatch_qty",0),
+                    "Received":     ln.get("received_qty",0),
+                    "Balance":      ln.get("qty",0) - ln.get("received_qty",0),
+                    "Remarks":      ln.get("remarks",""),
+                })
+            st.dataframe(pd.DataFrame(line_rows), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.markdown("#### ✏️ Update Line Quantities (Produced / Dispatched / Received)")
+
+            for i, line in enumerate(lines):
+                pri_color = {"Urgent":"#ef4444","High":"#d97706","Normal":"#059669"}.get(line.get("priority","Normal"),"#059669")
+                with st.expander(
+                    f"📦  {line.get('sku','')}  —  {line.get('sku_name','')}  |  Ordered: {line.get('qty',0)}  |  Balance: {line.get('qty',0)-line.get('received_qty',0)}",
+                    expanded=False
+                ):
+                    # Line detail strip
+                    st.markdown(f'''<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-bottom:12px;padding:10px 14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e5ef;">
+                        <span><span style="color:#94a3b8;">SKU</span> <strong>{line.get("sku","")}</strong></span>
+                        <span><span style="color:#94a3b8;">Size</span> <strong>{line.get("size","")}</strong></span>
+                        <span><span style="color:#94a3b8;">Rate</span> <strong>₹{line.get("rate",0)}</strong></span>
+                        <span><span style="color:#94a3b8;">GST</span> <strong>{line.get("gst_pct",0)}%</strong></span>
+                        <span><span style="color:#94a3b8;">Line Total</span> <strong>₹{line.get("total",0):,.2f}</strong></span>
+                        <span><span style="color:#94a3b8;">Delivery</span> <strong>{line.get("delivery_date","—")}</strong></span>
+                        <span><span style="color:#94a3b8;">Priority</span> <strong style="color:{pri_color};">{line.get("priority","Normal")}</strong></span>
+                        <span><span style="color:#94a3b8;">Merchant</span> <strong>{line.get("merchant","—")}</strong></span>
+                        <span><span style="color:#94a3b8;">HSN</span> <strong>{line.get("hsn","—")}</strong></span>
+                    </div>''', unsafe_allow_html=True)
+
+                    ql1, ql2, ql3, ql4 = st.columns(4)
+                    with ql1:
+                        st.markdown(f'<div class="card" style="text-align:center;padding:12px;"><div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Ordered</div><div style="font-size:26px;font-weight:800;">{line.get("qty",0)}</div></div>', unsafe_allow_html=True)
+                    with ql2:
+                        prod = st.number_input("Produced Qty", min_value=0, max_value=line["qty"]*2,
+                                               value=line.get("produced_qty",0), key=f"prod_{sel_so}_{i}")
+                    with ql3:
+                        disp = st.number_input("Dispatched Qty", min_value=0, max_value=line["qty"]*2,
+                                               value=line.get("dispatch_qty",0), key=f"disp_{sel_so}_{i}")
+                    with ql4:
+                        rcvd = st.number_input("Received Qty", min_value=0, max_value=line["qty"]*2,
+                                               value=line.get("received_qty",0), key=f"rcvd_{sel_so}_{i}")
+
+                    balance = line["qty"] - rcvd
+                    pct_r   = int(rcvd / line["qty"] * 100) if line["qty"] > 0 else 0
+                    st.markdown(f'''<div style="margin-top:8px;">
+                        <div class="prog-wrap"><div class="prog-fill prog-fill-green" style="width:{pct_r}%;"></div></div>
+                        <div style="font-size:11px;color:#64748b;margin-top:2px;">Received {pct_r}% &nbsp;|&nbsp; Balance: <strong>{balance} pcs</strong></div>
+                    </div>''', unsafe_allow_html=True)
+
+                    if st.button("💾 Save", key=f"save_line_{sel_so}_{i}"):
+                        SS["so_list"][sel_so]["lines"][i]["produced_qty"] = prod
+                        SS["so_list"][sel_so]["lines"][i]["dispatch_qty"]  = disp
+                        SS["so_list"][sel_so]["lines"][i]["received_qty"]  = rcvd
+                        # Auto-update SO status
+                        all_rcvd = all(
+                            l.get("received_qty",0) >= l.get("qty",0)
+                            for l in SS["so_list"][sel_so]["lines"]
+                        )
+                        any_rcvd = any(
+                            l.get("received_qty",0) > 0
+                            for l in SS["so_list"][sel_so]["lines"]
+                        )
+                        if all_rcvd:
+                            SS["so_list"][sel_so]["status"] = "Fully Received"
+                        elif any_rcvd:
+                            SS["so_list"][sel_so]["status"] = "Partially Received"
+                        st.success("✅ Line updated!")
+                        st.rerun()
+        else:
+            st.markdown('<div class="warn-box">This SO has no line items.</div>', unsafe_allow_html=True)
+
+    # ── LIST VIEW (no SO selected) ─────────────────────────────────────────────
+    else:
+        st.markdown('<h1>SO List & Tracking</h1>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box">👆 Kisi bhi SO row ke saamne <strong>Open</strong> button click karo — poori detail khul jaayegi.</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
         # Filters
         fc1, fc2, fc3, fc4 = st.columns(4)
-        with fc1: f_status = st.selectbox("Status", ["All"] + STATUS_LIST)
-        with fc2: f_source = st.selectbox("Source", ["All"] + ORDER_SOURCES)
-        with fc3: f_buyer  = st.selectbox("Buyer",  ["All"] + SS["buyers"])
-        with fc4: f_search = st.text_input("🔍 Search SO #", "")
+        with fc1: f_status = st.selectbox("Status", ["All"] + STATUS_LIST, key="fl_status")
+        with fc2: f_source = st.selectbox("Source", ["All"] + ORDER_SOURCES, key="fl_source")
+        with fc3: f_buyer  = st.selectbox("Buyer",  ["All"] + SS["buyers"], key="fl_buyer")
+        with fc4: f_search = st.text_input("🔍 Search SO # / Buyer", "", key="fl_search")
 
-        rows = []
-        for so_no, so in SS["so_list"].items():
-            if f_status != "All" and so.get("status") != f_status: continue
-            if f_source != "All" and so.get("order_source") != f_source: continue
-            if f_buyer  != "All" and so.get("buyer") != f_buyer: continue
-            if f_search and f_search.lower() not in so_no.lower(): continue
-
-            total_q = sum(l["qty"] for l in so.get("lines", []))
-            rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
-            rows.append({
-                "SO #": so_no,
-                "Date": so.get("so_date", ""),
-                "Buyer": so.get("buyer", ""),
-                "Source": so.get("order_source", ""),
-                "Ref #": so.get("ref_number", ""),
-                "Total Qty": total_q,
-                "Received": rcvd_q,
-                "Pending": total_q - rcvd_q,
-                "Grand Total": f"₹{so.get('grand_total', 0):,.0f}",
-                "Delivery": so.get("delivery_date", ""),
-                "Priority": so.get("priority", ""),
-                "Status": so.get("status", ""),
-            })
-
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        else:
-            st.markdown('<div class="warn-box">No SOs found with selected filters.</div>', unsafe_allow_html=True)
-
-    with lt2:
         if not SS["so_list"]:
-            st.markdown('<div class="warn-box">No SOs created yet.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="warn-box">Koi Sales Order nahi bana abhi tak. "Create Sales Order" se banao.</div>', unsafe_allow_html=True)
         else:
-            sel_so = st.selectbox("Select SO to View / Update", [""] + list(SS["so_list"].keys()))
-            if sel_so and sel_so in SS["so_list"]:
-                so = SS["so_list"][sel_so]
+            filtered_sos = {}
+            for so_no, so in SS["so_list"].items():
+                if f_status != "All" and so.get("status") != f_status: continue
+                if f_source != "All" and so.get("order_source") != f_source: continue
+                if f_buyer  != "All" and so.get("buyer") != f_buyer: continue
+                if f_search and f_search.lower() not in so_no.lower() and f_search.lower() not in so.get("buyer","").lower(): continue
+                filtered_sos[so_no] = so
 
-                # Header info
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f'''<div class="card card-left">
-                        <div class="sec-label">SO Details</div>
-                        <div style="font-family:Inconsolata,monospace;font-size:20px;font-weight:700;">{sel_so}</div>
-                        <div style="font-size:13px;margin-top:6px;">Date: <strong>{so.get("so_date")}</strong></div>
-                        <div style="font-size:13px;">Source: <strong>{so.get("order_source")}</strong></div>
-                        <div style="font-size:13px;">Ref: <strong>{so.get("ref_number","—")}</strong></div>
-                        <div style="margin-top:8px;">{badge(so.get("status","Draft"))}</div>
-                    </div>''', unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f'''<div class="card card-left-blue">
-                        <div class="sec-label">Buyer / Dispatch</div>
-                        <div style="font-size:13px;">Buyer: <strong>{so.get("buyer","—")}</strong></div>
-                        <div style="font-size:13px;">Delivery: <strong>{so.get("delivery_date","—")}</strong></div>
-                        <div style="font-size:13px;">Dispatch: <strong>{so.get("dispatch_date","—")}</strong></div>
-                        <div style="font-size:13px;">Priority: <strong>{so.get("priority","Normal")}</strong></div>
-                        <div style="font-size:13px;">Team: <strong>{so.get("sales_team","—")}</strong></div>
-                    </div>''', unsafe_allow_html=True)
-                with col3:
-                    total_q = sum(l["qty"] for l in so.get("lines", []))
-                    rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
-                    pct = int(rcvd_q / total_q * 100) if total_q > 0 else 0
-                    st.markdown(f'''<div class="card card-left-green">
-                        <div class="sec-label">Qty Tracking</div>
-                        <div style="font-size:13px;">SO Qty: <strong>{total_q}</strong></div>
-                        <div style="font-size:13px;">Received: <strong style="color:#1e6b4a;">{rcvd_q}</strong></div>
-                        <div style="font-size:13px;">Pending: <strong style="color:#c0392b;">{total_q - rcvd_q}</strong></div>
-                        <div style="font-size:13px;">Grand Total: <strong style="color:#d4a853;">₹{so.get("grand_total",0):,.0f}</strong></div>
-                        <div class="prog-wrap" style="margin-top:8px;"><div class="prog-fill prog-fill-green" style="width:{pct}%;"></div></div>
-                        <div style="font-size:11px;color:#888;">{pct}% received</div>
-                    </div>''', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Showing <strong>{len(filtered_sos)}</strong> of <strong>{len(SS["so_list"])}</strong> orders</div>', unsafe_allow_html=True)
 
-                # Status update
-                st.markdown("---")
-                col1, col2 = st.columns(2)
-                with col1:
-                    new_status = st.selectbox("Update Status", STATUS_LIST, index=STATUS_LIST.index(so.get("status","Draft")))
-                with col2:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("✅ Update Status"):
-                        SS["so_list"][sel_so]["status"] = new_status
-                        st.success(f"Status updated to {new_status}!")
+            # Render each SO as a clickable card row
+            for so_no, so in reversed(list(filtered_sos.items())):
+                total_q = sum(l["qty"] for l in so.get("lines", []))
+                rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
+                pct     = int(rcvd_q / total_q * 100) if total_q > 0 else 0
+                status  = so.get("status", "Draft")
+                is_over = so.get("delivery_date","9999") < str(date.today()) and status not in ["Fully Received","Closed","Cancelled"]
+                border_color = "#ef4444" if is_over else "#e2e5ef"
+
+                r1, r2, r3, r4, r5, r6, r7 = st.columns([1.2, 2, 1.5, 1, 1, 1.5, 0.8])
+                with r1:
+                    st.markdown(f'<div style="font-family:JetBrains Mono,monospace;font-weight:700;font-size:14px;color:#c8a96e;padding-top:10px;">{so_no}</div>', unsafe_allow_html=True)
+                with r2:
+                    st.markdown(f'<div style="padding-top:8px;"><div style="font-weight:600;font-size:13px;">{so.get("buyer","—")}</div><div style="font-size:11px;color:#94a3b8;">{so.get("order_source","")}</div></div>', unsafe_allow_html=True)
+                with r3:
+                    overdue_tag = '<span class="tag tag-red">OVERDUE</span>' if is_over else ''
+                    st.markdown(f'<div style="padding-top:8px;font-size:12px;">📅 {so.get("delivery_date","—")}<br>{overdue_tag}</div>', unsafe_allow_html=True)
+                with r4:
+                    st.markdown(f'<div style="padding-top:8px;text-align:center;"><div style="font-size:11px;color:#94a3b8;">Qty</div><div style="font-weight:700;">{total_q}</div></div>', unsafe_allow_html=True)
+                with r5:
+                    st.markdown(f'<div style="padding-top:4px;"><div style="font-size:11px;color:#94a3b8;">Progress</div><div class="prog-wrap"><div class="prog-fill" style="width:{pct}%;"></div></div><div style="font-size:11px;">{pct}%</div></div>', unsafe_allow_html=True)
+                with r6:
+                    st.markdown(f'<div style="padding-top:8px;text-align:center;">{badge(status)}<br><div style="font-size:12px;font-weight:600;color:#c8a96e;margin-top:4px;">₹{so.get("grand_total",0):,.0f}</div></div>', unsafe_allow_html=True)
+                with r7:
+                    if st.button("Open →", key=f"open_{so_no}", use_container_width=True):
+                        st.session_state["selected_so"] = so_no
                         st.rerun()
 
-                # Line-wise tracking
-                st.markdown("#### Line-wise Qty Update (Produced / Dispatched / Received)")
-                for i, line in enumerate(so.get("lines", [])):
-                    with st.expander(f"📦 {line['sku']} — {line['sku_name']} | Ordered: {line['qty']}"):
-                        lc1, lc2, lc3, lc4 = st.columns(4)
-                        with lc1: st.metric("Ordered Qty", line["qty"])
-                        with lc2:
-                            prod = st.number_input("Produced", min_value=0, max_value=line["qty"]*2,
-                                                    value=line.get("produced_qty", 0), key=f"prod_{sel_so}_{i}")
-                        with lc3:
-                            disp = st.number_input("Dispatched", min_value=0, max_value=line["qty"]*2,
-                                                    value=line.get("dispatch_qty", 0), key=f"disp_{sel_so}_{i}")
-                        with lc4:
-                            rcvd = st.number_input("Received", min_value=0, max_value=line["qty"]*2,
-                                                    value=line.get("received_qty", 0), key=f"rcvd_{sel_so}_{i}")
-
-                        balance = line["qty"] - rcvd
-                        pct_r = int(rcvd / line["qty"] * 100) if line["qty"] > 0 else 0
-                        st.markdown(f'''<div style="margin-top:6px;">
-                            <div class="prog-wrap"><div class="prog-fill" style="width:{pct_r}%;"></div></div>
-                            <div style="font-size:11px;color:#888;">Received {pct_r}% | Balance: {balance} pcs</div>
-                        </div>''', unsafe_allow_html=True)
-
-                        if st.button(f"💾 Save Line Update", key=f"save_line_{sel_so}_{i}"):
-                            SS["so_list"][sel_so]["lines"][i]["produced_qty"] = prod
-                            SS["so_list"][sel_so]["lines"][i]["dispatch_qty"]  = disp
-                            SS["so_list"][sel_so]["lines"][i]["received_qty"]  = rcvd
-                            st.success("Line updated!")
-                            st.rerun()
+                st.markdown(f'<hr style="margin:4px 0;border-color:{border_color};">', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # REPORTS
