@@ -15,206 +15,147 @@ st.set_page_config(
 # ─── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
-
-:root {
-    --bg: #0f0f0f;
-    --surface: #1a1a1a;
-    --surface2: #242424;
-    --border: #2e2e2e;
-    --accent: #c8a96e;
-    --accent2: #e8c9a0;
-    --text: #e8e4dc;
-    --text-muted: #888;
-    --green: #4caf82;
-    --red: #e06c75;
-    --blue: #61afef;
-}
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-    background-color: var(--bg);
-    color: var(--text);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background: #f5f6fa;
+    color: #1c1c2e;
 }
-
-.stApp { background: var(--bg); }
+.stApp { background: #f5f6fa; }
 
 /* Sidebar */
 section[data-testid="stSidebar"] {
-    background: var(--surface) !important;
-    border-right: 1px solid var(--border);
+    background: #1c1c2e !important;
+    border-right: none !important;
 }
-section[data-testid="stSidebar"] .stRadio label {
-    color: var(--text) !important;
-}
+section[data-testid="stSidebar"] * { color: #e8e4dc !important; }
+section[data-testid="stSidebar"] hr { border-color: #2e2e4a !important; }
 
 /* Headers */
-h1 { font-family: 'DM Serif Display', serif !important; color: var(--accent) !important; }
-h2, h3 { font-family: 'DM Sans', sans-serif !important; color: var(--text) !important; }
+h1 { font-family: 'Plus Jakarta Sans', sans-serif !important; font-weight: 800 !important; color: #1c1c2e !important; letter-spacing: -0.5px; font-size: 28px !important; }
+h2, h3, h4 { font-family: 'Plus Jakarta Sans', sans-serif !important; font-weight: 700 !important; color: #1c1c2e !important; }
 
 /* Cards */
 .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: #ffffff;
+    border: 1px solid #e2e5ef;
     border-radius: 12px;
-    padding: 20px;
-    margin: 10px 0;
+    padding: 18px 20px;
+    margin: 8px 0;
+    box-shadow: 0 1px 4px rgba(28,28,46,0.06);
 }
-.card-accent {
-    border-left: 3px solid var(--accent);
-}
-
-/* Status badges */
-.badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
-    font-family: 'DM Mono', monospace;
-}
-.badge-done { background: #1a3d2e; color: var(--green); }
-.badge-pending { background: #3d1a1a; color: var(--red); }
-.badge-new { background: #1a2a3d; color: var(--blue); }
-.badge-certified { background: #2d2200; color: var(--accent); }
+.card-accent  { border-left: 3px solid #c8a96e; }
+.card-left    { border-left: 4px solid #c8a96e; }
+.card-left-blue  { border-left: 4px solid #3b82f6; }
+.card-left-green { border-left: 4px solid #10b981; }
+.card-left-red   { border-left: 4px solid #ef4444; }
 
 /* Metric boxes */
 .metric-box {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
+    background: #1c1c2e;
+    border-radius: 12px;
+    padding: 18px 20px;
     text-align: center;
+    color: #f5f6fa;
 }
-.metric-value {
-    font-family: 'DM Serif Display', serif;
-    font-size: 28px;
-    color: var(--accent);
-}
-.metric-label {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 4px;
-}
+.metric-box.green { background: #064e3b; }
+.metric-box.amber { background: #78350f; }
+.metric-box.red   { background: #7f1d1d; }
+.metric-value { font-size: 30px; font-weight: 800; color: #c8a96e; font-family: 'Plus Jakarta Sans', sans-serif; }
+.metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #aaa; margin-top: 4px; }
 
-/* Tables */
-.stDataFrame { border-radius: 8px; overflow: hidden; }
+/* KPI cards (SO module) */
+.kpi-card { background: #1c1c2e; border-radius: 14px; padding: 20px 22px; color: #f5f6fa; }
+.kpi-value { font-size: 32px; font-weight: 800; line-height: 1; }
+.kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.6; margin-top: 5px; }
+.kpi-accent { background: #c8a96e; }
+.kpi-accent .kpi-value, .kpi-accent .kpi-label { color: #1c1c2e; opacity: 1; }
+.kpi-warn   { background: #b91c1c; }
+.kpi-green  { background: #065f46; }
+
+/* Badges */
+.badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:600; font-family:'JetBrains Mono',monospace; }
+.badge-done      { background:#d1fae5; color:#065f46; }
+.badge-pending   { background:#fee2e2; color:#991b1b; }
+.badge-new       { background:#dbeafe; color:#1e40af; }
+.badge-certified { background:#fef3c7; color:#92400e; }
+
+/* SO status badges */
+.status-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; font-family:'JetBrains Mono',monospace; text-transform:uppercase; letter-spacing:0.5px; }
+.s-draft      { background:#f1f5f9; color:#64748b; }
+.s-submitted  { background:#dbeafe; color:#1e40af; }
+.s-approved   { background:#d1fae5; color:#065f46; }
+.s-production { background:#fef3c7; color:#92400e; }
+.s-partial    { background:#ede9fe; color:#5b21b6; }
+.s-received   { background:#d1fae5; color:#065f46; }
+.s-closed     { background:#f1f5f9; color:#475569; }
+.s-cancelled  { background:#fee2e2; color:#991b1b; }
+
+/* Progress bar */
+.prog-wrap  { background:#e2e8f0; border-radius:99px; height:7px; margin:6px 0; overflow:hidden; }
+.prog-fill  { height:100%; border-radius:99px; background:#c8a96e; }
+.prog-fill-red   { background:#ef4444; }
+.prog-fill-green { background:#10b981; }
+
+/* Tags */
+.tag { display:inline-block; background:#f1f5f9; color:#475569; font-size:11px; padding:2px 8px; border-radius:4px; margin:2px; font-family:'JetBrains Mono',monospace; border:1px solid #e2e8f0; }
+.tag-accent { background:#fef3c7; color:#92400e; border-color:#fde68a; }
+.tag-gold   { background:#fef3c7; color:#92400e; border-color:#fde68a; }
+.tag-blue   { background:#dbeafe; color:#1e40af; border-color:#bfdbfe; }
+.tag-red    { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
+
+/* Section number circle */
+.section-number { background:#c8a96e; color:#1c1c2e; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'JetBrains Mono',monospace; }
+
+/* Info/warn boxes */
+.info-box  { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 14px; font-size:13px; color:#1e40af; }
+.warn-box  { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 14px; font-size:13px; color:#92400e; }
+.ok-box    { background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:10px 14px; font-size:13px; color:#065f46; }
+.danger-box{ background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:10px 14px; font-size:13px; color:#991b1b; }
+
+/* Sec label */
+.sec-label { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:2px; color:#c8a96e; margin-bottom:6px; }
 
 /* Inputs */
-.stTextInput > div > div > input,
-.stSelectbox > div > div > div,
-.stNumberInput > div > div > input,
-.stDateInput > div > div > input,
-.stTextArea > div > div > textarea {
-    background: var(--surface2) !important;
-    border: 1px solid var(--border) !important;
-    color: var(--text) !important;
-    border-radius: 6px !important;
+.stTextInput>div>div>input,
+.stSelectbox>div>div>div,
+.stNumberInput>div>div>input,
+.stDateInput>div>div>input,
+.stTextArea>div>div>textarea {
+    background: #ffffff !important;
+    border: 1.5px solid #e2e5ef !important;
+    color: #1c1c2e !important;
+    border-radius: 8px !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
 }
 
 /* Buttons */
-.stButton > button {
-    background: var(--accent) !important;
-    color: #0f0f0f !important;
+.stButton>button {
+    background: #1c1c2e !important;
+    color: #f5f6fa !important;
     border: none !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    font-family: 'DM Sans', sans-serif !important;
-    transition: all 0.2s !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-size: 13px !important;
+    transition: all 0.15s !important;
 }
-.stButton > button:hover {
-    background: var(--accent2) !important;
-    transform: translateY(-1px);
-}
+.stButton>button:hover { background: #c8a96e !important; color: #1c1c2e !important; }
 
 /* Tabs */
-.stTabs [data-baseweb="tab-list"] {
-    background: var(--surface) !important;
-    border-bottom: 1px solid var(--border) !important;
-    gap: 0 !important;
-}
-.stTabs [data-baseweb="tab"] {
-    background: transparent !important;
-    color: var(--text-muted) !important;
-    font-family: 'DM Sans', sans-serif !important;
-    font-weight: 500 !important;
-    border-bottom: 2px solid transparent !important;
-    padding: 10px 20px !important;
-}
-.stTabs [aria-selected="true"] {
-    color: var(--accent) !important;
-    border-bottom-color: var(--accent) !important;
-    background: transparent !important;
-}
+.stTabs [data-baseweb="tab-list"] { background: #ffffff !important; border-bottom: 2px solid #e2e5ef !important; border-radius: 10px 10px 0 0; gap:0 !important; }
+.stTabs [data-baseweb="tab"] { background:transparent !important; color:#94a3b8 !important; font-family:'Plus Jakarta Sans',sans-serif !important; font-weight:600 !important; font-size:13px !important; border-bottom:2px solid transparent !important; padding:10px 18px !important; }
+.stTabs [aria-selected="true"] { color:#1c1c2e !important; border-bottom-color:#c8a96e !important; }
 
 /* Expander */
-.streamlit-expanderHeader {
-    background: var(--surface2) !important;
-    border-radius: 6px !important;
-    color: var(--text) !important;
-    font-weight: 500 !important;
-}
+.streamlit-expanderHeader { background:#ffffff !important; border:1px solid #e2e5ef !important; border-radius:8px !important; color:#1c1c2e !important; font-weight:600 !important; }
 
 /* Divider */
-hr { border-color: var(--border) !important; }
+hr { border-color: #e2e5ef !important; }
 
-/* Tag pill */
-.tag {
-    display: inline-block;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    margin: 2px;
-    font-family: 'DM Mono', monospace;
-}
-.tag-accent {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-/* Section header */
-.section-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 16px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-}
-.section-number {
-    background: var(--accent);
-    color: #0f0f0f;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
-    font-family: 'DM Mono', monospace;
-}
-
-/* Info box */
-.info-box {
-    background: #1a2a1a;
-    border: 1px solid #2e4a2e;
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: var(--green);
-    font-size: 13px;
-}
-.warn-box {
-    background: #2a1a0a;
-    border: 1px solid #4a2e0a;
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: var(--accent);
-    font-size: 13px;
-}
+/* Dataframe */
+.stDataFrame { border-radius:8px; overflow:hidden; border:1px solid #e2e5ef; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -336,13 +277,47 @@ def next_demand():
     SS["demand_counter"] += 1
     return n
 
+def get_sku_info(sku):
+    """Get SKU info from Item Master items, falling back to demo skus dict"""
+    items = st.session_state.get("items", {})
+    if sku in items:
+        item = items[sku]
+        return {
+            "name": item.get("name", sku),
+            "parent": item.get("parent", ""),
+            "size": sku.split("-")[-1] if "-" in sku else "",
+            "price": item.get("selling_price", 0),
+            "stock": item.get("stock", 0),
+            "reserved": item.get("reserved", 0),
+            "in_production": item.get("in_production", 0),
+        }
+    # fallback demo data
+    return SS["skus"].get(sku, {"name": sku, "parent": "", "size": "", "price": 0, "stock": 0, "reserved": 0, "in_production": 0})
+
+def get_all_skus():
+    """Return all SKUs from Item Master (items that are size variants or FG with no children)"""
+    items = st.session_state.get("items", {})
+    so_skus = {}
+    for code, item in items.items():
+        # Include size variants (have a parent) and standalone FG items
+        if item.get("parent") or (item.get("item_type","") == "Finished Goods (FG)" and not item.get("sizes")):
+            so_skus[code] = item.get("name", code)
+    # Merge with demo skus for fallback
+    for k, v in SS["skus"].items():
+        if k not in so_skus:
+            so_skus[k] = v.get("name", k)
+    return so_skus
+
 def avg_daily_sale(sku):
-    return round((SS["skus"][sku]["stock"] * 0.08), 1) if sku in SS["skus"] else 0
+    info = get_sku_info(sku)
+    stock = info.get("stock", 0)
+    return round(stock * 0.08, 1)
 
 def running_days(sku):
-    ads = avg_daily_sale(sku)
-    stock = SS["skus"].get(sku, {}).get("stock", 0) - SS["skus"].get(sku, {}).get("reserved", 0)
-    return round(stock / ads, 1) if ads > 0 else 999
+    info = get_sku_info(sku)
+    ads  = avg_daily_sale(sku)
+    avail = info.get("stock", 0) - info.get("reserved", 0)
+    return round(avail / ads, 1) if ads > 0 else 999
 
 def so_qty_for_sku(sku):
     total = 0
@@ -1184,13 +1159,15 @@ if nav_so == "📊 SO Dashboard":
     with col2:
         st.markdown("#### SKU Running Days Alert")
         alert_rows = []
-        for sku, info in SS["skus"].items():
+        _all = get_all_skus()
+        for sku in list(_all.keys())[:20]:
+            _i = get_sku_info(sku)
             rd = running_days(sku)
-            alert_rows.append({"SKU": sku, "Stock": info["stock"], "Running Days": rd})
+            alert_rows.append({"SKU": sku, "Stock": _i.get("stock",0), "Running Days": rd})
         alert_rows.sort(key=lambda x: x["Running Days"])
         for row in alert_rows[:6]:
             rd = row["Running Days"]
-            color = "#c0392b" if rd < 7 else "#d4a853" if rd < 15 else "#1e6b4a"
+            color = "#ef4444" if rd < 7 else "#d97706" if rd < 15 else "#059669"
             pct = min(rd / 30 * 100, 100)
             fill_cls = "prog-fill-red" if rd < 7 else ""
             st.markdown(f'''<div class="card" style="padding:12px 16px;margin:4px 0;">
@@ -1250,10 +1227,13 @@ elif nav_so == "📋 Demand Management":
         with st.expander("➕ Add SKU to Demand", expanded=True):
             dc1, dc2, dc3 = st.columns(3)
             with dc1:
-                d_sku = st.selectbox("SKU *", [""] + list(SS["skus"].keys()), key="d_sku")
+                _all_skus_d = get_all_skus()
+                d_sku = st.selectbox("SKU *", [""] + list(_all_skus_d.keys()),
+                                     format_func=lambda x: f"{x} – {_all_skus_d.get(x,'')}" if x else "— Select SKU —",
+                                     key="d_sku")
                 if d_sku:
-                    info = SS["skus"][d_sku]
-                    st.markdown(f'<div class="ok-box">Stock: {info["stock"]} | Reserved: {info["reserved"]} | Running Days: {running_days(d_sku)}</div>', unsafe_allow_html=True)
+                    _di = get_sku_info(d_sku)
+                    st.markdown(f'<div class="ok-box">Stock: {_di.get("stock",0)} | Reserved: {_di.get("reserved",0)} | Running Days: {running_days(d_sku)}</div>', unsafe_allow_html=True)
             with dc2:
                 d_qty     = st.number_input("Demand Qty *", min_value=0, step=10, key="d_qty")
                 d_uom     = st.selectbox("UOM", ["Pieces", "Set", "Dozen"], key="d_uom")
@@ -1264,9 +1244,9 @@ elif nav_so == "📋 Demand Management":
                 if d_sku and d_qty > 0:
                     st.session_state[dem_lines_key].append({
                         "sku": d_sku,
-                        "sku_name": SS["skus"][d_sku]["name"],
-                        "parent": SS["skus"][d_sku]["parent"],
-                        "size": SS["skus"][d_sku]["size"],
+                        "sku_name": get_sku_info(d_sku).get("name", d_sku),
+                        "parent": get_sku_info(d_sku).get("parent", ""),
+                        "size": d_sku.split("-")[-1] if "-" in d_sku else "",
                         "demand_qty": d_qty,
                         "so_qty": 0,
                         "pending_qty": d_qty,
@@ -1396,7 +1376,6 @@ elif nav_so == "➕ Create Sales Order":
                 ref_number = st.text_input(f"{ref_label} *", placeholder=f"Enter {ref_label}")
 
             ref_date       = st.date_input("Reference Date", value=date.today(), key="_so_refdate")
-            priority       = st.selectbox("Priority", ["Normal", "High", "Urgent"], key="_so_priority")
             payment_terms  = st.selectbox("Payment Terms", SS["payment_terms"], key="_so_pay")
 
         st.markdown("---")
@@ -1427,35 +1406,49 @@ elif nav_so == "➕ Create Sales Order":
                         <span style="margin-left:8px;font-size:12px;font-weight:700;color:{color};">Pending: {pending}</span>
                     </div>''', unsafe_allow_html=True)
 
+        # Build SKU list from Item Master
+        all_skus = get_all_skus()
+        # Build merchant list from Item Master merchants
+        im_merchants = st.session_state.get("merchants", {})
+        merchant_opts = [""] + [f"{k} – {v}" for k, v in im_merchants.items()]
+
         with st.expander("➕ Add SKU Line", expanded=len(st.session_state["new_so_lines"]) == 0):
+            if not all_skus:
+                st.markdown('<div class="warn-box">⚠️ Item Master mein koi SKU nahi mila. Pehle Item Master mein Finished Goods items banao aur size variants generate karo.</div>', unsafe_allow_html=True)
+
             lc1, lc2, lc3 = st.columns(3)
             with lc1:
-                line_sku = st.selectbox("SKU *", [""] + list(SS["skus"].keys()), key="line_sku")
-                if line_sku and line_sku in SS["skus"]:
-                    info = SS["skus"][line_sku]
+                line_sku = st.selectbox("SKU *", [""] + list(all_skus.keys()),
+                                         format_func=lambda x: f"{x} – {all_skus.get(x,'')}" if x else "— Select SKU —",
+                                         key="line_sku")
+                if line_sku:
+                    info = get_sku_info(line_sku)
                     rd = running_days(line_sku)
-                    rd_color = "#c0392b" if rd < 7 else "#d4a853" if rd < 15 else "#1e6b4a"
-                    st.markdown(f'''<div class="card" style="padding:10px;margin:4px 0;">
+                    rd_color = "#ef4444" if rd < 7 else "#d97706" if rd < 15 else "#059669"
+                    st.markdown(f'''<div class="card" style="padding:10px 12px;margin:4px 0;">
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
-                            <div><span style="color:#888;">Current Stock</span><br><strong>{info["stock"]}</strong></div>
-                            <div><span style="color:#888;">Reserved</span><br><strong>{info["reserved"]}</strong></div>
-                            <div><span style="color:#888;">In Production</span><br><strong>{info["in_production"]}</strong></div>
-                            <div><span style="color:#888;">Running Days</span><br><strong style="color:{rd_color};">{rd}</strong></div>
-                            <div><span style="color:#888;">Avg Daily Sale</span><br><strong>{avg_daily_sale(line_sku)}</strong></div>
-                            <div><span style="color:#888;">Available</span><br><strong>{info["stock"] - info["reserved"]}</strong></div>
+                            <div><span style="color:#94a3b8;">Current Stock</span><br><strong>{info.get("stock",0)}</strong></div>
+                            <div><span style="color:#94a3b8;">Reserved</span><br><strong>{info.get("reserved",0)}</strong></div>
+                            <div><span style="color:#94a3b8;">In Production</span><br><strong>{info.get("in_production",0)}</strong></div>
+                            <div><span style="color:#94a3b8;">Running Days</span><br><strong style="color:{rd_color};">{rd}</strong></div>
+                            <div><span style="color:#94a3b8;">Avg Daily Sale</span><br><strong>{avg_daily_sale(line_sku)}</strong></div>
+                            <div><span style="color:#94a3b8;">Available</span><br><strong>{info.get("stock",0) - info.get("reserved",0)}</strong></div>
                         </div>
                     </div>''', unsafe_allow_html=True)
                 line_qty = st.number_input("Quantity *", min_value=0, step=10, key="line_qty")
+                line_priority = st.selectbox("Priority", ["Normal", "High", "Urgent"], key="line_priority")
 
             with lc2:
-                line_uom  = st.selectbox("UOM", ["Pieces", "Set", "Dozen"], key="line_uom")
-                line_rate = st.number_input("Rate (₹)", min_value=0.0, step=10.0,
-                                             value=float(SS["skus"].get(line_sku, {}).get("price", 0)) if line_sku else 0.0,
-                                             key="line_rate")
-                line_gst  = st.selectbox("GST %", GST_RATES, index=2, key="line_gst")
+                line_uom   = st.selectbox("UOM", ["Pieces", "Set", "Dozen"], key="line_uom")
+                _sku_price = float(get_sku_info(line_sku).get("price", 0)) if line_sku else 0.0
+                line_rate  = st.number_input("Rate (₹)", min_value=0.0, step=10.0, value=_sku_price, key="line_rate")
+                line_gst   = st.selectbox("GST %", GST_RATES, index=2, key="line_gst")
+                line_merchant = st.selectbox("Merchant Code", merchant_opts, key="line_merchant")
 
             with lc3:
-                line_hsn     = st.text_input("HSN Code", key="line_hsn", placeholder="e.g. 6211")
+                # Auto-fill HSN from item master
+                _hsn_default = st.session_state.get("items", {}).get(line_sku, {}).get("hsn", "") if line_sku else ""
+                line_hsn     = st.text_input("HSN Code", value=_hsn_default, key="line_hsn")
                 line_del     = st.date_input("Line Delivery Date", value=date.today() + timedelta(days=21), key="line_del")
                 line_remarks = st.text_input("Remarks", key="line_remarks")
 
@@ -1463,34 +1456,37 @@ elif nav_so == "➕ Create Sales Order":
                 if line_sku and line_qty > 0:
                     taxable  = line_qty * line_rate
                     gst_amt  = taxable * line_gst / 100
+                    _info    = get_sku_info(line_sku)
                     st.session_state["new_so_lines"].append({
-                        "sku": line_sku,
-                        "sku_name": SS["skus"].get(line_sku, {}).get("name", ""),
-                        "parent": SS["skus"].get(line_sku, {}).get("parent", ""),
-                        "size": SS["skus"].get(line_sku, {}).get("size", ""),
-                        "qty": line_qty,
-                        "uom": line_uom,
-                        "rate": line_rate,
-                        "gst_pct": line_gst,
-                        "hsn": line_hsn,
-                        "taxable": round(taxable, 2),
-                        "gst_amount": round(gst_amt, 2),
-                        "total": round(taxable + gst_amt, 2),
-                        "delivery_date": str(line_del),
+                        "sku":          line_sku,
+                        "sku_name":     _info.get("name", line_sku),
+                        "parent":       _info.get("parent", ""),
+                        "size":         line_sku.split("-")[-1] if "-" in line_sku else "",
+                        "qty":          line_qty,
+                        "uom":          line_uom,
+                        "rate":         line_rate,
+                        "gst_pct":      line_gst,
+                        "hsn":          line_hsn,
+                        "merchant":     line_merchant,
+                        "priority":     line_priority,
+                        "taxable":      round(taxable, 2),
+                        "gst_amount":   round(gst_amt, 2),
+                        "total":        round(taxable + gst_amt, 2),
+                        "delivery_date":str(line_del),
                         "produced_qty": 0, "dispatch_qty": 0, "received_qty": 0,
-                        "remarks": line_remarks,
+                        "remarks":      line_remarks,
                     })
                     st.rerun()
 
         so_lines = st.session_state["new_so_lines"]
         if so_lines:
             df_lines = pd.DataFrame(so_lines)
-            show = ["sku","sku_name","size","qty","uom","rate","gst_pct","taxable","gst_amount","total","delivery_date"]
+            show = ["sku","sku_name","size","priority","merchant","qty","uom","rate","gst_pct","taxable","total","delivery_date","remarks"]
             show = [c for c in show if c in df_lines.columns]
             st.dataframe(df_lines[show].rename(columns={
-                "sku":"SKU","sku_name":"Name","size":"Size","qty":"Qty","uom":"UOM",
-                "rate":"Rate(₹)","gst_pct":"GST%","taxable":"Taxable(₹)",
-                "gst_amount":"GST Amt(₹)","total":"Line Total(₹)","delivery_date":"Delivery"
+                "sku":"SKU","sku_name":"Name","size":"Size","priority":"Priority","merchant":"Merchant",
+                "qty":"Qty","uom":"UOM","rate":"Rate(₹)","gst_pct":"GST%",
+                "taxable":"Taxable(₹)","total":"Line Total(₹)","delivery_date":"Delivery","remarks":"Remarks"
             }), use_container_width=True, hide_index=True)
 
             del_line = st.number_input("Delete line # (1-based, 0=none)", min_value=0, max_value=len(so_lines), step=1, key="del_so_line")
@@ -1781,8 +1777,8 @@ elif nav_so == "📈 SO Reports":
         rows = [{"SKU": k, "Name": v["name"], "Total Ordered": v["total_ordered"],
                  "Total Received": v["total_received"],
                  "Pending": v["total_ordered"] - v["total_received"],
-                 "Current Stock": SS["skus"].get(k, {}).get("stock", "—"),
-                 "Running Days": running_days(k) if k in SS["skus"] else "—"}
+                 "Current Stock": get_sku_info(k).get("stock", "—"),
+                 "Running Days": running_days(k)}
                 for k, v in sku_summary.items()]
         if rows:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
