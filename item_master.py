@@ -1354,7 +1354,6 @@ elif nav_so == "➕ Create Sales Order":
 
         # Build SKU list from Item Master
         all_skus = get_all_skus()
-        # Build merchant list from Item Master merchants
         im_merchants = st.session_state.get("merchants", {})
         merchant_opts = [""] + [f"{k} – {v}" for k, v in im_merchants.items()]
 
@@ -1389,7 +1388,21 @@ elif nav_so == "➕ Create Sales Order":
                 _sku_price = float(get_sku_info(line_sku).get("price", 0)) if line_sku else 0.0
                 line_rate  = st.number_input("Rate (₹)", min_value=0.0, step=10.0, value=_sku_price, key="line_rate")
                 line_gst   = st.selectbox("GST %", GST_RATES, index=2, key="line_gst")
-                line_merchant = st.selectbox("Merchant Code", merchant_opts, key="line_merchant")
+
+                # Auto-fill merchant from Item Master — editable
+                _item_merchant_raw = st.session_state.get("items", {}).get(line_sku, {}).get("merchant", "") if line_sku else ""
+                # Extract just the code part (e.g. "MC001 – Amit Textiles" → "MC001")
+                _item_merchant_code = _item_merchant_raw.split(" – ")[0] if " – " in _item_merchant_raw else _item_merchant_raw
+                # Find matching option index in dropdown
+                _merchant_default_idx = 0
+                for _mi, _mopt in enumerate(merchant_opts):
+                    if _mopt.startswith(_item_merchant_code) and _item_merchant_code:
+                        _merchant_default_idx = _mi
+                        break
+                line_merchant = st.selectbox("Merchant Code", merchant_opts,
+                                              index=_merchant_default_idx,
+                                              key="line_merchant",
+                                              help="Item Master se auto-filled — zaroorat ho toh change kar sakte hain")
 
             with lc3:
                 # Auto-fill HSN from item master
