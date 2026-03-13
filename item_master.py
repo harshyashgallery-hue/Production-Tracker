@@ -372,61 +372,7 @@ if nav == "📊 Item Master Dashboard":
             <div class="metric-label">Certified BOMs</div>
         </div>''', unsafe_allow_html=True)
     
-    st.markdown("---")
-    
-    # Requirements Tracker
-    st.markdown("### 📋 Requirements Status Tracker")
-    
-    requirements = [
-        ("Item Types / Categories", "DONE", "7 types supported with future flexibility"),
-        ("Finished Goods Item Creation", "DONE", "All basic fields included"),
-        ("Item Photo Upload", "PENDING", "UI placeholder ready"),
-        ("Attachment Upload (CAD, Design, Tech Pack etc.)", "PENDING", "File upload UI needed"),
-        ("Routing / Process Flow", "DONE", "Order-wise routing with drag-drop sequence"),
-        ("Size Variant System (Automatic)", "DONE", "Auto SKU generation on size selection"),
-        ("BOM – All Fields", "DONE", "All 9 fields available"),
-        ("BOM from Item Master components", "DONE", "Components must be pre-created in Item Master"),
-        ("Size-wise BOM Logic", "DONE", "Common BOM + Size-wise BOM both supported"),
-        ("BOM Line Display", "DONE", "Lines visible like item master rows"),
-        ("BOM Certification / Approval", "DONE", "Admin-only certification toggle"),
-        ("Multi-Level BOM (FG → SFG → RM)", "DONE", "Hierarchy fully supported"),
-        ("BOM Costing Calculation", "DONE", "Auto calculation of all cost heads"),
-        ("Process Cost in BOM Costing", "NEW", "Process cost + CMT cost field added"),
-        ("Parent-Child Item Structure", "DONE", "Parent item links to all size variants"),
-        ("BOM Reuse (Copy Feature)", "DONE", "Copy BOM from existing items"),
-        ("Image Storage", "PENDING", "Front/Back/Detail image upload"),
-        ("Multiple BOM per Item", "DONE", "BOM-1, BOM-2 for diff fabric widths"),
-        ("Buyer-wise Packaging", "DONE", "Packaging define per buyer per item"),
-        ("Merchant Code Master", "DONE", "Create merchants before item creation"),
-    ]
-    
-    done = sum(1 for r in requirements if r[1] == "DONE")
-    pending = sum(1 for r in requirements if r[1] == "PENDING")
-    new = sum(1 for r in requirements if r[1] == "NEW")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f'<span class="badge badge-done">✓ DONE: {done}</span>', unsafe_allow_html=True)
-    with col2:
-        st.markdown(f'<span class="badge badge-pending">⏳ PENDING: {pending}</span>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(f'<span class="badge badge-new">★ NEW: {new}</span>', unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    for req, status, note in requirements:
-        badge_class = {"DONE": "badge-done", "PENDING": "badge-pending", "NEW": "badge-new"}[status]
-        badge_text = {"DONE": "✓ DONE", "PENDING": "⏳ PENDING", "NEW": "★ NEW"}[status]
-        st.markdown(f'''
-        <div class="card" style="padding:12px 16px; margin:4px 0;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <span style="font-weight:500; font-size:14px;">{req}</span>
-                    <div style="color:var(--text-muted); font-size:12px; margin-top:2px;">{note}</div>
-                </div>
-                <span class="badge {badge_class}">{badge_text}</span>
-            </div>
-        </div>''', unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CREATE ITEM
