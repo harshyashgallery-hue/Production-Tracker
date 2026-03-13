@@ -647,130 +647,199 @@ elif nav == "🔩 BOM Management":
                 st.markdown("#### 📋 Copy from Existing BOM")
                 copy_from = st.selectbox("Copy BOM from item:", ["— Don't copy —"] + existing_boms)
             
-            st.markdown("#### BOM Lines")
-            st.caption("Add each component below – components must exist in Item Master")
-            
-            # BOM lines state
-            bom_key = f"bom_lines_{target_item}"
+            # ── Session state keys ──────────────────────────────────────────
+            bom_key  = f"bom_lines_{target_item}"
+            proc_key = f"proc_lines_{target_item}"
+
             if bom_key not in st.session_state:
-                if 'copy_from' in dir() and copy_from != "— Don't copy —" and copy_from in st.session_state["boms"]:
-                    st.session_state[bom_key] = st.session_state["boms"][copy_from].get("lines", []).copy()
+                if 'copy_from' in dir() and copy_from != "\u2014 Don't copy \u2014" and copy_from in st.session_state["boms"]:
+                    st.session_state[bom_key]  = st.session_state["boms"][copy_from].get("lines", []).copy()
+                    st.session_state[proc_key] = st.session_state["boms"][copy_from].get("process_lines", []).copy()
                 else:
-                    st.session_state[bom_key] = []
-            
-            # Add new line
-            with st.expander("➕ Add BOM Line", expanded=len(st.session_state[bom_key]) == 0):
-                col1, col2, col3 = st.columns(3)
-                with col1:
+                    st.session_state[bom_key]  = []
+                    st.session_state[proc_key] = []
+
+            if proc_key not in st.session_state:
+                st.session_state[proc_key] = []
+
+            # ================================================================
+            # SECTION 1 - MATERIAL / COMPONENT LINES
+            # ================================================================
+            st.markdown("#### 🧵 Material / Component Lines")
+            st.caption("Item Master mein pehle se bane hue components yahan add karein")
+
+            with st.expander("➕ Add Material Line", expanded=len(st.session_state[bom_key]) == 0):
+                c1, c2, c3 = st.columns(3)
+                with c1:
                     component_items = {k: v["name"] for k, v in st.session_state["items"].items() if k != target_item}
                     if component_items:
-                        comp_code = st.selectbox("Component Item *", 
+                        comp_code = st.selectbox("Component Item *",
                                                   [""] + [f"{k} – {v}" for k, v in component_items.items()],
                                                   key="new_comp")
                     else:
-                        st.markdown('<div class="warn-box">No components in Item Master. Create Raw Materials / Accessories first.</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="warn-box">No components in Item Master. Create Raw Materials first.</div>', unsafe_allow_html=True)
                         comp_code = ""
-                    
-                    qty = st.number_input("Quantity *", min_value=0.0, step=0.1, key="new_qty")
+                    qty  = st.number_input("Quantity *", min_value=0.0, step=0.1, key="new_qty")
                     unit = st.selectbox("Unit", UNITS, key="new_unit")
-                
-                with col2:
-                    rate = st.number_input("Rate (₹/unit)", min_value=0.0, step=1.0, key="new_rate")
+                with c2:
+                    rate      = st.number_input("Rate (₹/unit)", min_value=0.0, step=1.0, key="new_rate")
                     shrinkage = st.number_input("Shrinkage %", min_value=0.0, max_value=100.0, step=0.5, key="new_shrink")
-                    wastage = st.number_input("Wastage %", min_value=0.0, max_value=100.0, step=0.5, key="new_waste")
-                
-                with col3:
-                    processes = st.session_state["processes"]
-                    process_used = st.selectbox("Process Used In", ["—"] + processes, key="new_process")
-                    remarks = st.text_input("Remarks", key="new_remarks")
-                
-                if st.button("➕ Add Line to BOM"):
+                    wastage   = st.number_input("Wastage %",   min_value=0.0, max_value=100.0, step=0.5, key="new_waste")
+                with c3:
+                    process_used = st.selectbox("Used In Process", ["\u2014"] + st.session_state["processes"], key="new_process")
+                    remarks      = st.text_input("Remarks", key="new_remarks")
+
+                if st.button("➕ Add Material Line"):
                     if comp_code and qty > 0:
                         actual_qty = qty * (1 + shrinkage/100) * (1 + wastage/100)
-                        amount = actual_qty * rate
-                        
-                        comp_key = comp_code.split(" – ")[0] if " – " in comp_code else comp_code
-                        comp_name = component_items.get(comp_key, comp_key)
-                        
-                        line = {
-                            "item_code": comp_key,
-                            "item_name": comp_name,
-                            "item_type": st.session_state["items"].get(comp_key, {}).get("item_type", ""),
-                            "qty": qty,
-                            "unit": unit,
-                            "rate": rate,
-                            "shrinkage": shrinkage,
-                            "wastage": wastage,
+                        amount     = actual_qty * rate
+                        ck = comp_code.split(" – ")[0] if " – " in comp_code else comp_code
+                        st.session_state[bom_key].append({
+                            "line_type": "Material",
+                            "item_code": ck,
+                            "item_name": component_items.get(ck, ck),
+                            "item_type": st.session_state["items"].get(ck, {}).get("item_type", ""),
+                            "qty": qty, "unit": unit, "rate": rate,
+                            "shrinkage": shrinkage, "wastage": wastage,
                             "actual_qty": round(actual_qty, 3),
                             "amount": round(amount, 2),
-                            "process": process_used,
-                            "remarks": remarks,
-                        }
-                        st.session_state[bom_key].append(line)
+                            "process": process_used, "remarks": remarks,
+                        })
                         st.rerun()
-            
-            # Display BOM lines
-            if st.session_state[bom_key]:
-                st.markdown("#### Current BOM Lines")
-                df_bom = pd.DataFrame(st.session_state[bom_key])
-                display_cols = ["item_code", "item_name", "item_type", "qty", "unit", "rate", "shrinkage", "actual_qty", "amount", "process", "remarks"]
-                available_cols = [c for c in display_cols if c in df_bom.columns]
-                st.dataframe(df_bom[available_cols].rename(columns={
-                    "item_code": "Code", "item_name": "Component", "item_type": "Type",
-                    "qty": "Qty", "unit": "Unit", "rate": "Rate (₹)", "shrinkage": "Shrink%",
-                    "actual_qty": "Net Qty", "amount": "Amount (₹)", "process": "Process", "remarks": "Remarks"
+
+            mat_lines = st.session_state[bom_key]
+            if mat_lines:
+                df_mat = pd.DataFrame(mat_lines)
+                sc = [x for x in ["item_code","item_name","item_type","qty","unit","rate","shrinkage","actual_qty","amount","process","remarks"] if x in df_mat.columns]
+                st.dataframe(df_mat[sc].rename(columns={
+                    "item_code":"Code","item_name":"Component","item_type":"Type",
+                    "qty":"Qty","unit":"Unit","rate":"Rate(₹)","shrinkage":"Shrink%",
+                    "actual_qty":"Net Qty","amount":"Amount(₹)","process":"Process","remarks":"Remarks"
                 }), use_container_width=True, hide_index=True)
-                
-                total = sum(l.get("amount", 0) for l in st.session_state[bom_key])
-                st.markdown(f'<div class="card card-accent" style="text-align:right;"><span style="font-size:18px; color:#c8a96e;">Total BOM Cost: ₹{total:,.2f}</span></div>', unsafe_allow_html=True)
-            
-            # Process Cost & CMT
+                del_mat = st.number_input("Delete material line # (1-based, 0=none)", min_value=0, max_value=len(mat_lines), step=1, key="del_mat")
+                if st.button("🗑 Delete Material Line") and del_mat > 0:
+                    st.session_state[bom_key].pop(del_mat - 1); st.rerun()
+
+            mat_total = sum(l.get("amount", 0) for l in mat_lines)
+            st.markdown(f'<div class="card" style="text-align:right;padding:10px 16px;">Material Total: <strong style="color:#c8a96e;">₹{mat_total:,.2f}</strong></div>', unsafe_allow_html=True)
+
             st.markdown("---")
-            st.markdown("#### 💰 Additional Costs (Process Cost + CMT)")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                process_cost = st.number_input("Process Cost (₹)", min_value=0.0, step=5.0, 
-                                                help="Printing, Dyeing, Embroidery etc. process cost")
-            with col2:
-                cmt_cost = st.number_input("CMT Cost (₹)", min_value=0.0, step=5.0,
-                                            help="Cut-Make-Trim / Job work cost")
-            with col3:
-                other_cost = st.number_input("Other Cost (₹)", min_value=0.0, step=5.0)
-            
-            bom_lines = st.session_state.get(bom_key, [])
-            component_total = sum(l.get("amount", 0) for l in bom_lines)
-            grand_total = component_total + process_cost + cmt_cost + other_cost
-            
-            if bom_lines or process_cost or cmt_cost:
-                st.markdown(f'''<div class="card">
-                    <div style="display:flex; gap:20px; flex-wrap:wrap;">
-                        <div><span style="color:var(--text-muted); font-size:12px;">Component Cost</span><br><strong>₹{component_total:,.2f}</strong></div>
-                        <div><span style="color:var(--text-muted); font-size:12px;">Process Cost</span><br><strong>₹{process_cost:,.2f}</strong></div>
-                        <div><span style="color:var(--text-muted); font-size:12px;">CMT Cost</span><br><strong>₹{cmt_cost:,.2f}</strong></div>
-                        <div><span style="color:var(--text-muted); font-size:12px;">Other Cost</span><br><strong>₹{other_cost:,.2f}</strong></div>
-                        <div style="margin-left:auto;"><span style="color:var(--text-muted); font-size:12px;">TOTAL PRODUCTION COST</span><br><span style="font-size:22px; color:var(--accent); font-family:'DM Serif Display', serif;">₹{grand_total:,.2f}</span></div>
-                    </div>
-                </div>''', unsafe_allow_html=True)
-            
+
+            # ================================================================
+            # SECTION 2 - PROCESS COST LINES
+            # ================================================================
+            st.markdown("#### ⚙️ Process Cost Lines")
+            st.caption("Har process ki alag rate daalein — jaise Cutting ₹2/piece, Stitching ₹15/piece")
+
+            with st.expander("➕ Add Process Cost Line", expanded=len(st.session_state[proc_key]) == 0):
+                p1, p2, p3 = st.columns(3)
+                with p1:
+                    proc_name = st.selectbox("Process *", [""] + st.session_state["processes"], key="new_proc_name")
+                    proc_qty  = st.number_input("Qty / Pieces", min_value=0.0, value=1.0, step=1.0, key="new_proc_qty")
+                with p2:
+                    proc_unit = st.selectbox("Unit", ["Per Piece","Per Meter","Per KG","Per Set","Lump Sum"], key="new_proc_unit")
+                    proc_rate = st.number_input("Rate (₹)", min_value=0.0, step=0.5, key="new_proc_rate")
+                with p3:
+                    proc_vendor  = st.text_input("Vendor / Job Worker", key="new_proc_vendor", placeholder="e.g. Sharma Cutting Unit")
+                    proc_remarks = st.text_input("Remarks", key="new_proc_remarks")
+
+                if st.button("➕ Add Process Line"):
+                    if proc_name:
+                        st.session_state[proc_key].append({
+                            "line_type": "Process",
+                            "process":   proc_name,
+                            "qty":       proc_qty,
+                            "unit":      proc_unit,
+                            "rate":      proc_rate,
+                            "amount":    round(proc_qty * proc_rate, 2),
+                            "vendor":    proc_vendor,
+                            "remarks":   proc_remarks,
+                        })
+                        st.rerun()
+
+            proc_lines = st.session_state[proc_key]
+            if proc_lines:
+                df_proc = pd.DataFrame(proc_lines)
+                sp = [x for x in ["process","qty","unit","rate","amount","vendor","remarks"] if x in df_proc.columns]
+                st.dataframe(df_proc[sp].rename(columns={
+                    "process":"Process","qty":"Qty","unit":"Unit",
+                    "rate":"Rate(₹)","amount":"Amount(₹)","vendor":"Vendor","remarks":"Remarks"
+                }), use_container_width=True, hide_index=True)
+                del_proc = st.number_input("Delete process line # (1-based, 0=none)", min_value=0, max_value=len(proc_lines), step=1, key="del_proc")
+                if st.button("🗑 Delete Process Line") and del_proc > 0:
+                    st.session_state[proc_key].pop(del_proc - 1); st.rerun()
+
+            proc_total = sum(l.get("amount", 0) for l in proc_lines)
+            st.markdown(f'<div class="card" style="text-align:right;padding:10px 16px;">Process Cost Total: <strong style="color:#c8a96e;">₹{proc_total:,.2f}</strong></div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # ================================================================
+            # SECTION 3 - CMT + OTHER COSTS
+            # ================================================================
+            st.markdown("#### 💼 CMT & Other Costs")
+            cm1, cm2 = st.columns(2)
+            with cm1:
+                cmt_cost   = st.number_input("CMT Cost (₹)", min_value=0.0, step=5.0,
+                                              help="Overall job work cost (agar process-wise nahi dalna)")
+            with cm2:
+                other_cost = st.number_input("Other Cost (₹)", min_value=0.0, step=5.0,
+                                              help="Transport, overhead etc.")
+
+            grand_total = mat_total + proc_total + cmt_cost + other_cost
+
+            st.markdown(f"""
+<div class="card" style="margin-top:12px;">
+  <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Material</div>
+      <div style="font-size:20px;font-weight:600;">₹{mat_total:,.2f}</div>
+    </div>
+    <div style="color:#555;font-size:20px;align-self:center;">+</div>
+    <div>
+      <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Process</div>
+      <div style="font-size:20px;font-weight:600;">₹{proc_total:,.2f}</div>
+    </div>
+    <div style="color:#555;font-size:20px;align-self:center;">+</div>
+    <div>
+      <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px;">CMT</div>
+      <div style="font-size:20px;font-weight:600;">₹{cmt_cost:,.2f}</div>
+    </div>
+    <div style="color:#555;font-size:20px;align-self:center;">+</div>
+    <div>
+      <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Other</div>
+      <div style="font-size:20px;font-weight:600;">₹{other_cost:,.2f}</div>
+    </div>
+    <div style="margin-left:auto;text-align:right;">
+      <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Total Production Cost</div>
+      <div style="font-size:30px;font-weight:700;color:#c8a96e;">₹{grand_total:,.2f}</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
             # Save BOM
             st.markdown("---")
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("💾 Save BOM (Draft)", use_container_width=True):
                     st.session_state["boms"][target_item] = {
-                        "item_code": target_item,
-                        "bom_number": bom_number,
-                        "description": bom_desc,
-                        "bom_type": bom_type,
-                        "lines": st.session_state.get(bom_key, []),
-                        "process_cost": process_cost,
-                        "cmt_cost": cmt_cost,
-                        "other_cost": other_cost,
-                        "total": grand_total,
-                        "status": "Draft",
-                        "created_at": datetime.now().isoformat(),
+                        "item_code":     target_item,
+                        "bom_number":    bom_number,
+                        "description":   bom_desc,
+                        "bom_type":      bom_type,
+                        "lines":         st.session_state.get(bom_key, []),
+                        "process_lines": st.session_state.get(proc_key, []),
+                        "cmt_cost":      cmt_cost,
+                        "other_cost":    other_cost,
+                        "mat_total":     mat_total,
+                        "proc_total":    proc_total,
+                        "total":         grand_total,
+                        "status":        "Draft",
+                        "created_at":    datetime.now().isoformat(),
                     }
                     st.success("✅ BOM saved as Draft!")
+
             with col2:
                 if st.button("✅ Certify BOM (Admin Only)", use_container_width=True):
                     # In real app, check admin role
