@@ -159,23 +159,51 @@ hr { border-color: #e2e5ef !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Session State Init ─────────────────────────────────────────────────────────
-if "items" not in st.session_state:
-    st.session_state["items"] = {}
-if "boms" not in st.session_state:
-    st.session_state["boms"] = {}
-if "merchants" not in st.session_state:
-    st.session_state["merchants"] = {
-        "MC001": "Amit Textiles",
-        "MC002": "Ravi Exports",
-        "MC003": "Sharma Trading Co.",
-    }
-if "buyers" not in st.session_state:
-    st.session_state["buyers"] = ["Myntra", "Flipkart", "Amazon", "Reliance", "Direct"]
-if "processes" not in st.session_state:
-    st.session_state["processes"] = ["Cutting", "Printing", "Dyeing", "Stitching", "Finishing", "Packing", "Embroidery", "Washing"]
-if "routings" not in st.session_state:
-    st.session_state["routings"] = {}
+# ─── Persistence Layer (JSON file) ─────────────────────────────────────────────
+import os
+
+DATA_FILE = "erp_data.json"
+
+DEFAULT_DATA = {
+    "items":          {},
+    "boms":           {},
+    "merchants":      {"MC001": "Amit Textiles", "MC002": "Ravi Exports", "MC003": "Sharma Trading Co."},
+    "buyers":         ["Myntra", "Flipkart", "Amazon", "Reliance", "Direct"],
+    "processes":      ["Cutting", "Printing", "Dyeing", "Stitching", "Finishing", "Packing", "Embroidery", "Washing"],
+    "routings":       {},
+    "so_list":        {},
+    "demands":        {},
+    "so_counter":     1,
+    "demand_counter": 1,
+    "warehouses":     ["Main Warehouse", "Finished Goods Store", "Export Warehouse"],
+    "sales_teams":    ["Team Alpha", "Team Beta", "North Zone", "South Zone", "Export Desk"],
+    "payment_terms":  ["Immediate", "Net 15", "Net 30", "Net 45", "Net 60", "Against LC"],
+    "skus":           {},
+}
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for key, default_val in DEFAULT_DATA.items():
+                if key not in st.session_state:
+                    st.session_state[key] = saved.get(key, default_val)
+        except Exception:
+            for key, val in DEFAULT_DATA.items():
+                if key not in st.session_state:
+                    st.session_state[key] = val
+    else:
+        for key, val in DEFAULT_DATA.items():
+            if key not in st.session_state:
+                st.session_state[key] = val
+
+def save_data():
+    to_save = {key: st.session_state.get(key, DEFAULT_DATA.get(key)) for key in DEFAULT_DATA}
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(to_save, f, ensure_ascii=False, indent=2, default=str)
+
+load_data()
 
 ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)", 
               "Accessories", "Packing Materials", "Fuel & Lubricants"]
@@ -230,30 +258,6 @@ with st.sidebar:
     st.markdown(f'<div style="font-size:11px;color:#888;padding:2px 4px;">Items: <strong style="color:#c8a96e;">{n_items}</strong> | BOMs: <strong style="color:#c8a96e;">{n_boms}</strong> | Open SO: <strong style="color:#c8a96e;">{open_so}</strong></div>', unsafe_allow_html=True)
 
 
-def init_state():
-    defaults = {
-        "so_list": {},        # SO Number → SO dict
-        "demands": {},        # Demand Number → demand dict
-        "so_counter": 1,
-        "demand_counter": 1,
-        "buyers": ["Myntra", "Flipkart", "Amazon", "Reliance Trends", "Max Fashion", "Direct", "Export Buyer"],
-        "warehouses": ["Main Warehouse", "Finished Goods Store", "Export Warehouse"],
-        "sales_teams": ["Team Alpha", "Team Beta", "North Zone", "South Zone", "Export Desk"],
-        "payment_terms": ["Immediate", "Net 15", "Net 30", "Net 45", "Net 60", "Against LC"],
-        "skus": {
-            "YG-SET-101-S": {"name": "Floral Kurta Set S",  "parent": "YG-SET-101", "size": "S",  "price": 599, "stock": 120, "reserved": 30, "in_production": 200},
-            "YG-SET-101-M": {"name": "Floral Kurta Set M",  "parent": "YG-SET-101", "size": "M",  "price": 599, "stock": 85,  "reserved": 20, "in_production": 200},
-            "YG-SET-101-L": {"name": "Floral Kurta Set L",  "parent": "YG-SET-101", "size": "L",  "price": 599, "stock": 60,  "reserved": 15, "in_production": 200},
-            "YG-SET-101-XL":{"name": "Floral Kurta Set XL", "parent": "YG-SET-101", "size": "XL", "price": 599, "stock": 40,  "reserved": 10, "in_production": 150},
-            "YG-DRS-201-S": {"name": "Embroid Dress S",     "parent": "YG-DRS-201", "size": "S",  "price": 799, "stock": 50,  "reserved": 10, "in_production": 100},
-            "YG-DRS-201-M": {"name": "Embroid Dress M",     "parent": "YG-DRS-201", "size": "M",  "price": 799, "stock": 70,  "reserved": 20, "in_production": 100},
-        },
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-init_state()
 
 SS = st.session_state
 
@@ -531,6 +535,7 @@ elif nav == "➕ Create Item":
                 }
                 
                 st.session_state["items"][item_code] = item_data
+                save_data()
                 
                 # Auto-create size variant records
                 for sz in sizes:
@@ -546,6 +551,7 @@ elif nav == "➕ Create Item":
                 # Save routing
                 if route:
                     st.session_state["routings"][item_code] = route
+                    save_data()
                 
                 st.success(f"✅ Item '{item_name}' saved! {len(sizes)} size variants created.")
                 st.balloons()
@@ -858,6 +864,7 @@ elif nav == "🔩 BOM Management":
                         "status":        "Draft",
                         "created_at":    datetime.now().isoformat(),
                     }
+                    save_data()
                     st.success("✅ BOM saved as Draft!")
 
             with col2:
@@ -866,6 +873,7 @@ elif nav == "🔩 BOM Management":
                     admin_pass = st.session_state.get("admin_verified", False)
                     if target_item in st.session_state["boms"]:
                         st.session_state["boms"][target_item]["status"] = "Certified"
+                        save_data()
                         st.success("✅ BOM Certified! Only Admin can now modify it.")
                     else:
                         st.warning("Save BOM first before certifying.")
@@ -953,6 +961,7 @@ elif nav == "🔄 Routing Master":
         if st.button("➕ Add Process"):
             if new_process and new_process not in st.session_state["processes"]:
                 st.session_state["processes"].append(new_process)
+                save_data()
                 st.success(f"Process '{new_process}' added!")
                 st.rerun()
     
@@ -991,6 +1000,7 @@ elif nav == "👤 Merchant Master":
         if st.button("💾 Save Merchant", use_container_width=True):
             if mc_code and mc_name:
                 st.session_state["merchants"][mc_code] = mc_name
+                save_data()
                 st.success(f"Merchant '{mc_name}' ({mc_code}) added!")
                 st.rerun()
             else:
@@ -1022,6 +1032,7 @@ elif nav == "📦 Buyer Packaging":
         if st.button("➕ Add Buyer"):
             if new_buyer and new_buyer not in st.session_state["buyers"]:
                 st.session_state["buyers"].append(new_buyer)
+                save_data()
                 st.success(f"Buyer '{new_buyer}' added!")
                 st.rerun()
         
@@ -1224,6 +1235,7 @@ elif nav_so == "📋 Demand Management":
                 st.session_state[dem_lines_key] = []
                 # Increment counter properly
                 SS["demand_counter"] = int(dem_no.split("-")[1]) + 1
+                save_data()
                 st.success(f"✅ Demand {dem_no} created successfully!")
                 st.rerun()
 
@@ -1523,6 +1535,7 @@ elif nav_so == "➕ Create Sales Order":
         }
         SS["so_counter"] += 1
         st.session_state["new_so_lines"] = []
+        save_data()
         st.success(f"✅ {so_no} saved as {status}!")
         st.rerun()
 
@@ -1626,6 +1639,7 @@ elif nav_so == "📂 SO List & Tracking":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("✅ Update Status", use_container_width=True):
                 SS["so_list"][sel_so]["status"] = new_status
+                save_data()
                 st.success(f"Status → {new_status}")
                 st.rerun()
         with stu3:
@@ -1709,6 +1723,7 @@ elif nav_so == "📂 SO List & Tracking":
                         SS["so_list"][sel_so]["lines"][i]["produced_qty"] = prod
                         SS["so_list"][sel_so]["lines"][i]["dispatch_qty"]  = disp
                         SS["so_list"][sel_so]["lines"][i]["received_qty"]  = rcvd
+                        save_data()
                         # Auto-update SO status
                         all_rcvd = all(
                             l.get("received_qty",0) >= l.get("qty",0)
@@ -1722,6 +1737,7 @@ elif nav_so == "📂 SO List & Tracking":
                             SS["so_list"][sel_so]["status"] = "Fully Received"
                         elif any_rcvd:
                             SS["so_list"][sel_so]["status"] = "Partially Received"
+                        save_data()
                         st.success("✅ Line updated!")
                         st.rerun()
         else:
@@ -1934,6 +1950,7 @@ elif nav_so == "⚙️ SO Settings":
             if st.button("➕ Add Buyer") and new_buyer:
                 if new_buyer not in SS["buyers"]:
                     SS["buyers"].append(new_buyer)
+                    save_data()
                     st.success(f"'{new_buyer}' added!")
                     st.rerun()
         with col2:
@@ -1947,6 +1964,7 @@ elif nav_so == "⚙️ SO Settings":
             if st.button("➕ Add Warehouse") and new_wh:
                 if new_wh not in SS["warehouses"]:
                     SS["warehouses"].append(new_wh)
+                    save_data()
                     st.success(f"'{new_wh}' added!")
                     st.rerun()
         with col2:
@@ -1960,6 +1978,7 @@ elif nav_so == "⚙️ SO Settings":
             if st.button("➕ Add Team") and new_team:
                 if new_team not in SS["sales_teams"]:
                     SS["sales_teams"].append(new_team)
+                    save_data()
                     st.success(f"'{new_team}' added!")
                     st.rerun()
         with col2:
