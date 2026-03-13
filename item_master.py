@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import uuid
 
 # ─── Page Config ───────────────────────────────────────────────────────────────
@@ -243,14 +243,18 @@ UNITS = ["Meter", "KG", "Gram", "Piece", "Set", "Box", "Roll", "Litre", "Dozen"]
 SIZES_ALL = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "Free Size"]
 HSN_CODES = ["6211", "6206", "6204", "6203", "6205", "6207", "6208", "6212", "5208", "5209"]
 
+
 # ─── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<h1 style="font-size:24px; margin:0;">🧵 Garment ERP</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="color:var(--text-muted); font-size:12px; margin-top:4px;">Item Master & BOM Module</p>', unsafe_allow_html=True)
+    st.markdown('''<div style="padding:16px 4px 4px;">
+        <div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div>
+        <div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div>
+    </div>''', unsafe_allow_html=True)
     st.markdown("---")
-    
-    nav = st.radio("Navigation", [
-        "📊 Dashboard",
+
+    st.markdown('<div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;padding-left:4px;">Item Master</div>', unsafe_allow_html=True)
+    nav = st.radio("nav", [
+        "📊 Item Master Dashboard",
         "➕ Create Item",
         "📋 Item Master List",
         "🔩 BOM Management",
@@ -258,14 +262,109 @@ with st.sidebar:
         "👤 Merchant Master",
         "📦 Buyer Packaging",
     ], label_visibility="collapsed")
-    
-    st.markdown("---")
-    st.markdown(f'<p style="color:#888888; font-size:11px;">Items: {len(st.session_state["items"])} | BOMs: {len(st.session_state["boms"])}</p>', unsafe_allow_html=True)
 
+    st.markdown("---")
+    st.markdown('<div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;padding-left:4px;">Sales</div>', unsafe_allow_html=True)
+    nav_so = st.radio("nav_so", [
+        "📊 SO Dashboard",
+        "📋 Demand Management",
+        "➕ Create Sales Order",
+        "📂 SO List & Tracking",
+        "📈 SO Reports",
+        "⚙️ SO Settings",
+    ], label_visibility="collapsed")
+
+    # Active module logic
+    if nav_so != "📊 SO Dashboard" and st.session_state.get("_last_click") == "so":
+        active_module = "SO"
+    elif nav != "📊 Item Master Dashboard" and st.session_state.get("_last_click") == "im":
+        active_module = "IM"
+    else:
+        active_module = st.session_state.get("_active_module", "IM")
+
+    st.markdown("---")
+    n_items = len(st.session_state.get("items", {}))
+    n_boms  = len(st.session_state.get("boms", {}))
+    open_so = sum(1 for s in st.session_state.get("so_list", {}).values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
+    st.markdown(f'<div style="font-size:11px;color:#888;padding:2px 4px;">Items: <strong style="color:#c8a96e;">{n_items}</strong> | BOMs: <strong style="color:#c8a96e;">{n_boms}</strong> | Open SO: <strong style="color:#c8a96e;">{open_so}</strong></div>', unsafe_allow_html=True)
+
+
+def init_state():
+    defaults = {
+        "so_list": {},        # SO Number → SO dict
+        "demands": {},        # Demand Number → demand dict
+        "so_counter": 1,
+        "demand_counter": 1,
+        "buyers": ["Myntra", "Flipkart", "Amazon", "Reliance Trends", "Max Fashion", "Direct", "Export Buyer"],
+        "warehouses": ["Main Warehouse", "Finished Goods Store", "Export Warehouse"],
+        "sales_teams": ["Team Alpha", "Team Beta", "North Zone", "South Zone", "Export Desk"],
+        "payment_terms": ["Immediate", "Net 15", "Net 30", "Net 45", "Net 60", "Against LC"],
+        "skus": {
+            "YG-SET-101-S": {"name": "Floral Kurta Set S",  "parent": "YG-SET-101", "size": "S",  "price": 599, "stock": 120, "reserved": 30, "in_production": 200},
+            "YG-SET-101-M": {"name": "Floral Kurta Set M",  "parent": "YG-SET-101", "size": "M",  "price": 599, "stock": 85,  "reserved": 20, "in_production": 200},
+            "YG-SET-101-L": {"name": "Floral Kurta Set L",  "parent": "YG-SET-101", "size": "L",  "price": 599, "stock": 60,  "reserved": 15, "in_production": 200},
+            "YG-SET-101-XL":{"name": "Floral Kurta Set XL", "parent": "YG-SET-101", "size": "XL", "price": 599, "stock": 40,  "reserved": 10, "in_production": 150},
+            "YG-DRS-201-S": {"name": "Embroid Dress S",     "parent": "YG-DRS-201", "size": "S",  "price": 799, "stock": 50,  "reserved": 10, "in_production": 100},
+            "YG-DRS-201-M": {"name": "Embroid Dress M",     "parent": "YG-DRS-201", "size": "M",  "price": 799, "stock": 70,  "reserved": 20, "in_production": 100},
+        },
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+init_state()
+
+SS = st.session_state
+
+# ─── Helpers ────────────────────────────────────────────────────────────────────
+STATUS_LIST = ["Draft", "Submitted", "Approved", "In Production", "Partially Received", "Fully Received", "Closed", "Cancelled"]
+STATUS_CLASS = {
+    "Draft": "s-draft", "Submitted": "s-submitted", "Approved": "s-approved",
+    "In Production": "s-production", "Partially Received": "s-partial",
+    "Fully Received": "s-received", "Closed": "s-closed", "Cancelled": "s-cancelled",
+}
+ORDER_SOURCES = ["Sales Team Demand", "Buyer PO", "Offline Order"]
+GST_RATES = [0, 5, 12, 18, 28]
+
+def next_so():
+    n = f"SO-{SS['so_counter']:04d}"
+    SS["so_counter"] += 1
+    return n
+
+def next_demand():
+    n = f"DEM-{SS['demand_counter']:04d}"
+    SS["demand_counter"] += 1
+    return n
+
+def avg_daily_sale(sku):
+    return round((SS["skus"][sku]["stock"] * 0.08), 1) if sku in SS["skus"] else 0
+
+def running_days(sku):
+    ads = avg_daily_sale(sku)
+    stock = SS["skus"].get(sku, {}).get("stock", 0) - SS["skus"].get(sku, {}).get("reserved", 0)
+    return round(stock / ads, 1) if ads > 0 else 999
+
+def so_qty_for_sku(sku):
+    total = 0
+    for so in SS["so_list"].values():
+        if so.get("status") not in ["Cancelled", "Closed"]:
+            for line in so.get("lines", []):
+                if line["sku"] == sku:
+                    total += line["qty"]
+    return total
+
+def badge(status):
+    cls = STATUS_CLASS.get(status, "s-draft")
+    return f'<span class="status-badge {cls}">{status}</span>'
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ITEM MASTER MODULE
+# ═══════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
-if nav == "📊 Dashboard":
+if nav == "📊 Item Master Dashboard":
     st.markdown('<h1>Item Master & BOM Dashboard</h1>', unsafe_allow_html=True)
     
     # Metrics
@@ -1026,3 +1125,773 @@ elif nav == "📦 Buyer Packaging":
                                 st.markdown(f'<div class="card" style="padding:8px;">{pkg_str}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="warn-box">No buyer packaging defined yet. Define packaging when creating items.</div>', unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════
+# SALES ORDER MODULE
+# ═══════════════════════════════════════════════════════════════════════
+if nav_so == "📊 SO Dashboard":
+    st.markdown('<h1>Sales Order Dashboard</h1>', unsafe_allow_html=True)
+
+    # KPI Cards
+    total_open = sum(1 for s in SS["so_list"].values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
+    today_so   = sum(1 for s in SS["so_list"].values() if s.get("so_date") == str(date.today()))
+    overdue    = sum(1 for s in SS["so_list"].values()
+                     if s.get("status") not in ["Closed","Cancelled","Fully Received"]
+                     and s.get("delivery_date","9999") < str(date.today()))
+    pending_qty = sum(
+        line["qty"] - line.get("received_qty", 0)
+        for s in SS["so_list"].values()
+        if s.get("status") not in ["Closed","Cancelled"]
+        for line in s.get("lines", [])
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f'<div class="kpi-card"><div class="kpi-value">{total_open}</div><div class="kpi-label">Total Open SOs</div></div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown(f'<div class="kpi-card kpi-accent"><div class="kpi-value">{int(pending_qty)}</div><div class="kpi-label">Pending SO Qty</div></div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown(f'<div class="kpi-card kpi-green"><div class="kpi-value">{today_so}</div><div class="kpi-label">Today Created SOs</div></div>', unsafe_allow_html=True)
+    with c4:
+        st.markdown(f'<div class="kpi-card kpi-warn"><div class="kpi-value">{overdue}</div><div class="kpi-label">Overdue Orders</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns([3, 2])
+
+    with col1:
+        st.markdown("#### Recent Sales Orders")
+        if SS["so_list"]:
+            rows = []
+            for so_no, so in list(SS["so_list"].items())[-10:]:
+                total_q = sum(l["qty"] for l in so.get("lines", []))
+                rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
+                rows.append({
+                    "SO #": so_no,
+                    "Buyer": so.get("buyer", ""),
+                    "Source": so.get("order_source", ""),
+                    "Total Qty": total_q,
+                    "Received": rcvd_q,
+                    "Pending": total_q - rcvd_q,
+                    "Delivery": so.get("delivery_date", ""),
+                    "Status": so.get("status", "Draft"),
+                })
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No Sales Orders yet. Create one from "Create Sales Order".</div>', unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("#### SKU Running Days Alert")
+        alert_rows = []
+        for sku, info in SS["skus"].items():
+            rd = running_days(sku)
+            alert_rows.append({"SKU": sku, "Stock": info["stock"], "Running Days": rd})
+        alert_rows.sort(key=lambda x: x["Running Days"])
+        for row in alert_rows[:6]:
+            rd = row["Running Days"]
+            color = "#c0392b" if rd < 7 else "#d4a853" if rd < 15 else "#1e6b4a"
+            pct = min(rd / 30 * 100, 100)
+            fill_cls = "prog-fill-red" if rd < 7 else ""
+            st.markdown(f'''<div class="card" style="padding:12px 16px;margin:4px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-family:Inconsolata,monospace;font-size:13px;">{row["SKU"]}</span>
+                    <span style="font-weight:700;color:{color};">{rd} days</span>
+                </div>
+                <div class="prog-wrap"><div class="{f"prog-fill {fill_cls}"}" style="width:{pct}%;"></div></div>
+                <div style="font-size:11px;color:#888;">Stock: {row["Stock"]} pcs</div>
+            </div>''', unsafe_allow_html=True)
+
+    # Status distribution
+    st.markdown("---")
+    st.markdown("#### SO Status Distribution")
+    status_counts = {}
+    for so in SS["so_list"].values():
+        s = so.get("status", "Draft")
+        status_counts[s] = status_counts.get(s, 0) + 1
+
+    if status_counts:
+        c1, c2, c3, c4 = st.columns(4)
+        cols = [c1, c2, c3, c4]
+        for i, (status, count) in enumerate(status_counts.items()):
+            with cols[i % 4]:
+                st.markdown(f'<div class="card" style="text-align:center;padding:16px;">{badge(status)}<div style="font-size:24px;font-weight:700;margin-top:8px;font-family:Syne,sans-serif;">{count}</div></div>', unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEMAND MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+elif nav_so == "📋 Demand Management":
+    st.markdown('<h1>Demand Management</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Demand = Sales Team ya Forecasting se aane wali requirement. Demand ke against Sales Orders bante hain.</div>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    dtab1, dtab2 = st.tabs(["➕ Create Demand", "📋 Demand List & Tracking"])
+
+    with dtab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            dem_no = next_demand()
+            st.markdown(f'<div class="card card-left" style="padding:10px 16px;"><span class="sec-label">Auto Demand Number</span><br><span style="font-family:Inconsolata,monospace;font-size:20px;font-weight:700;">{dem_no}</span></div>', unsafe_allow_html=True)
+            dem_date   = st.date_input("Demand Date", value=date.today(), key="dem_date")
+            dem_source = st.selectbox("Demand Source", ["Sales Team", "Forecasting System", "Buyer Indent", "Marketing Team"])
+            dem_buyer  = st.selectbox("Buyer / Customer", ["All"] + SS["buyers"])
+        with col2:
+            dem_delivery = st.date_input("Required By Date", value=date.today() + timedelta(days=30), key="dem_delivery")
+            dem_priority = st.selectbox("Priority", ["Normal", "High", "Urgent"])
+            dem_remarks  = st.text_area("Remarks", height=80, key="dem_remarks")
+
+        st.markdown("---")
+        st.markdown("#### Add SKU Lines to Demand")
+
+        dem_lines_key = "dem_lines_new"
+        if dem_lines_key not in st.session_state:
+            st.session_state[dem_lines_key] = []
+
+        with st.expander("➕ Add SKU to Demand", expanded=True):
+            dc1, dc2, dc3 = st.columns(3)
+            with dc1:
+                d_sku = st.selectbox("SKU *", [""] + list(SS["skus"].keys()), key="d_sku")
+                if d_sku:
+                    info = SS["skus"][d_sku]
+                    st.markdown(f'<div class="ok-box">Stock: {info["stock"]} | Reserved: {info["reserved"]} | Running Days: {running_days(d_sku)}</div>', unsafe_allow_html=True)
+            with dc2:
+                d_qty     = st.number_input("Demand Qty *", min_value=0, step=10, key="d_qty")
+                d_uom     = st.selectbox("UOM", ["Pieces", "Set", "Dozen"], key="d_uom")
+            with dc3:
+                d_remarks = st.text_input("Remarks", key="d_line_remarks")
+
+            if st.button("➕ Add SKU Line to Demand"):
+                if d_sku and d_qty > 0:
+                    st.session_state[dem_lines_key].append({
+                        "sku": d_sku,
+                        "sku_name": SS["skus"][d_sku]["name"],
+                        "parent": SS["skus"][d_sku]["parent"],
+                        "size": SS["skus"][d_sku]["size"],
+                        "demand_qty": d_qty,
+                        "so_qty": 0,
+                        "pending_qty": d_qty,
+                        "uom": d_uom,
+                        "remarks": d_remarks,
+                    })
+                    st.rerun()
+
+        dem_lines = st.session_state[dem_lines_key]
+        if dem_lines:
+            df_dem = pd.DataFrame(dem_lines)
+            st.dataframe(df_dem[["sku","sku_name","size","demand_qty","uom","remarks"]].rename(columns={
+                "sku":"SKU","sku_name":"Name","size":"Size","demand_qty":"Demand Qty","uom":"UOM","remarks":"Remarks"
+            }), use_container_width=True, hide_index=True)
+
+            if st.button("💾 Save Demand"):
+                SS["demands"][dem_no] = {
+                    "dem_no": dem_no,
+                    "dem_date": str(dem_date),
+                    "source": dem_source,
+                    "buyer": dem_buyer,
+                    "delivery_date": str(dem_delivery),
+                    "priority": dem_priority,
+                    "remarks": dem_remarks,
+                    "lines": dem_lines.copy(),
+                    "status": "Open",
+                    "created_at": datetime.now().isoformat(),
+                }
+                st.session_state[dem_lines_key] = []
+                # Increment counter properly
+                SS["demand_counter"] = int(dem_no.split("-")[1]) + 1
+                st.success(f"✅ Demand {dem_no} created successfully!")
+                st.rerun()
+
+    with dtab2:
+        if not SS["demands"]:
+            st.markdown('<div class="warn-box">No demands created yet.</div>', unsafe_allow_html=True)
+        else:
+            for dem_no, dem in SS["demands"].items():
+                total_dem_qty = sum(l["demand_qty"] for l in dem.get("lines", []))
+                # Count SO qty against this demand
+                so_against = sum(
+                    l["qty"] for so in SS["so_list"].values()
+                    if so.get("ref_number") == dem_no
+                    for l in so.get("lines", [])
+                )
+                pending = max(0, total_dem_qty - so_against)
+                pct = int((so_against / total_dem_qty * 100)) if total_dem_qty > 0 else 0
+
+                with st.expander(f"📋 {dem_no} | {dem.get('buyer','')} | {total_dem_qty} pcs | SO Coverage: {pct}%"):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.markdown(f"**Date:** {dem.get('dem_date')}  \n**Source:** {dem.get('source')}  \n**Priority:** {dem.get('priority')}")
+                    with col2:
+                        st.markdown(f"**Total Demand:** {total_dem_qty} pcs  \n**SO Created:** {so_against} pcs  \n**Pending SO:** {pending} pcs")
+                    with col3:
+                        fill_cls = "prog-fill-red" if pct < 30 else ""
+                        st.markdown(f'''<div style="padding-top:8px;">
+                            <div style="font-size:11px;color:#888;">SO Coverage</div>
+                            <div class="prog-wrap"><div class="prog-fill {fill_cls}" style="width:{pct}%;"></div></div>
+                            <div style="font-size:13px;font-weight:700;color:#d4a853;">{pct}%</div>
+                        </div>''', unsafe_allow_html=True)
+
+                    # SKU-level tracking
+                    if dem.get("lines"):
+                        st.markdown("**SKU-wise Demand vs SO:**")
+                        sku_rows = []
+                        for line in dem["lines"]:
+                            sku_so = sum(
+                                l["qty"] for so in SS["so_list"].values()
+                                if so.get("ref_number") == dem_no
+                                for l in so.get("lines", []) if l["sku"] == line["sku"]
+                            )
+                            sku_rows.append({
+                                "SKU": line["sku"], "Name": line["sku_name"],
+                                "Demand Qty": line["demand_qty"],
+                                "SO Created": sku_so,
+                                "Pending": max(0, line["demand_qty"] - sku_so),
+                            })
+                        st.dataframe(pd.DataFrame(sku_rows), use_container_width=True, hide_index=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CREATE SALES ORDER
+# ═══════════════════════════════════════════════════════════════════════════════
+elif nav_so == "➕ Create Sales Order":
+    st.markdown('<h1>Create Sales Order</h1>', unsafe_allow_html=True)
+
+    so_tab1, so_tab2, so_tab3 = st.tabs(["📝 SO Header", "🧵 SO Lines", "💰 Financials"])
+
+    # -- shared state for SO being created
+    if "new_so_lines" not in st.session_state:
+        st.session_state["new_so_lines"] = []
+
+    with so_tab1:
+        st.markdown('<div class="sec-label">Header Information</div>', unsafe_allow_html=True)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            so_number = f"SO-{SS['so_counter']:04d}"
+            st.markdown(f'<div class="card card-left" style="padding:10px 16px;"><span class="sec-label">Auto SO Number</span><br><span style="font-family:Inconsolata,monospace;font-size:22px;font-weight:700;">{so_number}</span></div>', unsafe_allow_html=True)
+            so_date      = st.date_input("SO Date", value=date.today(), key="_so_date")
+            order_source = st.selectbox("Order Source *", ORDER_SOURCES, key="_so_src")
+            warehouse    = st.selectbox("Warehouse", SS["warehouses"], key="_so_wh")
+
+        with col2:
+            buyer         = st.selectbox("Buyer / Customer *", [""] + SS["buyers"], key="_so_buyer")
+            delivery_date = st.date_input("Delivery Date", value=date.today() + timedelta(days=21), key="_so_del")
+            dispatch_date = st.date_input("Planned Dispatch Date", value=date.today() + timedelta(days=18), key="_so_disp")
+            sales_team    = st.selectbox("Sales Team", SS["sales_teams"], key="_so_team")
+
+        with col3:
+            # Reference fields based on source
+            ref_map = {
+                "Sales Team Demand": ("Demand Number", list(SS["demands"].keys())),
+                "Buyer PO": ("Buyer PO Number", []),
+                "Offline Order": ("Offline Order Number", []),
+            }
+            ref_label, ref_options = ref_map.get(order_source, ("Reference Number", []))
+
+            if ref_options:
+                ref_number = st.selectbox(f"{ref_label} *", [""] + ref_options)
+                # Auto-fill buyer from demand
+                if ref_number and ref_number in SS["demands"]:
+                    dem = SS["demands"][ref_number]
+                    st.markdown(f'<div class="ok-box">Demand: {ref_number} | Source: {dem.get("source")} | Priority: {dem.get("priority")}</div>', unsafe_allow_html=True)
+            else:
+                ref_number = st.text_input(f"{ref_label} *", placeholder=f"Enter {ref_label}")
+
+            ref_date       = st.date_input("Reference Date", value=date.today(), key="_so_refdate")
+            priority       = st.selectbox("Priority", ["Normal", "High", "Urgent"], key="_so_priority")
+            payment_terms  = st.selectbox("Payment Terms", SS["payment_terms"], key="_so_pay")
+
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            merchant = st.text_input("Merchant Name / Code", placeholder="e.g. MC001 – Amit Textiles", key="_so_merchant")
+        with col2:
+            so_remarks = st.text_area("Remarks", height=70, key="_so_remarks")
+
+    with so_tab2:
+        st.markdown('<div class="sec-label">SO Line Items</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box">Live inventory visibility ke saath SKU select karein. Size-wise quantity define karein.</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # If demand linked, show demand lines as reference
+        if 'ref_number' in dir() and ref_number and ref_number in SS["demands"]:
+            with st.expander("📋 Demand Lines Reference (for this SO)", expanded=False):
+                dem_ref = SS["demands"][ref_number]
+                for dl in dem_ref.get("lines", []):
+                    so_already = so_qty_for_sku(dl["sku"])
+                    pending = max(0, dl["demand_qty"] - so_already)
+                    color = "#c0392b" if pending == dl["demand_qty"] else "#d4a853" if pending > 0 else "#1e6b4a"
+                    st.markdown(f'''<div class="card" style="padding:10px 16px;margin:3px 0;">
+                        <span class="tag tag-gold">{dl["sku"]}</span>
+                        <span style="margin-left:8px;">{dl["sku_name"]}</span>
+                        <span style="margin-left:16px;font-size:12px;color:#888;">Demand: {dl["demand_qty"]}</span>
+                        <span style="margin-left:8px;font-size:12px;color:#888;">SO Done: {so_already}</span>
+                        <span style="margin-left:8px;font-size:12px;font-weight:700;color:{color};">Pending: {pending}</span>
+                    </div>''', unsafe_allow_html=True)
+
+        with st.expander("➕ Add SKU Line", expanded=len(st.session_state["new_so_lines"]) == 0):
+            lc1, lc2, lc3 = st.columns(3)
+            with lc1:
+                line_sku = st.selectbox("SKU *", [""] + list(SS["skus"].keys()), key="line_sku")
+                if line_sku and line_sku in SS["skus"]:
+                    info = SS["skus"][line_sku]
+                    rd = running_days(line_sku)
+                    rd_color = "#c0392b" if rd < 7 else "#d4a853" if rd < 15 else "#1e6b4a"
+                    st.markdown(f'''<div class="card" style="padding:10px;margin:4px 0;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+                            <div><span style="color:#888;">Current Stock</span><br><strong>{info["stock"]}</strong></div>
+                            <div><span style="color:#888;">Reserved</span><br><strong>{info["reserved"]}</strong></div>
+                            <div><span style="color:#888;">In Production</span><br><strong>{info["in_production"]}</strong></div>
+                            <div><span style="color:#888;">Running Days</span><br><strong style="color:{rd_color};">{rd}</strong></div>
+                            <div><span style="color:#888;">Avg Daily Sale</span><br><strong>{avg_daily_sale(line_sku)}</strong></div>
+                            <div><span style="color:#888;">Available</span><br><strong>{info["stock"] - info["reserved"]}</strong></div>
+                        </div>
+                    </div>''', unsafe_allow_html=True)
+                line_qty = st.number_input("Quantity *", min_value=0, step=10, key="line_qty")
+
+            with lc2:
+                line_uom  = st.selectbox("UOM", ["Pieces", "Set", "Dozen"], key="line_uom")
+                line_rate = st.number_input("Rate (₹)", min_value=0.0, step=10.0,
+                                             value=float(SS["skus"].get(line_sku, {}).get("price", 0)) if line_sku else 0.0,
+                                             key="line_rate")
+                line_gst  = st.selectbox("GST %", GST_RATES, index=2, key="line_gst")
+
+            with lc3:
+                line_hsn     = st.text_input("HSN Code", key="line_hsn", placeholder="e.g. 6211")
+                line_del     = st.date_input("Line Delivery Date", value=date.today() + timedelta(days=21), key="line_del")
+                line_remarks = st.text_input("Remarks", key="line_remarks")
+
+            if st.button("➕ Add Line to SO"):
+                if line_sku and line_qty > 0:
+                    taxable  = line_qty * line_rate
+                    gst_amt  = taxable * line_gst / 100
+                    st.session_state["new_so_lines"].append({
+                        "sku": line_sku,
+                        "sku_name": SS["skus"].get(line_sku, {}).get("name", ""),
+                        "parent": SS["skus"].get(line_sku, {}).get("parent", ""),
+                        "size": SS["skus"].get(line_sku, {}).get("size", ""),
+                        "qty": line_qty,
+                        "uom": line_uom,
+                        "rate": line_rate,
+                        "gst_pct": line_gst,
+                        "hsn": line_hsn,
+                        "taxable": round(taxable, 2),
+                        "gst_amount": round(gst_amt, 2),
+                        "total": round(taxable + gst_amt, 2),
+                        "delivery_date": str(line_del),
+                        "produced_qty": 0, "dispatch_qty": 0, "received_qty": 0,
+                        "remarks": line_remarks,
+                    })
+                    st.rerun()
+
+        so_lines = st.session_state["new_so_lines"]
+        if so_lines:
+            df_lines = pd.DataFrame(so_lines)
+            show = ["sku","sku_name","size","qty","uom","rate","gst_pct","taxable","gst_amount","total","delivery_date"]
+            show = [c for c in show if c in df_lines.columns]
+            st.dataframe(df_lines[show].rename(columns={
+                "sku":"SKU","sku_name":"Name","size":"Size","qty":"Qty","uom":"UOM",
+                "rate":"Rate(₹)","gst_pct":"GST%","taxable":"Taxable(₹)",
+                "gst_amount":"GST Amt(₹)","total":"Line Total(₹)","delivery_date":"Delivery"
+            }), use_container_width=True, hide_index=True)
+
+            del_line = st.number_input("Delete line # (1-based, 0=none)", min_value=0, max_value=len(so_lines), step=1, key="del_so_line")
+            if st.button("🗑 Delete Line") and del_line > 0:
+                st.session_state["new_so_lines"].pop(del_line - 1)
+                st.rerun()
+
+    with so_tab3:
+        so_lines = st.session_state["new_so_lines"]
+        subtotal   = sum(l["taxable"] for l in so_lines)
+        total_gst  = sum(l["gst_amount"] for l in so_lines)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            disc_pct      = st.number_input("Discount %", min_value=0.0, max_value=100.0, step=0.5, key="_so_disc")
+            shipping      = st.number_input("Shipping Charges (₹)", min_value=0.0, step=50.0, key="_so_ship")
+            other_charges = st.number_input("Other Charges (₹)", min_value=0.0, step=10.0, key="_so_other")
+
+        disc_amt    = subtotal * disc_pct / 100
+        taxable_net = subtotal - disc_amt
+        grand_total = taxable_net + total_gst + shipping + other_charges
+
+        with col2:
+            st.markdown(f'''<div class="card card-left" style="padding:20px;">
+                <table style="width:100%;font-size:14px;border-collapse:collapse;">
+                    <tr><td style="padding:4px 0;color:#888;">Subtotal</td><td style="text-align:right;">₹{subtotal:,.2f}</td></tr>
+                    <tr><td style="padding:4px 0;color:#888;">Discount ({disc_pct}%)</td><td style="text-align:right;color:#c0392b;">- ₹{disc_amt:,.2f}</td></tr>
+                    <tr><td style="padding:4px 0;color:#888;">Taxable Amount</td><td style="text-align:right;">₹{taxable_net:,.2f}</td></tr>
+                    <tr><td style="padding:4px 0;color:#888;">GST Amount</td><td style="text-align:right;">₹{total_gst:,.2f}</td></tr>
+                    <tr><td style="padding:4px 0;color:#888;">Shipping</td><td style="text-align:right;">₹{shipping:,.2f}</td></tr>
+                    <tr><td style="padding:4px 0;color:#888;">Other Charges</td><td style="text-align:right;">₹{other_charges:,.2f}</td></tr>
+                    <tr style="border-top:2px solid #e8e3da;">
+                        <td style="padding:10px 0 4px;font-family:Syne,sans-serif;font-weight:800;font-size:16px;">Grand Total</td>
+                        <td style="text-align:right;font-family:Syne,sans-serif;font-weight:800;font-size:22px;color:#d4a853;">₹{grand_total:,.2f}</td>
+                    </tr>
+                </table>
+            </div>''', unsafe_allow_html=True)
+
+    # ── Save SO ─────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    sc1, sc2, sc3 = st.columns(3)
+
+    def do_save(status):
+        so_no   = f"SO-{SS['so_counter']:04d}"
+        sl      = st.session_state.get("new_so_lines", [])
+        if not sl:
+            st.error("Add at least one SKU line!")
+            return
+        sub     = sum(l["taxable"] for l in sl)
+        tgst    = sum(l["gst_amount"] for l in sl)
+        dp      = st.session_state.get("_so_disc", 0.0)
+        sh      = st.session_state.get("_so_ship", 0.0)
+        oc      = st.session_state.get("_so_other", 0.0)
+        da      = sub * dp / 100
+        gt      = (sub - da) + tgst + sh + oc
+        SS["so_list"][so_no] = {
+            "so_number":    so_no,
+            "so_date":      str(st.session_state.get("_so_date", date.today())),
+            "order_source": st.session_state.get("_so_src", ""),
+            "buyer":        st.session_state.get("_so_buyer", ""),
+            "delivery_date":str(st.session_state.get("_so_del", date.today())),
+            "dispatch_date":str(st.session_state.get("_so_disp", date.today())),
+            "sales_team":   st.session_state.get("_so_team", ""),
+            "ref_number":   st.session_state.get("_so_ref", ""),
+            "ref_date":     str(st.session_state.get("_so_refdate", date.today())),
+            "priority":     st.session_state.get("_so_priority", "Normal"),
+            "payment_terms":st.session_state.get("_so_pay", ""),
+            "warehouse":    st.session_state.get("_so_wh", ""),
+            "merchant":     st.session_state.get("_so_merchant", ""),
+            "remarks":      st.session_state.get("_so_remarks", ""),
+            "discount_pct": dp, "shipping": sh, "other_charges": oc,
+            "subtotal": sub, "total_gst": tgst, "grand_total": gt,
+            "lines": sl, "status": status,
+            "created_at": datetime.now().isoformat(),
+        }
+        SS["so_counter"] += 1
+        st.session_state["new_so_lines"] = []
+        st.success(f"✅ {so_no} saved as {status}!")
+        st.rerun()
+
+    with sc1:
+        if st.button("💾 Save as Draft", use_container_width=True):
+            do_save("Draft")
+    with sc2:
+        if st.button("📤 Save & Submit", use_container_width=True):
+            do_save("Submitted")
+    with sc3:
+        if st.button("🗑 Clear All Lines", use_container_width=True):
+            st.session_state["new_so_lines"] = []
+            st.rerun()
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SO LIST & TRACKING
+# ═══════════════════════════════════════════════════════════════════════════════
+elif nav_so == "📂 SO List & Tracking":
+    st.markdown('<h1>SO List & Tracking</h1>', unsafe_allow_html=True)
+
+    lt1, lt2 = st.tabs(["📋 All SOs", "🔍 SO Detail & Update"])
+
+    with lt1:
+        # Filters
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        with fc1: f_status = st.selectbox("Status", ["All"] + STATUS_LIST)
+        with fc2: f_source = st.selectbox("Source", ["All"] + ORDER_SOURCES)
+        with fc3: f_buyer  = st.selectbox("Buyer",  ["All"] + SS["buyers"])
+        with fc4: f_search = st.text_input("🔍 Search SO #", "")
+
+        rows = []
+        for so_no, so in SS["so_list"].items():
+            if f_status != "All" and so.get("status") != f_status: continue
+            if f_source != "All" and so.get("order_source") != f_source: continue
+            if f_buyer  != "All" and so.get("buyer") != f_buyer: continue
+            if f_search and f_search.lower() not in so_no.lower(): continue
+
+            total_q = sum(l["qty"] for l in so.get("lines", []))
+            rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
+            rows.append({
+                "SO #": so_no,
+                "Date": so.get("so_date", ""),
+                "Buyer": so.get("buyer", ""),
+                "Source": so.get("order_source", ""),
+                "Ref #": so.get("ref_number", ""),
+                "Total Qty": total_q,
+                "Received": rcvd_q,
+                "Pending": total_q - rcvd_q,
+                "Grand Total": f"₹{so.get('grand_total', 0):,.0f}",
+                "Delivery": so.get("delivery_date", ""),
+                "Priority": so.get("priority", ""),
+                "Status": so.get("status", ""),
+            })
+
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No SOs found with selected filters.</div>', unsafe_allow_html=True)
+
+    with lt2:
+        if not SS["so_list"]:
+            st.markdown('<div class="warn-box">No SOs created yet.</div>', unsafe_allow_html=True)
+        else:
+            sel_so = st.selectbox("Select SO to View / Update", [""] + list(SS["so_list"].keys()))
+            if sel_so and sel_so in SS["so_list"]:
+                so = SS["so_list"][sel_so]
+
+                # Header info
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.markdown(f'''<div class="card card-left">
+                        <div class="sec-label">SO Details</div>
+                        <div style="font-family:Inconsolata,monospace;font-size:20px;font-weight:700;">{sel_so}</div>
+                        <div style="font-size:13px;margin-top:6px;">Date: <strong>{so.get("so_date")}</strong></div>
+                        <div style="font-size:13px;">Source: <strong>{so.get("order_source")}</strong></div>
+                        <div style="font-size:13px;">Ref: <strong>{so.get("ref_number","—")}</strong></div>
+                        <div style="margin-top:8px;">{badge(so.get("status","Draft"))}</div>
+                    </div>''', unsafe_allow_html=True)
+                with col2:
+                    st.markdown(f'''<div class="card card-left-blue">
+                        <div class="sec-label">Buyer / Dispatch</div>
+                        <div style="font-size:13px;">Buyer: <strong>{so.get("buyer","—")}</strong></div>
+                        <div style="font-size:13px;">Delivery: <strong>{so.get("delivery_date","—")}</strong></div>
+                        <div style="font-size:13px;">Dispatch: <strong>{so.get("dispatch_date","—")}</strong></div>
+                        <div style="font-size:13px;">Priority: <strong>{so.get("priority","Normal")}</strong></div>
+                        <div style="font-size:13px;">Team: <strong>{so.get("sales_team","—")}</strong></div>
+                    </div>''', unsafe_allow_html=True)
+                with col3:
+                    total_q = sum(l["qty"] for l in so.get("lines", []))
+                    rcvd_q  = sum(l.get("received_qty", 0) for l in so.get("lines", []))
+                    pct = int(rcvd_q / total_q * 100) if total_q > 0 else 0
+                    st.markdown(f'''<div class="card card-left-green">
+                        <div class="sec-label">Qty Tracking</div>
+                        <div style="font-size:13px;">SO Qty: <strong>{total_q}</strong></div>
+                        <div style="font-size:13px;">Received: <strong style="color:#1e6b4a;">{rcvd_q}</strong></div>
+                        <div style="font-size:13px;">Pending: <strong style="color:#c0392b;">{total_q - rcvd_q}</strong></div>
+                        <div style="font-size:13px;">Grand Total: <strong style="color:#d4a853;">₹{so.get("grand_total",0):,.0f}</strong></div>
+                        <div class="prog-wrap" style="margin-top:8px;"><div class="prog-fill prog-fill-green" style="width:{pct}%;"></div></div>
+                        <div style="font-size:11px;color:#888;">{pct}% received</div>
+                    </div>''', unsafe_allow_html=True)
+
+                # Status update
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_status = st.selectbox("Update Status", STATUS_LIST, index=STATUS_LIST.index(so.get("status","Draft")))
+                with col2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("✅ Update Status"):
+                        SS["so_list"][sel_so]["status"] = new_status
+                        st.success(f"Status updated to {new_status}!")
+                        st.rerun()
+
+                # Line-wise tracking
+                st.markdown("#### Line-wise Qty Update (Produced / Dispatched / Received)")
+                for i, line in enumerate(so.get("lines", [])):
+                    with st.expander(f"📦 {line['sku']} — {line['sku_name']} | Ordered: {line['qty']}"):
+                        lc1, lc2, lc3, lc4 = st.columns(4)
+                        with lc1: st.metric("Ordered Qty", line["qty"])
+                        with lc2:
+                            prod = st.number_input("Produced", min_value=0, max_value=line["qty"]*2,
+                                                    value=line.get("produced_qty", 0), key=f"prod_{sel_so}_{i}")
+                        with lc3:
+                            disp = st.number_input("Dispatched", min_value=0, max_value=line["qty"]*2,
+                                                    value=line.get("dispatch_qty", 0), key=f"disp_{sel_so}_{i}")
+                        with lc4:
+                            rcvd = st.number_input("Received", min_value=0, max_value=line["qty"]*2,
+                                                    value=line.get("received_qty", 0), key=f"rcvd_{sel_so}_{i}")
+
+                        balance = line["qty"] - rcvd
+                        pct_r = int(rcvd / line["qty"] * 100) if line["qty"] > 0 else 0
+                        st.markdown(f'''<div style="margin-top:6px;">
+                            <div class="prog-wrap"><div class="prog-fill" style="width:{pct_r}%;"></div></div>
+                            <div style="font-size:11px;color:#888;">Received {pct_r}% | Balance: {balance} pcs</div>
+                        </div>''', unsafe_allow_html=True)
+
+                        if st.button(f"💾 Save Line Update", key=f"save_line_{sel_so}_{i}"):
+                            SS["so_list"][sel_so]["lines"][i]["produced_qty"] = prod
+                            SS["so_list"][sel_so]["lines"][i]["dispatch_qty"]  = disp
+                            SS["so_list"][sel_so]["lines"][i]["received_qty"]  = rcvd
+                            st.success("Line updated!")
+                            st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPORTS
+# ═══════════════════════════════════════════════════════════════════════════════
+elif nav_so == "📈 SO Reports":
+    st.markdown('<h1>Reports</h1>', unsafe_allow_html=True)
+
+    rep = st.selectbox("Select Report", [
+        "1. Demand vs SO Report",
+        "2. SO vs Received Report",
+        "3. SKU Pending Report",
+        "4. Delivery Due Report",
+        "5. Buyer Order Report",
+        "6. Source-wise Order Report",
+    ])
+
+    st.markdown("---")
+
+    if rep.startswith("1"):
+        st.markdown("### Demand vs SO Report")
+        rows = []
+        for dem_no, dem in SS["demands"].items():
+            for line in dem.get("lines", []):
+                so_q = sum(l["qty"] for so in SS["so_list"].values()
+                           if so.get("ref_number") == dem_no
+                           for l in so.get("lines", []) if l["sku"] == line["sku"])
+                rows.append({
+                    "Demand #": dem_no, "Buyer": dem.get("buyer",""), "SKU": line["sku"],
+                    "SKU Name": line["sku_name"], "Demand Qty": line["demand_qty"],
+                    "SO Created": so_q, "Pending SO": max(0, line["demand_qty"] - so_q),
+                    "Coverage %": f"{int(so_q/line['demand_qty']*100) if line['demand_qty'] > 0 else 0}%",
+                })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No demand data available.</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("2"):
+        st.markdown("### SO vs Received Report")
+        rows = []
+        for so_no, so in SS["so_list"].items():
+            for line in so.get("lines", []):
+                rows.append({
+                    "SO #": so_no, "Buyer": so.get("buyer",""), "SKU": line["sku"],
+                    "SO Qty": line["qty"], "Produced": line.get("produced_qty",0),
+                    "Dispatched": line.get("dispatch_qty",0), "Received": line.get("received_qty",0),
+                    "Balance": line["qty"] - line.get("received_qty",0),
+                    "Status": so.get("status",""),
+                })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No SO data available.</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("3"):
+        st.markdown("### SKU Pending Report")
+        sku_summary = {}
+        for so in SS["so_list"].values():
+            if so.get("status") in ["Cancelled","Closed"]: continue
+            for line in so.get("lines", []):
+                sku = line["sku"]
+                if sku not in sku_summary:
+                    sku_summary[sku] = {"name": line["sku_name"], "total_ordered": 0, "total_received": 0}
+                sku_summary[sku]["total_ordered"]  += line["qty"]
+                sku_summary[sku]["total_received"] += line.get("received_qty", 0)
+
+        rows = [{"SKU": k, "Name": v["name"], "Total Ordered": v["total_ordered"],
+                 "Total Received": v["total_received"],
+                 "Pending": v["total_ordered"] - v["total_received"],
+                 "Current Stock": SS["skus"].get(k, {}).get("stock", "—"),
+                 "Running Days": running_days(k) if k in SS["skus"] else "—"}
+                for k, v in sku_summary.items()]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No pending SKU data.</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("4"):
+        st.markdown("### Delivery Due Report")
+        today = str(date.today())
+        rows = []
+        for so_no, so in SS["so_list"].items():
+            if so.get("status") in ["Cancelled","Fully Received","Closed"]: continue
+            dd = so.get("delivery_date","")
+            overdue = dd < today if dd else False
+            days_left = (datetime.strptime(dd, "%Y-%m-%d").date() - date.today()).days if dd else 999
+            rows.append({
+                "SO #": so_no, "Buyer": so.get("buyer",""),
+                "Delivery Date": dd, "Days Left": days_left,
+                "Total Qty": sum(l["qty"] for l in so.get("lines",[])),
+                "Pending Qty": sum(l["qty"]-l.get("received_qty",0) for l in so.get("lines",[])),
+                "Status": so.get("status",""), "Overdue": "🔴 YES" if overdue else "✅ NO",
+            })
+        rows.sort(key=lambda x: x["Days Left"])
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No pending delivery data.</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("5"):
+        st.markdown("### Buyer Order Report")
+        buyer_summary = {}
+        for so in SS["so_list"].values():
+            b = so.get("buyer","Unknown")
+            if b not in buyer_summary:
+                buyer_summary[b] = {"so_count": 0, "total_qty": 0, "received_qty": 0, "grand_total": 0}
+            buyer_summary[b]["so_count"]    += 1
+            buyer_summary[b]["total_qty"]   += sum(l["qty"] for l in so.get("lines",[]))
+            buyer_summary[b]["received_qty"]+= sum(l.get("received_qty",0) for l in so.get("lines",[]))
+            buyer_summary[b]["grand_total"] += so.get("grand_total",0)
+
+        rows = [{"Buyer": k, "SO Count": v["so_count"], "Total Qty": v["total_qty"],
+                 "Received": v["received_qty"], "Pending": v["total_qty"]-v["received_qty"],
+                 "Total Value": f"₹{v['grand_total']:,.0f}"} for k, v in buyer_summary.items()]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No buyer data.</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("6"):
+        st.markdown("### Source-wise Order Report")
+        source_summary = {}
+        for so in SS["so_list"].values():
+            src = so.get("order_source","Unknown")
+            if src not in source_summary:
+                source_summary[src] = {"so_count": 0, "total_qty": 0, "grand_total": 0}
+            source_summary[src]["so_count"]  += 1
+            source_summary[src]["total_qty"] += sum(l["qty"] for l in so.get("lines",[]))
+            source_summary[src]["grand_total"]+= so.get("grand_total",0)
+
+        rows = [{"Source": k, "SO Count": v["so_count"], "Total Qty": v["total_qty"],
+                 "Total Value": f"₹{v['grand_total']:,.0f}"} for k, v in source_summary.items()]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">No data.</div>', unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+elif nav_so == "⚙️ SO Settings":
+    st.markdown('<h1>Settings</h1>', unsafe_allow_html=True)
+
+    stab1, stab2, stab3 = st.tabs(["👤 Buyers", "🏭 Warehouses", "👥 Sales Teams"])
+
+    with stab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            new_buyer = st.text_input("Add Buyer")
+            if st.button("➕ Add Buyer") and new_buyer:
+                if new_buyer not in SS["buyers"]:
+                    SS["buyers"].append(new_buyer)
+                    st.success(f"'{new_buyer}' added!")
+                    st.rerun()
+        with col2:
+            for b in SS["buyers"]:
+                st.markdown(f'<span class="tag tag-gold">{b}</span>', unsafe_allow_html=True)
+
+    with stab2:
+        col1, col2 = st.columns(2)
+        with col1:
+            new_wh = st.text_input("Add Warehouse")
+            if st.button("➕ Add Warehouse") and new_wh:
+                if new_wh not in SS["warehouses"]:
+                    SS["warehouses"].append(new_wh)
+                    st.success(f"'{new_wh}' added!")
+                    st.rerun()
+        with col2:
+            for w in SS["warehouses"]:
+                st.markdown(f'<span class="tag tag-blue">{w}</span>', unsafe_allow_html=True)
+
+    with stab3:
+        col1, col2 = st.columns(2)
+        with col1:
+            new_team = st.text_input("Add Sales Team")
+            if st.button("➕ Add Team") and new_team:
+                if new_team not in SS["sales_teams"]:
+                    SS["sales_teams"].append(new_team)
+                    st.success(f"'{new_team}' added!")
+                    st.rerun()
+        with col2:
+            for t in SS["sales_teams"]:
+                st.markdown(f'<span class="tag">{t}</span>', unsafe_allow_html=True)
