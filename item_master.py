@@ -494,30 +494,82 @@ elif nav == "➕ Create Item":
                     </div>''', unsafe_allow_html=True)
     
     with tab4:
-        st.markdown("#### 📦 Buyer-wise Packaging Definition")
-        st.markdown('''<div class="info-box">✓ Same item ke liye alag buyers ke liye alag packaging define kar sakte hain (polybag, tag, sticker, carton etc.)</div>''', unsafe_allow_html=True)
+        st.markdown("#### 📦 Buyer-wise Packaging")
+        st.markdown('<div class="info-box">✓ Pehle <strong>Packing Materials</strong> type ke items Item Master mein banao (sticker, tag, polybag, carton etc.) — phir yahan buyer ke liye add karo.</div>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        
-        buyer_packaging = {}
-        for buyer in st.session_state["buyers"]:
-            with st.expander(f"📦 {buyer} Packaging"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    polybag = st.text_input(f"Polybag Type", key=f"poly_{buyer}", placeholder="e.g. 10x14 LDPE Zip")
-                    brand_tag = st.text_input(f"Brand Tag", key=f"btag_{buyer}", placeholder="e.g. Woven Label Main")
-                with col2:
-                    size_tag = st.text_input(f"Size Tag", key=f"stag_{buyer}", placeholder="e.g. Printed Size Sticker")
-                    price_tag = st.text_input(f"Price Tag / Sticker", key=f"ptag_{buyer}", placeholder="e.g. MRP Sticker")
-                with col3:
-                    carton = st.text_input(f"Carton Type", key=f"cart_{buyer}", placeholder="e.g. 5-ply Export Carton")
-                    inner_box = st.text_input(f"Inner Box/Hanger", key=f"inner_{buyer}", placeholder="e.g. PP Hanger")
-                
-                if polybag or brand_tag:
-                    buyer_packaging[buyer] = {
-                        "polybag": polybag, "brand_tag": brand_tag,
-                        "size_tag": size_tag, "price_tag": price_tag,
-                        "carton": carton, "inner_box": inner_box
-                    }
+
+        # Get all packing material items from item master
+        packing_items = {
+            k: v for k, v in st.session_state["items"].items()
+            if v.get("item_type") in ["Packing Materials", "Accessories"]
+        }
+
+        buyers_list = st.session_state["buyers"]
+        if not buyers_list:
+            st.markdown('<div class="warn-box">Koi buyer nahi mila. SO Settings mein buyers add karo.</div>', unsafe_allow_html=True)
+        else:
+            sel_buyer_pkg = st.selectbox("Buyer select karo", [""] + buyers_list, key="pkg_buyer_sel")
+
+            if sel_buyer_pkg:
+                pkg_key = f"pkg_lines_{sel_buyer_pkg}"
+                if pkg_key not in st.session_state:
+                    st.session_state[pkg_key] = []
+
+                # Add packing item line
+                with st.expander(f"➕ {sel_buyer_pkg} ke liye packing item add karo", expanded=len(st.session_state[pkg_key]) == 0):
+                    if not packing_items:
+                        st.markdown('<div class="warn-box">⚠️ Koi Packing Materials / Accessories item nahi mila. Pehle Item Master mein banao.</div>', unsafe_allow_html=True)
+                    else:
+                        pc1, pc2, pc3 = st.columns(3)
+                        with pc1:
+                            pkg_item = st.selectbox(
+                                "Packing Item *",
+                                [""] + list(packing_items.keys()),
+                                format_func=lambda x: f"{x} – {packing_items.get(x,{}).get('name','')}" if x else "— Select Item —",
+                                key="pkg_item_sel"
+                            )
+                        with pc2:
+                            pkg_qty  = st.number_input("Qty per piece", min_value=0.0, step=1.0, value=1.0, key="pkg_qty")
+                            pkg_uom  = st.selectbox("UOM", ["Piece", "Set", "Meter", "KG", "Gram", "Roll"], key="pkg_uom")
+                        with pc3:
+                            pkg_remarks = st.text_input("Remarks", key="pkg_remarks", placeholder="e.g. Inside polybag")
+
+                        if st.button(f"➕ Add to {sel_buyer_pkg} Packaging"):
+                            if pkg_item:
+                                st.session_state[pkg_key].append({
+                                    "item_code": pkg_item,
+                                    "item_name": packing_items[pkg_item].get("name", pkg_item),
+                                    "item_type": packing_items[pkg_item].get("item_type", ""),
+                                    "qty":       pkg_qty,
+                                    "uom":       pkg_uom,
+                                    "remarks":   pkg_remarks,
+                                })
+                                st.rerun()
+
+                # Show current lines
+                lines = st.session_state[pkg_key]
+                if lines:
+                    st.markdown(f"##### {sel_buyer_pkg} — Packaging Lines")
+                    for idx, ln in enumerate(lines):
+                        lc1, lc2, lc3, lc4, lc5 = st.columns([2, 2, 1, 1, 0.5])
+                        with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["item_code"]}</strong></div>', unsafe_allow_html=True)
+                        with lc2: st.markdown(f'<div style="padding-top:8px;font-size:13px;">{ln["item_name"]}</div>', unsafe_allow_html=True)
+                        with lc3: st.markdown(f'<div style="padding-top:8px;font-size:13px;">{ln["qty"]} {ln["uom"]}</div>', unsafe_allow_html=True)
+                        with lc4: st.markdown(f'<div style="padding-top:8px;font-size:13px;color:#64748b;">{ln.get("remarks","")}</div>', unsafe_allow_html=True)
+                        with lc5:
+                            if st.button("🗑", key=f"del_pkg_{sel_buyer_pkg}_{idx}"):
+                                st.session_state[pkg_key].pop(idx)
+                                st.rerun()
+                        st.markdown('<hr style="margin:2px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="warn-box">Koi packing item nahi add kiya abhi tak.</div>', unsafe_allow_html=True)
+
+            # Build buyer_packaging dict for saving
+            buyer_packaging = {}
+            for b in buyers_list:
+                bkey = f"pkg_lines_{b}"
+                if st.session_state.get(bkey):
+                    buyer_packaging[b] = st.session_state[bkey]
     
     # Save Button
     st.markdown("---")
@@ -1056,20 +1108,19 @@ elif nav == "📦 Buyer Packaging":
     with col2:
         st.markdown("#### View Item Packaging Definitions")
         items_with_packaging = {k: v for k, v in st.session_state["items"].items() if v.get("buyer_packaging")}
-        
+
         if items_with_packaging:
             for item_code, item in items_with_packaging.items():
                 pkg = item.get("buyer_packaging", {})
                 if pkg:
                     with st.expander(f"📦 {item_code} – {item.get('name', '')}"):
-                        for buyer, details in pkg.items():
-                            non_empty = {k: v for k, v in details.items() if v}
-                            if non_empty:
-                                st.markdown(f"**{buyer}:**")
-                                pkg_str = " | ".join([f"{k.replace('_', ' ').title()}: {v}" for k, v in non_empty.items()])
-                                st.markdown(f'<div class="card" style="padding:8px;">{pkg_str}</div>', unsafe_allow_html=True)
+                        for buyer, lines in pkg.items():
+                            if lines:
+                                st.markdown(f"**{buyer}**")
+                                for ln in lines:
+                                    st.markdown(f'<div class="card" style="padding:8px 12px;margin:3px 0;display:flex;gap:16px;font-size:13px;"><span class="tag tag-gold">{ln.get("item_code","")}</span> <span>{ln.get("item_name","")}</span> <span style="color:#64748b;">{ln.get("qty","")} {ln.get("uom","")}</span> <span style="color:#94a3b8;">{ln.get("remarks","")}</span></div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="warn-box">No buyer packaging defined yet. Define packaging when creating items.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="warn-box">No buyer packaging defined yet. Item create karte waqt Buyer Packaging tab mein define karo.</div>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════
 # SALES ORDER MODULE
