@@ -213,39 +213,58 @@ SIZES_ALL = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "Free Size"]
 HSN_CODES = ["6211", "6206", "6204", "6203", "6205", "6207", "6208", "6212", "5208", "5209"]
 
 
-# ─── Sidebar ────────────────────────────────────────────────────────────────────────────────
-IM_PAGES = [
-    "📊 Item Master Dashboard",
-    "➕ Create Item",
-    "📋 Item Master List",
-    "🔩 BOM Management",
-    "🔄 Routing Master",
-    "👤 Merchant Master",
-    "📦 Buyer Packaging",
+# ─── Page routing via session state ────────────────────────────────────────────────
+ALL_PAGES = [
+    ("IM", "📊 Item Master Dashboard"),
+    ("IM", "➕ Create Item"),
+    ("IM", "📋 Item Master List"),
+    ("IM", "🔩 BOM Management"),
+    ("IM", "🔄 Routing Master"),
+    ("IM", "👤 Merchant Master"),
+    ("IM", "📦 Buyer Packaging"),
+    ("SO", "📊 SO Dashboard"),
+    ("SO", "📋 Demand Management"),
+    ("SO", "➕ Create Sales Order"),
+    ("SO", "📂 SO List & Tracking"),
+    ("SO", "📈 SO Reports"),
+    ("SO", "⚙️ SO Settings"),
 ]
-SO_PAGES = [
-    "📊 SO Dashboard",
-    "📋 Demand Management",
-    "➕ Create Sales Order",
-    "📂 SO List & Tracking",
-    "📈 SO Reports",
-    "⚙️ SO Settings",
-]
-ALL_PAGES = IM_PAGES + SO_PAGES
+IM_PAGES = [p for m, p in ALL_PAGES if m == "IM"]
+SO_PAGES = [p for m, p in ALL_PAGES if m == "SO"]
+
+if "current_page" not in st.session_state:
+    st.session_state["current_page"] = "📊 Item Master Dashboard"
 
 with st.sidebar:
     st.markdown('<div style="padding:16px 4px 8px;"><div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div><div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div></div>', unsafe_allow_html=True)
     st.markdown("---")
-    st.caption("ITEM MASTER")
-    _page = st.radio("Menu", ALL_PAGES, label_visibility="collapsed", key="main_nav")
+
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px 0;">ITEM MASTER</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="IM"]:
+        is_active = st.session_state["current_page"] == pg
+        btn_style = "background:#c8a96e;color:#1c1c2e;font-weight:700;" if is_active else "background:transparent;color:#bbb;"
+        st.markdown(f'<div style="margin:1px 0;">', unsafe_allow_html=True)
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">SALES</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="SO"]:
+        is_active = st.session_state["current_page"] == pg
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
     st.markdown("---")
     _ni = len(st.session_state.get("items", {}))
     _nb = len(st.session_state.get("boms", {}))
     _no = sum(1 for s in st.session_state.get("so_list", {}).values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
     st.caption(f"Items: {_ni} | BOMs: {_nb} | Open SO: {_no}")
 
-nav    = _page if _page in IM_PAGES else None
-nav_so = _page if _page in SO_PAGES else None
+# Route to correct page
+_cp  = st.session_state["current_page"]
+nav    = _cp if _cp in IM_PAGES else None
+nav_so = _cp if _cp in SO_PAGES else None
 
 SS = st.session_state
 
