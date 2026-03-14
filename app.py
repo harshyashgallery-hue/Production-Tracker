@@ -1072,7 +1072,7 @@ elif nav == "📦 Buyer Packaging":
 # ═══════════════════════════════════════════════════════════════════════
 # SALES ORDER MODULE
 # ═══════════════════════════════════════════════════════════════════════
-if nav_so == "📊 SO Dashboard":
+elif nav_so == "📊 SO Dashboard":
     st.markdown('<h1>Sales Order Dashboard</h1>', unsafe_allow_html=True)
 
     # KPI Cards
