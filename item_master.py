@@ -1608,19 +1608,79 @@ elif nav_so == "➕ Create Sales Order":
 
         so_lines = st.session_state["new_so_lines"]
         if so_lines:
-            df_lines = pd.DataFrame(so_lines)
-            show = ["sku","sku_name","size","priority","merchant","qty","uom","rate","gst_pct","taxable","total","delivery_date","remarks"]
-            show = [c for c in show if c in df_lines.columns]
-            st.dataframe(df_lines[show].rename(columns={
-                "sku":"SKU","sku_name":"Name","size":"Size","priority":"Priority","merchant":"Merchant",
-                "qty":"Qty","uom":"UOM","rate":"Rate(₹)","gst_pct":"GST%",
-                "taxable":"Taxable(₹)","total":"Line Total(₹)","delivery_date":"Delivery","remarks":"Remarks"
-            }), use_container_width=True, hide_index=True)
+            st.markdown("#### ✏️ Lines — directly edit karo (Qty, Rate, GST%, Delivery, Priority, Remarks)")
 
-            del_line = st.number_input("Delete line # (1-based, 0=none)", min_value=0, max_value=len(so_lines), step=1, key="del_so_line")
-            if st.button("🗑 Delete Line") and del_line > 0:
-                st.session_state["new_so_lines"].pop(del_line - 1)
+            im_merchants = st.session_state.get("merchants", {})
+            merchant_opts_list = [""] + [f"{k} – {v}" for k, v in im_merchants.items()]
+
+            # Build editable dataframe
+            edit_df = pd.DataFrame([{
+                "SKU":          ln["sku"],
+                "Name":         ln.get("sku_name",""),
+                "Size":         ln.get("size",""),
+                "Qty":          int(ln.get("qty", 0)),
+                "Rate (₹)":     float(ln.get("rate", 0)),
+                "GST %":        int(ln.get("gst_pct", 12)),
+                "Merchant":     ln.get("merchant",""),
+                "Priority":     ln.get("priority","Normal"),
+                "Delivery":     ln.get("delivery_date", str(date.today() + timedelta(days=21))),
+                "Remarks":      ln.get("remarks",""),
+            } for ln in so_lines])
+
+            edited = st.data_editor(
+                edit_df,
+                use_container_width=True,
+                hide_index=False,
+                num_rows="dynamic",
+                column_config={
+                    "SKU":      st.column_config.TextColumn("SKU", disabled=True, width="small"),
+                    "Name":     st.column_config.TextColumn("Name", disabled=True, width="medium"),
+                    "Size":     st.column_config.TextColumn("Size", disabled=True, width="small"),
+                    "Qty":      st.column_config.NumberColumn("Qty", min_value=0, step=1, width="small"),
+                    "Rate (₹)": st.column_config.NumberColumn("Rate (₹)", min_value=0.0, step=1.0, width="small"),
+                    "GST %":    st.column_config.SelectboxColumn("GST %", options=GST_RATES, width="small"),
+                    "Merchant": st.column_config.SelectboxColumn("Merchant", options=merchant_opts_list, width="medium"),
+                    "Priority": st.column_config.SelectboxColumn("Priority", options=["Normal","High","Urgent"], width="small"),
+                    "Delivery": st.column_config.TextColumn("Delivery (YYYY-MM-DD)", width="small"),
+                    "Remarks":  st.column_config.TextColumn("Remarks", width="medium"),
+                },
+                key="so_lines_editor"
+            )
+
+            # Apply edits back to session state
+            if st.button("✅ Apply Edits", use_container_width=False):
+                updated_lines = []
+                for i, row in edited.iterrows():
+                    if pd.isna(row.get("SKU")) or row.get("SKU","") == "":
+                        continue  # skip deleted rows
+                    qty     = int(row["Qty"]) if not pd.isna(row["Qty"]) else 0
+                    rate    = float(row["Rate (₹)"]) if not pd.isna(row["Rate (₹)"]) else 0.0
+                    gst     = int(row["GST %"]) if not pd.isna(row["GST %"]) else 12
+                    taxable = qty * rate
+                    gst_amt = taxable * gst / 100
+                    # Preserve original line data, update editable fields
+                    orig = so_lines[i] if i < len(so_lines) else {}
+                    updated_lines.append({
+                        **orig,
+                        "qty":          qty,
+                        "rate":         rate,
+                        "gst_pct":      gst,
+                        "merchant":     row.get("Merchant",""),
+                        "priority":     row.get("Priority","Normal"),
+                        "delivery_date":str(row.get("Delivery", "")),
+                        "remarks":      row.get("Remarks",""),
+                        "taxable":      round(taxable, 2),
+                        "gst_amount":   round(gst_amt, 2),
+                        "total":        round(taxable + gst_amt, 2),
+                    })
+                st.session_state["new_so_lines"] = updated_lines
+                st.success("✅ Lines updated!")
                 st.rerun()
+
+            # Summary
+            _sub = sum(ln.get("taxable",0) for ln in so_lines)
+            _gst = sum(ln.get("gst_amount",0) for ln in so_lines)
+            st.markdown(f'<div class="info-box" style="margin-top:8px;">Lines: <strong>{len(so_lines)}</strong> &nbsp;|&nbsp; Subtotal: <strong>₹{_sub:,.0f}</strong> &nbsp;|&nbsp; GST: <strong>₹{_gst:,.0f}</strong> &nbsp;|&nbsp; Total: <strong>₹{_sub+_gst:,.0f}</strong></div>', unsafe_allow_html=True)
 
     with so_tab3:
         so_lines = st.session_state["new_so_lines"]
