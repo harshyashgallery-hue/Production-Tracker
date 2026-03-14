@@ -6,7 +6,7 @@ import uuid
 
 # ─── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Garment ERP – Item Master & BOM",
+    page_title="Garment ERP v2",
     page_icon="🧵",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -213,51 +213,58 @@ SIZES_ALL = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "Free Size"]
 HSN_CODES = ["6211", "6206", "6204", "6203", "6205", "6207", "6208", "6212", "5208", "5209"]
 
 
-# ─── Sidebar ────────────────────────────────────────────────────────────────────
+# ─── Page routing via session state ────────────────────────────────────────────────
+ALL_PAGES = [
+    ("IM", "📊 Item Master Dashboard"),
+    ("IM", "➕ Create Item"),
+    ("IM", "📋 Item Master List"),
+    ("IM", "🔩 BOM Management"),
+    ("IM", "🔄 Routing Master"),
+    ("IM", "👤 Merchant Master"),
+    ("IM", "📦 Buyer Packaging"),
+    ("SO", "📊 SO Dashboard"),
+    ("SO", "📋 Demand Management"),
+    ("SO", "➕ Create Sales Order"),
+    ("SO", "📂 SO List & Tracking"),
+    ("SO", "📈 SO Reports"),
+    ("SO", "⚙️ SO Settings"),
+]
+IM_PAGES = [p for m, p in ALL_PAGES if m == "IM"]
+SO_PAGES = [p for m, p in ALL_PAGES if m == "SO"]
+
+if "current_page" not in st.session_state:
+    st.session_state["current_page"] = "📊 Item Master Dashboard"
+
 with st.sidebar:
-    st.markdown('''<div style="padding:16px 4px 4px;">
-        <div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div>
-        <div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div>
-    </div>''', unsafe_allow_html=True)
+    st.markdown('<div style="padding:16px 4px 8px;"><div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div><div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div></div>', unsafe_allow_html=True)
     st.markdown("---")
 
-    st.markdown('<div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;padding-left:4px;">Item Master</div>', unsafe_allow_html=True)
-    nav = st.radio("nav", [
-        "📊 Item Master Dashboard",
-        "➕ Create Item",
-        "📋 Item Master List",
-        "🔩 BOM Management",
-        "🔄 Routing Master",
-        "👤 Merchant Master",
-        "📦 Buyer Packaging",
-    ], label_visibility="collapsed")
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px 0;">ITEM MASTER</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="IM"]:
+        is_active = st.session_state["current_page"] == pg
+        btn_style = "background:#c8a96e;color:#1c1c2e;font-weight:700;" if is_active else "background:transparent;color:#bbb;"
+        st.markdown(f'<div style="margin:1px 0;">', unsafe_allow_html=True)
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">SALES</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="SO"]:
+        is_active = st.session_state["current_page"] == pg
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
 
     st.markdown("---")
-    st.markdown('<div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;padding-left:4px;">Sales</div>', unsafe_allow_html=True)
-    nav_so = st.radio("nav_so", [
-        "📊 SO Dashboard",
-        "📋 Demand Management",
-        "➕ Create Sales Order",
-        "📂 SO List & Tracking",
-        "📈 SO Reports",
-        "⚙️ SO Settings",
-    ], label_visibility="collapsed")
+    _ni = len(st.session_state.get("items", {}))
+    _nb = len(st.session_state.get("boms", {}))
+    _no = sum(1 for s in st.session_state.get("so_list", {}).values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
+    st.caption(f"Items: {_ni} | BOMs: {_nb} | Open SO: {_no}")
 
-    # Active module logic
-    if nav_so != "📊 SO Dashboard" and st.session_state.get("_last_click") == "so":
-        active_module = "SO"
-    elif nav != "📊 Item Master Dashboard" and st.session_state.get("_last_click") == "im":
-        active_module = "IM"
-    else:
-        active_module = st.session_state.get("_active_module", "IM")
-
-    st.markdown("---")
-    n_items = len(st.session_state.get("items", {}))
-    n_boms  = len(st.session_state.get("boms", {}))
-    open_so = sum(1 for s in st.session_state.get("so_list", {}).values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
-    st.markdown(f'<div style="font-size:11px;color:#888;padding:2px 4px;">Items: <strong style="color:#c8a96e;">{n_items}</strong> | BOMs: <strong style="color:#c8a96e;">{n_boms}</strong> | Open SO: <strong style="color:#c8a96e;">{open_so}</strong></div>', unsafe_allow_html=True)
-
-
+# Route to correct page
+_cp  = st.session_state["current_page"]
+nav    = _cp if _cp in IM_PAGES else None
+nav_so = _cp if _cp in SO_PAGES else None
 
 SS = st.session_state
 
@@ -1061,7 +1068,7 @@ elif nav == "📦 Buyer Packaging":
 # ═══════════════════════════════════════════════════════════════════════
 # SALES ORDER MODULE
 # ═══════════════════════════════════════════════════════════════════════
-if nav_so == "📊 SO Dashboard":
+elif nav_so == "📊 SO Dashboard":
     st.markdown('<h1>Sales Order Dashboard</h1>', unsafe_allow_html=True)
 
     # KPI Cards
