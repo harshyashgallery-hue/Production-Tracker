@@ -626,83 +626,134 @@ elif nav == "➕ Create Item":
 # ═══════════════════════════════════════════════════════════════════════════════
 elif nav == "📋 Item Master List":
     st.markdown('<h1>Item Master List</h1>', unsafe_allow_html=True)
-    
+
+    if "edit_item_code" not in st.session_state:
+        st.session_state["edit_item_code"] = None
+
     if not st.session_state["items"]:
         st.markdown('<div class="warn-box">No items created yet. Go to "Create Item" to add items.</div>', unsafe_allow_html=True)
     else:
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            filter_type = st.selectbox("Filter by Type", ["All"] + ITEM_TYPES)
-        with col2:
-            filter_season = st.selectbox("Filter by Season", ["All"] + SEASONS)
-        with col3:
-            search = st.text_input("🔍 Search by Name/Code", placeholder="Type to filter...")
-        
-        items_list = []
-        for code, item in st.session_state["items"].items():
-            if filter_type != "All" and item.get("item_type") != filter_type:
-                continue
-            if filter_season != "All" and item.get("season") != filter_season:
-                continue
-            if search and search.lower() not in code.lower() and search.lower() not in item.get("name", "").lower():
-                continue
-            
-            has_bom = code in st.session_state["boms"]
-            bom_status = st.session_state["boms"].get(code, {}).get("status", "—") if has_bom else "—"
-            
-            items_list.append({
-                "Item Code": code,
-                "Item Name": item.get("name"),
-                "Type": item.get("item_type", "").replace(" (FG)", "").replace(" (SFG)", "").replace(" (RM)", ""),
-                "Season": item.get("season", ""),
-                "Sizes": ", ".join(item.get("sizes", [])) or "—",
-                "Selling Price": f"₹{item.get('selling_price', 0):,.0f}",
-                "Parent": item.get("parent") or "—",
-                "BOM": bom_status,
-            })
-        
-        df = pd.DataFrame(items_list)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.caption(f"Showing {len(items_list)} items")
-        
-        # Item Detail View
-        st.markdown("---")
-        st.markdown("#### Item Detail View")
-        selected_item_code = st.selectbox("Select item to view details", 
-                                           [""] + list(st.session_state["items"].keys()))
-        if selected_item_code:
-            item = st.session_state["items"][selected_item_code]
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(f'''<div class="card card-accent">
-                    <div style="color:var(--text-muted); font-size:11px;">ITEM CODE</div>
-                    <div style="font-family:'DM Mono', monospace; font-size:18px; color:var(--accent);">{item["code"]}</div>
-                    <div style="margin-top:8px; font-weight:500;">{item["name"]}</div>
-                    <div style="margin-top:4px;"><span class="tag">{item.get("item_type","")}</span></div>
-                </div>''', unsafe_allow_html=True)
-            with col2:
-                st.markdown(f'''<div class="card">
-                    <div style="color:var(--text-muted); font-size:11px; margin-bottom:8px;">COMMERCIAL DETAILS</div>
-                    <div style="font-size:13px;">HSN: <strong>{item.get("hsn","")}</strong></div>
-                    <div style="font-size:13px;">Season: <strong>{item.get("season","")}</strong></div>
-                    <div style="font-size:13px;">Selling: <strong>₹{item.get("selling_price",0):,.0f}</strong></div>
-                    <div style="font-size:13px;">Purchase: <strong>₹{item.get("purchase_price",0):,.0f}</strong></div>
-                </div>''', unsafe_allow_html=True)
-            with col3:
-                route = item.get("routing", [])
-                route_html = " → ".join([f'<span class="tag tag-accent">{p}</span>' for p in route]) if route else "No routing defined"
-                st.markdown(f'''<div class="card">
-                    <div style="color:var(--text-muted); font-size:11px; margin-bottom:8px;">ROUTING</div>
-                    {route_html}
-                </div>''', unsafe_allow_html=True)
-            
-            # Child SKUs
-            child_skus = [c for c, d in st.session_state["items"].items() if d.get("parent") == selected_item_code]
-            if child_skus:
-                st.markdown("**Child SKUs:**")
-                for sku in child_skus:
-                    st.markdown(f'<span class="tag tag-accent">{sku}</span>', unsafe_allow_html=True)
+        # ── If edit mode ──────────────────────────────────────────────────────
+        if st.session_state["edit_item_code"] and st.session_state["edit_item_code"] in st.session_state["items"]:
+            ec   = st.session_state["edit_item_code"]
+            item = st.session_state["items"][ec]
+
+            bc1, bc2 = st.columns([1, 6])
+            with bc1:
+                if st.button("← Back"):
+                    st.session_state["edit_item_code"] = None
+                    st.rerun()
+            with bc2:
+                st.markdown(f'<h3 style="margin:0;">Edit Item — <span style="color:#c8a96e;">{ec}</span></h3>', unsafe_allow_html=True)
+
+            st.markdown("---")
+            e1, e2 = st.columns(2)
+            with e1:
+                e_name   = st.text_input("Item Name *", value=item.get("name",""), key="e_name")
+                e_type   = st.selectbox("Item Category", ITEM_TYPES, index=ITEM_TYPES.index(item.get("item_type", ITEM_TYPES[0])), key="e_type")
+                e_season = st.selectbox("Season", SEASONS, index=SEASONS.index(item.get("season", SEASONS[0])) if item.get("season") in SEASONS else 0, key="e_season")
+            with e2:
+                merchant_opts_e = ["Select Merchant..."] + [f"{k} – {v}" for k, v in st.session_state["merchants"].items()]
+                cur_merch = item.get("merchant","")
+                merch_idx = next((i for i, o in enumerate(merchant_opts_e) if o.startswith(cur_merch.split(" –")[0])), 0)
+                e_merchant = st.selectbox("Merchant Code", merchant_opts_e, index=merch_idx, key="e_merchant")
+                e_hsn      = st.selectbox("HSN Code", HSN_CODES, index=HSN_CODES.index(item.get("hsn", HSN_CODES[0])) if item.get("hsn") in HSN_CODES else 0, key="e_hsn")
+                e_sp, e_pp = st.columns(2)
+                with e_sp: e_selling  = st.number_input("Selling Price (₹)", value=float(item.get("selling_price",0)), step=10.0, key="e_sp")
+                with e_pp: e_purchase = st.number_input("Purchase Price (₹)", value=float(item.get("purchase_price",0)), step=10.0, key="e_pp")
+
+            e_desc    = st.text_area("Description", value=item.get("description",""), key="e_desc")
+
+            st.markdown("---")
+            sv1, sv2 = st.columns(2)
+            with sv1:
+                if st.button("💾 Save Changes", use_container_width=True):
+                    st.session_state["items"][ec].update({
+                        "name":           e_name,
+                        "item_type":      e_type,
+                        "season":         e_season,
+                        "merchant":       e_merchant,
+                        "hsn":            e_hsn,
+                        "selling_price":  e_selling,
+                        "purchase_price": e_purchase,
+                        "description":    e_desc,
+                    })
+                    save_data()
+                    st.success(f"✅ Item '{e_name}' updated!")
+                    st.session_state["edit_item_code"] = None
+                    st.rerun()
+            with sv2:
+                if st.button("✖ Cancel", use_container_width=True):
+                    st.session_state["edit_item_code"] = None
+                    st.rerun()
+
+        # ── List mode ─────────────────────────────────────────────────────────
+        else:
+            # Filters
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1: filter_type   = st.selectbox("Filter by Type", ["All"] + ITEM_TYPES)
+            with fc2: filter_season = st.selectbox("Filter by Season", ["All"] + SEASONS)
+            with fc3: search        = st.text_input("🔍 Search by Name/Code", placeholder="Type to filter...")
+
+            filtered = {}
+            for code, item in st.session_state["items"].items():
+                if filter_type != "All" and item.get("item_type") != filter_type: continue
+                if filter_season != "All" and item.get("season") != filter_season: continue
+                if search and search.lower() not in code.lower() and search.lower() not in item.get("name","").lower(): continue
+                filtered[code] = item
+
+            st.markdown(f'<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Showing <strong>{len(filtered)}</strong> of <strong>{len(st.session_state["items"])}</strong> items</div>', unsafe_allow_html=True)
+
+            # Confirm delete state
+            if "confirm_delete_item" not in st.session_state:
+                st.session_state["confirm_delete_item"] = None
+
+            for code, item in filtered.items():
+                has_bom    = code in st.session_state["boms"]
+                bom_status = st.session_state["boms"].get(code,{}).get("status","—") if has_bom else "—"
+                child_count = sum(1 for d in st.session_state["items"].values() if d.get("parent") == code)
+
+                r1, r2, r3, r4, r5, r6 = st.columns([1.5, 2.5, 1.2, 1, 0.8, 0.8])
+                with r1:
+                    st.markdown(f'<div style="padding-top:8px;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:#c8a96e;">{code}</div>', unsafe_allow_html=True)
+                with r2:
+                    st.markdown(f'<div style="padding-top:6px;"><div style="font-size:13px;font-weight:600;">{item.get("name","")}</div><div style="font-size:11px;color:#94a3b8;">{item.get("item_type","")}</div></div>', unsafe_allow_html=True)
+                with r3:
+                    st.markdown(f'<div style="padding-top:8px;font-size:12px;">{item.get("season","—")}</div>', unsafe_allow_html=True)
+                with r4:
+                    st.markdown(f'<div style="padding-top:8px;font-size:12px;">₹{item.get("selling_price",0):,.0f}</div>', unsafe_allow_html=True)
+                with r5:
+                    if st.button("✏️ Edit", key=f"edit_{code}", use_container_width=True):
+                        st.session_state["edit_item_code"] = code
+                        st.session_state["confirm_delete_item"] = None
+                        st.rerun()
+                with r6:
+                    if st.session_state["confirm_delete_item"] == code:
+                        if st.button("✅ Confirm", key=f"conf_del_{code}", use_container_width=True):
+                            # Delete item and its children
+                            children = [c for c, d in st.session_state["items"].items() if d.get("parent") == code]
+                            for child in children:
+                                del st.session_state["items"][child]
+                            del st.session_state["items"][code]
+                            if code in st.session_state["boms"]:
+                                del st.session_state["boms"][code]
+                            if code in st.session_state["routings"]:
+                                del st.session_state["routings"][code]
+                            save_data()
+                            st.session_state["confirm_delete_item"] = None
+                            st.success(f"'{code}' deleted!")
+                            st.rerun()
+                    else:
+                        if st.button("🗑 Delete", key=f"del_{code}", use_container_width=True):
+                            st.session_state["confirm_delete_item"] = code
+                            st.rerun()
+
+                # Confirm warning
+                if st.session_state["confirm_delete_item"] == code:
+                    _warn = f"⚠️ '{code}' delete hoga" + (f" + {child_count} child SKUs" if child_count else "") + ". Pakka?"
+                    st.markdown(f'<div class="danger-box" style="margin:2px 0 4px 0;">{_warn}</div>', unsafe_allow_html=True)
+
+                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BOM MANAGEMENT
