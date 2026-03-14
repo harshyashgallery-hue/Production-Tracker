@@ -231,33 +231,58 @@ SO_PAGES = [
     "📈 SO Reports",
     "⚙️ SO Settings",
 ]
-
-if "active_page" not in st.session_state:
-    st.session_state["active_page"] = "📊 Item Master Dashboard"
+ALL_PAGES = IM_PAGES + SO_PAGES
 
 with st.sidebar:
     st.markdown('''<div style="padding:16px 4px 4px;">
         <div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div>
         <div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div>
     </div>''', unsafe_allow_html=True)
-    st.markdown("---")
 
-    st.markdown('<div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;padding-left:4px;">Item Master</div>', unsafe_allow_html=True)
-    for _p in IM_PAGES:
-        _active = st.session_state["active_page"] == _p
-        _label = f"► {_p}" if _active else f"  {_p}"
-        if st.button(_label, key=f"nav__{_p}", use_container_width=True):
-            st.session_state["active_page"] = _p
-            st.rerun()
+    # Add visual labels via CSS injection into radio options
+    st.markdown('''<style>
+    /* Style the sidebar radio to look like a nav menu */
+    div[data-testid="stSidebar"] .stRadio > div { gap: 0 !important; }
+    div[data-testid="stSidebar"] .stRadio label {
+        padding: 6px 8px !important;
+        border-radius: 6px !important;
+        font-size: 13px !important;
+        cursor: pointer !important;
+        transition: background 0.15s !important;
+        color: #ccc !important;
+    }
+    div[data-testid="stSidebar"] .stRadio label:hover { background: rgba(200,169,110,0.1) !important; }
+    div[data-testid="stSidebar"] .stRadio [data-checked="true"] label,
+    div[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
+        background: rgba(200,169,110,0.15) !important;
+        color: #c8a96e !important;
+        font-weight: 700 !important;
+    }
+    </style>''', unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown('<div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;padding-left:4px;">Sales</div>', unsafe_allow_html=True)
-    for _p in SO_PAGES:
-        _active = st.session_state["active_page"] == _p
-        _label = f"► {_p}" if _active else f"  {_p}"
-        if st.button(_label, key=f"nav__{_p}", use_container_width=True):
-            st.session_state["active_page"] = _p
-            st.rerun()
+    st.markdown('<div style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 2px 4px;">ITEM MASTER</div>', unsafe_allow_html=True)
+    _page_im = st.radio("im_nav", IM_PAGES, label_visibility="collapsed", key="im_nav")
+
+    st.markdown('<div style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 2px 4px;">SALES</div>', unsafe_allow_html=True)
+    _page_so = st.radio("so_nav", SO_PAGES, label_visibility="collapsed", key="so_nav")
+
+    # Determine which was clicked last
+    if "im_nav" not in st.session_state: st.session_state["im_nav"] = IM_PAGES[0]
+    if "so_nav" not in st.session_state: st.session_state["so_nav"] = SO_PAGES[0]
+    if "last_module" not in st.session_state: st.session_state["last_module"] = "im"
+
+    # Track which radio changed by comparing with stored previous values
+    _prev_im = st.session_state.get("_prev_im", IM_PAGES[0])
+    _prev_so = st.session_state.get("_prev_so", SO_PAGES[0])
+
+    if _page_im != _prev_im:
+        st.session_state["last_module"] = "im"
+        st.session_state["_prev_im"] = _page_im
+    elif _page_so != _prev_so:
+        st.session_state["last_module"] = "so"
+        st.session_state["_prev_so"] = _page_so
+
+    _page = _page_im if st.session_state["last_module"] == "im" else _page_so
 
     st.markdown("---")
     n_items = len(st.session_state.get("items", {}))
@@ -265,10 +290,9 @@ with st.sidebar:
     open_so = sum(1 for s in st.session_state.get("so_list", {}).values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
     st.markdown(f'<div style="font-size:11px;color:#888;padding:2px 4px;">Items: <strong style="color:#c8a96e;">{n_items}</strong> | BOMs: <strong style="color:#c8a96e;">{n_boms}</strong> | Open SO: <strong style="color:#c8a96e;">{open_so}</strong></div>', unsafe_allow_html=True)
 
-# Active page routing
-_pg   = st.session_state["active_page"]
-nav    = _pg if _pg in IM_PAGES else None
-nav_so = _pg if _pg in SO_PAGES else None
+# Single active page — one radio, one source of truth
+nav    = _page if _page in IM_PAGES else None
+nav_so = _page if _page in SO_PAGES else None
 
 SS = st.session_state
 
