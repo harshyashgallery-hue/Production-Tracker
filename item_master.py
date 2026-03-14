@@ -322,17 +322,26 @@ def get_sku_info(sku):
     return SS["skus"].get(sku, {"name": sku, "parent": "", "size": "", "price": 0, "stock": 0, "reserved": 0, "in_production": 0})
 
 def get_all_skus():
-    """Return all SKUs from Item Master (items that are size variants or FG with no children)"""
+    """Return all SKUs from Item Master (size variants + standalone FG).
+    Returns dict: code -> display label including parent"""
     items = st.session_state.get("items", {})
     so_skus = {}
     for code, item in items.items():
-        # Include size variants (have a parent) and standalone FG items
-        if item.get("parent") or (item.get("item_type","") == "Finished Goods (FG)" and not item.get("sizes")):
-            so_skus[code] = item.get("name", code)
+        parent = item.get("parent", "")
+        if parent or (item.get("item_type","") == "Finished Goods (FG)" and not item.get("sizes")):
+            # Label: "PARENT-CODE | SKU-CODE – Item Name"
+            if parent:
+                so_skus[code] = f"{parent} | {code} – {item.get('name', code)}"
+            else:
+                so_skus[code] = f"{code} – {item.get('name', code)}"
     # Merge with demo skus for fallback
     for k, v in SS["skus"].items():
         if k not in so_skus:
-            so_skus[k] = v.get("name", k)
+            parent = v.get("parent","")
+            if parent:
+                so_skus[k] = f"{parent} | {k} – {v.get('name', k)}"
+            else:
+                so_skus[k] = v.get("name", k)
     return so_skus
 
 def avg_daily_sale(sku):
@@ -1318,7 +1327,7 @@ elif nav_so == "📋 Demand Management":
             with dc1:
                 _all_skus_d = get_all_skus()
                 d_sku = st.selectbox("SKU *", [""] + list(_all_skus_d.keys()),
-                                     format_func=lambda x: f"{x} – {_all_skus_d.get(x,'')}" if x else "— Select SKU —",
+                                     format_func=lambda x: _all_skus_d.get(x, x) if x else "— Select SKU —",
                                      key="d_sku")
                 if d_sku:
                     _di = get_sku_info(d_sku)
@@ -1347,8 +1356,11 @@ elif nav_so == "📋 Demand Management":
         dem_lines = st.session_state[dem_lines_key]
         if dem_lines:
             df_dem = pd.DataFrame(dem_lines)
-            st.dataframe(df_dem[["sku","sku_name","size","demand_qty","uom","remarks"]].rename(columns={
-                "sku":"SKU","sku_name":"Name","size":"Size","demand_qty":"Demand Qty","uom":"UOM","remarks":"Remarks"
+            _dem_show_cols = ["parent","sku","sku_name","size","demand_qty","uom","remarks"]
+            _dem_show_cols = [c for c in _dem_show_cols if c in df_dem.columns]
+            st.dataframe(df_dem[_dem_show_cols].rename(columns={
+                "parent":"Parent Item","sku":"SKU","sku_name":"Name","size":"Size",
+                "demand_qty":"Demand Qty","uom":"UOM","remarks":"Remarks"
             }), use_container_width=True, hide_index=True)
 
             if st.button("💾 Save Demand"):
@@ -1533,7 +1545,7 @@ elif nav_so == "➕ Create Sales Order":
             lc1, lc2, lc3 = st.columns(3)
             with lc1:
                 line_sku = st.selectbox("SKU *", [""] + list(all_skus.keys()),
-                                         format_func=lambda x: f"{x} – {all_skus.get(x,'')}" if x else "— Select SKU —",
+                                         format_func=lambda x: all_skus.get(x, x) if x else "— Select SKU —",
                                          key="line_sku")
                 if line_sku:
                     info = get_sku_info(line_sku)
@@ -1615,6 +1627,7 @@ elif nav_so == "➕ Create Sales Order":
 
             # Build editable dataframe
             edit_df = pd.DataFrame([{
+                "Parent":       ln.get("parent",""),
                 "SKU":          ln["sku"],
                 "Name":         ln.get("sku_name",""),
                 "Size":         ln.get("size",""),
@@ -1633,6 +1646,7 @@ elif nav_so == "➕ Create Sales Order":
                 hide_index=False,
                 num_rows="dynamic",
                 column_config={
+                    "Parent":   st.column_config.TextColumn("Parent Item", disabled=True, width="small"),
                     "SKU":      st.column_config.TextColumn("SKU", disabled=True, width="small"),
                     "Name":     st.column_config.TextColumn("Name", disabled=True, width="medium"),
                     "Size":     st.column_config.TextColumn("Size", disabled=True, width="small"),
