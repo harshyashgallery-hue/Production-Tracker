@@ -1786,7 +1786,7 @@ elif nav_so == "📂 SO List & Tracking":
         so     = SS["so_list"][sel_so]
 
         # ── Top bar ────────────────────────────────────────────────────────────
-        back_col, title_col, status_col = st.columns([1, 4, 2])
+        back_col, title_col, status_col, print_col = st.columns([1, 4, 1.5, 1.5])
         with back_col:
             if st.button("← Back to List"):
                 st.session_state["selected_so"] = None
@@ -1795,6 +1795,168 @@ elif nav_so == "📂 SO List & Tracking":
             st.markdown(f'<h1 style="margin:0;">Sales Order — {sel_so}</h1>', unsafe_allow_html=True)
         with status_col:
             st.markdown(f'<div style="padding-top:12px;">{badge(so.get("status","Draft"))}</div>', unsafe_allow_html=True)
+        with print_col:
+            if st.button("🖨️ Print / PDF", use_container_width=True):
+                st.session_state["print_so"] = sel_so
+
+        # ── Print view ─────────────────────────────────────────────────────────
+        if st.session_state.get("print_so") == sel_so:
+            lines    = so.get("lines", [])
+            disc_pct = so.get("discount_pct", 0)
+            subtotal = so.get("subtotal", 0)
+            disc_amt = subtotal * disc_pct / 100
+            rows_html = ""
+            for i, ln in enumerate(lines, 1):
+                pri_color = {"Urgent":"#dc2626","High":"#d97706","Normal":"#16a34a"}.get(ln.get("priority","Normal"),"#16a34a")
+                rows_html += f"""
+                <tr>
+                    <td>{i}</td>
+                    <td><strong>{ln.get('sku','')}</strong><br><span style="color:#666;font-size:11px;">{ln.get('sku_name','')}</span></td>
+                    <td>{ln.get('size','—')}</td>
+                    <td style="color:{pri_color};font-weight:600;">{ln.get('priority','Normal')}</td>
+                    <td>{ln.get('hsn','—')}</td>
+                    <td style="text-align:center;">{ln.get('qty',0)}</td>
+                    <td style="text-align:center;">{ln.get('uom','')}</td>
+                    <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                    <td style="text-align:center;">{ln.get('gst_pct',0)}%</td>
+                    <td style="text-align:right;">₹{ln.get('taxable',0):,.2f}</td>
+                    <td style="text-align:right;">₹{ln.get('gst_amount',0):,.2f}</td>
+                    <td style="text-align:right;font-weight:600;">₹{ln.get('total',0):,.2f}</td>
+                    <td>{ln.get('delivery_date','—')}</td>
+                    <td style="color:#666;font-size:11px;">{ln.get('merchant','—')}</td>
+                </tr>"""
+
+            html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Sales Order {sel_so}</title>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 20px; }}
+  .header {{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; padding-bottom:12px; border-bottom:2px solid #c8a96e; }}
+  .company {{ font-size:22px; font-weight:800; color:#1a1a2e; }}
+  .company-sub {{ font-size:10px; color:#888; letter-spacing:2px; text-transform:uppercase; }}
+  .so-title {{ text-align:right; }}
+  .so-num {{ font-size:24px; font-weight:800; color:#c8a96e; font-family:monospace; }}
+  .so-status {{ display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; background:#fef3c7; color:#92400e; }}
+  .info-grid {{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px; }}
+  .info-box {{ border:1px solid #e2e5ef; border-radius:6px; padding:10px 12px; }}
+  .info-box-title {{ font-size:9px; text-transform:uppercase; letter-spacing:1.5px; color:#c8a96e; font-weight:700; margin-bottom:6px; }}
+  .info-row {{ font-size:11px; margin-bottom:3px; }}
+  .info-row span {{ color:#666; }}
+  table {{ width:100%; border-collapse:collapse; margin-bottom:16px; font-size:11px; }}
+  thead tr {{ background:#1a1a2e; color:white; }}
+  thead th {{ padding:7px 6px; text-align:left; font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; }}
+  tbody tr:nth-child(even) {{ background:#f8fafc; }}
+  tbody td {{ padding:6px 6px; border-bottom:1px solid #e2e5ef; vertical-align:top; }}
+  .totals {{ margin-left:auto; width:280px; border:1px solid #e2e5ef; border-radius:6px; overflow:hidden; }}
+  .totals table {{ margin:0; }}
+  .totals td {{ padding:5px 10px; font-size:12px; border-bottom:1px solid #f1f5f9; }}
+  .totals .grand {{ background:#1a1a2e; color:white; font-size:14px; font-weight:800; }}
+  .totals .grand td {{ border:none; padding:8px 10px; }}
+  .footer {{ margin-top:24px; padding-top:10px; border-top:1px solid #e2e5ef; display:flex; justify-content:space-between; font-size:10px; color:#888; }}
+  .sig-box {{ border-top:1px solid #888; width:160px; padding-top:4px; text-align:center; font-size:10px; color:#666; }}
+  @media print {{
+    body {{ padding: 10px; }}
+    button {{ display:none !important; }}
+  }}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="company">🧵 Garment ERP</div>
+    <div class="company-sub">Sales Order Document</div>
+  </div>
+  <div class="so-title">
+    <div class="so-num">{sel_so}</div>
+    <div style="margin-top:4px;"><span class="so-status">{so.get('status','Draft')}</span></div>
+    <div style="font-size:11px;color:#666;margin-top:4px;">Date: {so.get('so_date','—')}</div>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-box">
+    <div class="info-box-title">Buyer / Customer</div>
+    <div class="info-row"><strong style="font-size:13px;">{so.get('buyer','—')}</strong></div>
+    <div class="info-row"><span>Payment Terms:</span> {so.get('payment_terms','—')}</div>
+    <div class="info-row"><span>Warehouse:</span> {so.get('warehouse','—')}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-box-title">Order Info</div>
+    <div class="info-row"><span>Source:</span> {so.get('order_source','—')}</div>
+    <div class="info-row"><span>Ref #:</span> {so.get('ref_number','—')}</div>
+    <div class="info-row"><span>Sales Team:</span> {so.get('sales_team','—')}</div>
+    <div class="info-row"><span>Merchant:</span> {so.get('merchant','—')}</div>
+  </div>
+  <div class="info-box">
+    <div class="info-box-title">Delivery</div>
+    <div class="info-row"><span>Delivery Date:</span> <strong>{so.get('delivery_date','—')}</strong></div>
+    <div class="info-row"><span>Dispatch Date:</span> {so.get('dispatch_date','—')}</div>
+    <div class="info-row"><span>Remarks:</span> {so.get('remarks','—')}</div>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>SKU / Item</th><th>Size</th><th>Priority</th><th>HSN</th>
+      <th>Qty</th><th>UOM</th><th>Rate</th><th>GST%</th>
+      <th>Taxable</th><th>GST Amt</th><th>Line Total</th><th>Delivery</th><th>Merchant</th>
+    </tr>
+  </thead>
+  <tbody>
+    {rows_html}
+  </tbody>
+</table>
+
+<div style="display:flex;justify-content:flex-end;">
+  <div class="totals">
+    <table>
+      <tr><td>Subtotal</td><td style="text-align:right;">₹{subtotal:,.2f}</td></tr>
+      <tr><td>Discount ({disc_pct}%)</td><td style="text-align:right;color:#dc2626;">- ₹{disc_amt:,.2f}</td></tr>
+      <tr><td>Taxable Amount</td><td style="text-align:right;">₹{subtotal - disc_amt:,.2f}</td></tr>
+      <tr><td>GST Amount</td><td style="text-align:right;">₹{so.get('total_gst',0):,.2f}</td></tr>
+      <tr><td>Shipping</td><td style="text-align:right;">₹{so.get('shipping',0):,.2f}</td></tr>
+      <tr><td>Other Charges</td><td style="text-align:right;">₹{so.get('other_charges',0):,.2f}</td></tr>
+      <tr class="grand"><td>GRAND TOTAL</td><td style="text-align:right;">₹{so.get('grand_total',0):,.2f}</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  <div>
+    <div>Generated: {datetime.now().strftime('%d-%m-%Y %H:%M')}</div>
+    <div style="margin-top:2px;">This is a computer generated document.</div>
+  </div>
+  <div style="display:flex;gap:40px;">
+    <div class="sig-box">Prepared By</div>
+    <div class="sig-box">Authorized Signatory</div>
+  </div>
+</div>
+
+<script>window.onload = function() {{ window.print(); }}</script>
+</body>
+</html>"""
+
+            # Encode and create download + auto-open
+            import base64
+            b64 = base64.b64encode(html_doc.encode()).decode()
+            st.markdown(f'''
+            <a href="data:text/html;base64,{b64}" download="{sel_so}.html" id="so_dl_{sel_so}">
+                <button style="background:#1c1c2e;color:white;border:none;padding:8px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">
+                    ⬇️ Download {sel_so}.html (Print/PDF)
+                </button>
+            </a>
+            <script>document.getElementById("so_dl_{sel_so}").click();</script>
+            ''', unsafe_allow_html=True)
+
+            st.markdown('<div class="info-box">👆 File download ho rahi hai — open karke <strong>Ctrl+P</strong> dabao ya browser ka Print button use karo → "Save as PDF" select karo.</div>', unsafe_allow_html=True)
+
+            if st.button("✖ Close Print View"):
+                st.session_state["print_so"] = None
+                st.rerun()
 
         st.markdown("---")
 
