@@ -200,10 +200,26 @@ def load_data():
 
 def save_data():
     to_save = {key: st.session_state.get(key, DEFAULT_DATA.get(key)) for key in DEFAULT_DATA}
+    # Also save pkg_lines_* keys for buyer packaging
+    pkg_lines = {k: v for k, v in st.session_state.items() if k.startswith("pkg_lines_")}
+    to_save["_pkg_lines"] = pkg_lines
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(to_save, f, ensure_ascii=False, indent=2, default=str)
 
+def load_pkg_lines():
+    """Load pkg_lines_* keys back into session state after load_data()"""
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for k, v in saved.get("_pkg_lines", {}).items():
+                if k not in st.session_state:
+                    st.session_state[k] = v
+        except Exception:
+            pass
+
 load_data()
+load_pkg_lines()
 
 ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)", 
               "Accessories", "Packing Materials", "Fuel & Lubricants"]
@@ -544,6 +560,7 @@ elif nav == "➕ Create Item":
                                     "uom":       pkg_uom,
                                     "remarks":   pkg_remarks,
                                 })
+                                save_data()
                                 st.rerun()
 
                 # Show current lines
@@ -559,17 +576,13 @@ elif nav == "➕ Create Item":
                         with lc5:
                             if st.button("🗑", key=f"del_pkg_{sel_buyer_pkg}_{idx}"):
                                 st.session_state[pkg_key].pop(idx)
+                                save_data()
                                 st.rerun()
                         st.markdown('<hr style="margin:2px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
                 else:
                     st.markdown('<div class="warn-box">Koi packing item nahi add kiya abhi tak.</div>', unsafe_allow_html=True)
 
-            # Build buyer_packaging dict for saving
-            buyer_packaging = {}
-            for b in buyers_list:
-                bkey = f"pkg_lines_{b}"
-                if st.session_state.get(bkey):
-                    buyer_packaging[b] = st.session_state[bkey]
+            # pkg_lines stored in session state — save_data() picks them up automatically
     
     # Save Button
     st.markdown("---")
@@ -594,7 +607,11 @@ elif nav == "➕ Create Item":
                     "purchase_price": purchase_price,
                     "sizes": sizes,
                     "routing": route,
-                    "buyer_packaging": buyer_packaging if 'buyer_packaging' in dir() else {},
+                    "buyer_packaging": {
+                        b: st.session_state[f"pkg_lines_{b}"]
+                        for b in st.session_state.get("buyers", [])
+                        if st.session_state.get(f"pkg_lines_{b}")
+                    },
                     "parent": parent_item if parent_item != "None" else None,
                     "created_at": datetime.now().isoformat(),
                 }
