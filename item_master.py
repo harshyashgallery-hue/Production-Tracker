@@ -409,6 +409,7 @@ elif nav == "➕ Create Item":
             
             item_name = st.text_input("Item Name / Style Name *", placeholder="e.g. Floral Printed Kurta Set")
             item_type = st.selectbox("Item Category *", ITEM_TYPES)
+            st.session_state["_tmp_item_type"] = item_type
             
             # Parent item
             parent_items = {k: v["name"] for k, v in st.session_state["items"].items() if v.get("item_type") == item_type}
@@ -471,21 +472,26 @@ elif nav == "➕ Create Item":
             st.markdown('<div class="warn-box">Size variants are only applicable for Finished Goods items.</div>', unsafe_allow_html=True)
     
     with tab3:
-        st.markdown("#### 🔄 Production Routing (Process Order)")
-        st.markdown('''<div class="info-box">✓ Processes ko order wise arrange karein – alag SKU ke liye alag process order define kar sakte hain</div>''', unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        available_processes = st.session_state["processes"].copy()
-        selected_route = st.multiselect("Select Processes (in order)", available_processes,
-                                         default=["Cutting", "Stitching", "Finishing", "Packing"])
-        
-        if selected_route:
-            st.markdown("#### Process Sequence")
-            for i, proc in enumerate(selected_route, 1):
-                st.markdown(f'''<div class="card card-accent" style="padding:10px 16px; margin:4px 0;">
-                    <span class="section-number">{i}</span>
-                    <span style="margin-left:10px; font-weight:500;">{proc}</span>
-                </div>''', unsafe_allow_html=True)
+        _routing_types = ["Finished Goods (FG)", "Semi Finished Goods (SFG)"]
+        _cur_type = st.session_state.get("_tmp_item_type", "Finished Goods (FG)")
+        if _cur_type not in _routing_types:
+            st.markdown(f'<div class="warn-box">⚠️ Routing sirf <strong>Finished Goods</strong> aur <strong>Semi Finished Goods</strong> ke liye hoti hai.<br>Is item type (<strong>{_cur_type}</strong>) ke liye routing applicable nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown("#### 🔄 Production Routing (Process Order)")
+            st.markdown('''<div class="info-box">✓ Processes ko order wise arrange karein – alag SKU ke liye alag process order define kar sakte hain</div>''', unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            available_processes = st.session_state["processes"].copy()
+            selected_route = st.multiselect("Select Processes (in order)", available_processes,
+                                             default=["Cutting", "Stitching", "Finishing", "Packing"])
+            
+            if selected_route:
+                st.markdown("#### Process Sequence")
+                for i, proc in enumerate(selected_route, 1):
+                    st.markdown(f'''<div class="card card-accent" style="padding:10px 16px; margin:4px 0;">
+                        <span class="section-number">{i}</span>
+                        <span style="margin-left:10px; font-weight:500;">{proc}</span>
+                    </div>''', unsafe_allow_html=True)
     
     with tab4:
         st.markdown("#### 📦 Buyer-wise Packaging Definition")
@@ -555,8 +561,8 @@ elif nav == "➕ Create Item":
                         "sizes": [],
                     }
                 
-                # Save routing
-                if route:
+                # Save routing — only for FG / SFG
+                if route and item_type in ["Finished Goods (FG)", "Semi Finished Goods (SFG)"]:
                     st.session_state["routings"][item_code] = route
                     save_data()
                 
