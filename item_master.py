@@ -323,25 +323,17 @@ def get_sku_info(sku):
 
 def get_all_skus():
     """Return all SKUs from Item Master (size variants + standalone FG).
-    Returns dict: code -> display label including parent"""
+    Returns dict: sku_code -> item_name (simple, parent stored separately in item data)"""
     items = st.session_state.get("items", {})
     so_skus = {}
     for code, item in items.items():
         parent = item.get("parent", "")
         if parent or (item.get("item_type","") == "Finished Goods (FG)" and not item.get("sizes")):
-            # Label: "PARENT-CODE | SKU-CODE – Item Name"
-            if parent:
-                so_skus[code] = f"{parent} | {code} – {item.get('name', code)}"
-            else:
-                so_skus[code] = f"{code} – {item.get('name', code)}"
+            so_skus[code] = item.get("name", code)
     # Merge with demo skus for fallback
     for k, v in SS["skus"].items():
         if k not in so_skus:
-            parent = v.get("parent","")
-            if parent:
-                so_skus[k] = f"{parent} | {k} – {v.get('name', k)}"
-            else:
-                so_skus[k] = v.get("name", k)
+            so_skus[k] = v.get("name", k)
     return so_skus
 
 def avg_daily_sale(sku):
@@ -1326,8 +1318,8 @@ elif nav_so == "📋 Demand Management":
             dc1, dc2, dc3 = st.columns(3)
             with dc1:
                 _all_skus_d = get_all_skus()
-                d_sku = st.selectbox("SKU *", [""] + list(_all_skus_d.keys()),
-                                     format_func=lambda x: _all_skus_d.get(x, x) if x else "— Select SKU —",
+                d_sku = st.selectbox("SKU / Style-Size *", [""] + list(_all_skus_d.keys()),
+                                     format_func=lambda x: f"{x}  —  {_all_skus_d.get(x,'')}" if x else "— Select SKU —",
                                      key="d_sku")
                 if d_sku:
                     _di = get_sku_info(d_sku)
@@ -1359,7 +1351,7 @@ elif nav_so == "📋 Demand Management":
             _dem_show_cols = ["parent","sku","sku_name","size","demand_qty","uom","remarks"]
             _dem_show_cols = [c for c in _dem_show_cols if c in df_dem.columns]
             st.dataframe(df_dem[_dem_show_cols].rename(columns={
-                "parent":"Parent Item","sku":"SKU","sku_name":"Name","size":"Size",
+                "parent":"Style Code","sku":"SKU Code","sku_name":"Description","size":"Size",
                 "demand_qty":"Demand Qty","uom":"UOM","remarks":"Remarks"
             }), use_container_width=True, hide_index=True)
 
@@ -1544,8 +1536,8 @@ elif nav_so == "➕ Create Sales Order":
 
             lc1, lc2, lc3 = st.columns(3)
             with lc1:
-                line_sku = st.selectbox("SKU *", [""] + list(all_skus.keys()),
-                                         format_func=lambda x: all_skus.get(x, x) if x else "— Select SKU —",
+                line_sku = st.selectbox("SKU / Style-Size *", [""] + list(all_skus.keys()),
+                                         format_func=lambda x: f"{x}  —  {all_skus.get(x,'')}" if x else "— Select SKU —",
                                          key="line_sku")
                 if line_sku:
                     info = get_sku_info(line_sku)
@@ -1627,10 +1619,10 @@ elif nav_so == "➕ Create Sales Order":
 
             # Build editable dataframe
             edit_df = pd.DataFrame([{
-                "Parent":       ln.get("parent",""),
-                "SKU":          ln["sku"],
-                "Name":         ln.get("sku_name",""),
-                "Size":         ln.get("size",""),
+                "Style Code":   ln.get("parent", ln["sku"].rsplit("-",1)[0] if "-" in ln["sku"] else ln["sku"]),
+                "SKU Code":     ln["sku"],
+                "Description":  ln.get("sku_name",""),
+                "Size":         ln.get("size", ln["sku"].rsplit("-",1)[-1] if "-" in ln["sku"] else ""),
                 "Qty":          int(ln.get("qty", 0)),
                 "Rate (₹)":     float(ln.get("rate", 0)),
                 "GST %":        int(ln.get("gst_pct", 12)),
@@ -1646,10 +1638,10 @@ elif nav_so == "➕ Create Sales Order":
                 hide_index=False,
                 num_rows="dynamic",
                 column_config={
-                    "Parent":   st.column_config.TextColumn("Parent Item", disabled=True, width="small"),
-                    "SKU":      st.column_config.TextColumn("SKU", disabled=True, width="small"),
-                    "Name":     st.column_config.TextColumn("Name", disabled=True, width="medium"),
-                    "Size":     st.column_config.TextColumn("Size", disabled=True, width="small"),
+                    "Style Code":  st.column_config.TextColumn("Style Code", disabled=True, width="small"),
+                    "SKU Code":    st.column_config.TextColumn("SKU Code", disabled=True, width="small"),
+                    "Description": st.column_config.TextColumn("Description", disabled=True, width="medium"),
+                    "Size":        st.column_config.TextColumn("Size", disabled=True, width="small"),
                     "Qty":      st.column_config.NumberColumn("Qty", min_value=0, step=1, width="small"),
                     "Rate (₹)": st.column_config.NumberColumn("Rate (₹)", min_value=0.0, step=1.0, width="small"),
                     "GST %":    st.column_config.SelectboxColumn("GST %", options=GST_RATES, width="small"),
@@ -1673,7 +1665,9 @@ elif nav_so == "➕ Create Sales Order":
                     taxable = qty * rate
                     gst_amt = taxable * gst / 100
                     # Preserve original line data, update editable fields
-                    orig = so_lines[i] if i < len(so_lines) else {}
+                    # match by SKU Code column
+                    orig_sku = row.get("SKU Code","")
+                    orig = next((l for l in so_lines if l["sku"] == orig_sku), so_lines[i] if i < len(so_lines) else {})
                     updated_lines.append({
                         **orig,
                         "qty":          qty,
@@ -1825,8 +1819,10 @@ elif nav_so == "📂 SO List & Tracking":
                 rows_html += f"""
                 <tr>
                     <td>{i}</td>
-                    <td><strong>{ln.get('sku','')}</strong><br><span style="color:#666;font-size:11px;">{ln.get('sku_name','')}</span></td>
-                    <td>{ln.get('size','—')}</td>
+                    <td style="font-family:monospace;">{ln.get('parent', ln.get('sku','').rsplit('-',1)[0] if '-' in ln.get('sku','') else ln.get('sku',''))}</td>
+                    <td style="font-family:monospace;font-weight:700;">{ln.get('sku','')}</td>
+                    <td>{ln.get('sku_name','')}</td>
+                    <td>{ln.get('size', ln.get('sku','').rsplit('-',1)[-1] if '-' in ln.get('sku','') else '—')}</td>
                     <td style="color:{pri_color};font-weight:600;">{ln.get('priority','Normal')}</td>
                     <td>{ln.get('hsn','—')}</td>
                     <td style="text-align:center;">{ln.get('qty',0)}</td>
@@ -1915,7 +1911,7 @@ elif nav_so == "📂 SO List & Tracking":
 <table>
   <thead>
     <tr>
-      <th>#</th><th>SKU / Item</th><th>Size</th><th>Priority</th><th>HSN</th>
+      <th>#</th><th>Style Code</th><th>SKU Code</th><th>Description</th><th>Size</th><th>Priority</th><th>HSN</th>
       <th>Qty</th><th>UOM</th><th>Rate</th><th>GST%</th>
       <th>Taxable</th><th>GST Amt</th><th>Line Total</th><th>Delivery</th><th>Merchant</th>
     </tr>
@@ -2049,10 +2045,13 @@ elif nav_so == "📂 SO List & Tracking":
             # Full lines table
             line_rows = []
             for ln in lines:
+                _sku = ln.get("sku","")
+                _parent = ln.get("parent", _sku.rsplit("-",1)[0] if "-" in _sku else _sku)
                 line_rows.append({
-                    "SKU":          ln.get("sku",""),
-                    "Item Name":    ln.get("sku_name",""),
-                    "Size":         ln.get("size",""),
+                    "Style Code":   _parent,
+                    "SKU Code":     _sku,
+                    "Description":  ln.get("sku_name",""),
+                    "Size":         ln.get("size", _sku.rsplit("-",1)[-1] if "-" in _sku else ""),
                     "Priority":     ln.get("priority","Normal"),
                     "Merchant":     ln.get("merchant","—"),
                     "Qty":          ln.get("qty",0),
