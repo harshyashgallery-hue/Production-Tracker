@@ -1457,13 +1457,46 @@ elif nav_so == "➕ Create Sales Order":
             ref_label, ref_options = ref_map.get(order_source, ("Reference Number", []))
 
             if ref_options:
-                ref_number = st.selectbox(f"{ref_label} *", [""] + ref_options)
-                # Auto-fill buyer from demand
+                ref_number = st.selectbox(f"{ref_label} *", [""] + ref_options, key="_so_ref")
+                # Auto-fill buyer from demand + auto-populate lines
                 if ref_number and ref_number in SS["demands"]:
                     dem = SS["demands"][ref_number]
                     st.markdown(f'<div class="ok-box">Demand: {ref_number} | Source: {dem.get("source")} | Priority: {dem.get("priority")}</div>', unsafe_allow_html=True)
+                    # Auto-populate SO lines from demand if not already done
+                    if st.session_state.get("_last_demand_loaded") != ref_number:
+                        new_lines = []
+                        for dl in dem.get("lines", []):
+                            _info   = get_sku_info(dl["sku"])
+                            _price  = float(_info.get("price", 0))
+                            _gst    = 12
+                            _taxable = dl["demand_qty"] * _price
+                            _gst_amt = _taxable * _gst / 100
+                            # Auto-fill merchant from item master
+                            _item_merch = st.session_state.get("items", {}).get(dl["sku"], {}).get("merchant", "")
+                            new_lines.append({
+                                "sku":          dl["sku"],
+                                "sku_name":     dl.get("sku_name", dl["sku"]),
+                                "parent":       _info.get("parent", ""),
+                                "size":         dl["sku"].split("-")[-1] if "-" in dl["sku"] else "",
+                                "qty":          dl["demand_qty"],
+                                "uom":          "Pieces",
+                                "rate":         _price,
+                                "gst_pct":      _gst,
+                                "hsn":          st.session_state.get("items", {}).get(dl["sku"], {}).get("hsn", ""),
+                                "merchant":     _item_merch,
+                                "priority":     dem.get("priority", "Normal"),
+                                "taxable":      round(_taxable, 2),
+                                "gst_amount":   round(_gst_amt, 2),
+                                "total":        round(_taxable + _gst_amt, 2),
+                                "delivery_date": str(date.today() + timedelta(days=21)),
+                                "produced_qty": 0, "dispatch_qty": 0, "received_qty": 0,
+                                "remarks":      f"From {ref_number}",
+                            })
+                        st.session_state["new_so_lines"] = new_lines
+                        st.session_state["_last_demand_loaded"] = ref_number
+                        st.rerun()
             else:
-                ref_number = st.text_input(f"{ref_label} *", placeholder=f"Enter {ref_label}")
+                ref_number = st.text_input(f"{ref_label} *", placeholder=f"Enter {ref_label}", key="_so_ref")
 
             ref_date       = st.date_input("Reference Date", value=date.today(), key="_so_refdate")
             payment_terms  = st.selectbox("Payment Terms", SS["payment_terms"], key="_so_pay")
@@ -1480,21 +1513,13 @@ elif nav_so == "➕ Create Sales Order":
         st.markdown('<div class="info-box">Live inventory visibility ke saath SKU select karein. Size-wise quantity define karein.</div>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # If demand linked, show demand lines as reference
-        if 'ref_number' in dir() and ref_number and ref_number in SS["demands"]:
-            with st.expander("📋 Demand Lines Reference (for this SO)", expanded=False):
-                dem_ref = SS["demands"][ref_number]
-                for dl in dem_ref.get("lines", []):
-                    so_already = so_qty_for_sku(dl["sku"])
-                    pending = max(0, dl["demand_qty"] - so_already)
-                    color = "#c0392b" if pending == dl["demand_qty"] else "#d4a853" if pending > 0 else "#1e6b4a"
-                    st.markdown(f'''<div class="card" style="padding:10px 16px;margin:3px 0;">
-                        <span class="tag tag-gold">{dl["sku"]}</span>
-                        <span style="margin-left:8px;">{dl["sku_name"]}</span>
-                        <span style="margin-left:16px;font-size:12px;color:#888;">Demand: {dl["demand_qty"]}</span>
-                        <span style="margin-left:8px;font-size:12px;color:#888;">SO Done: {so_already}</span>
-                        <span style="margin-left:8px;font-size:12px;font-weight:700;color:{color};">Pending: {pending}</span>
-                    </div>''', unsafe_allow_html=True)
+        # Show demand info if lines were loaded from demand
+        _loaded_dem = st.session_state.get("_last_demand_loaded", "")
+        if _loaded_dem and _loaded_dem in SS["demands"]:
+            dem_ref = SS["demands"][_loaded_dem]
+            _total_dem_qty = sum(dl["demand_qty"] for dl in dem_ref.get("lines", []))
+            st.markdown(f'<div class="ok-box">✅ <strong>{_loaded_dem}</strong> ki {len(dem_ref.get("lines",[]))} lines auto-load ho gayi hain ({_total_dem_qty} pcs) — neeche edit/delete kar sakte ho.</div>', unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 
         # Build SKU list from Item Master
         all_skus = get_all_skus()
@@ -1667,6 +1692,7 @@ elif nav_so == "➕ Create Sales Order":
         }
         SS["so_counter"] += 1
         st.session_state["new_so_lines"] = []
+        st.session_state["_last_demand_loaded"] = ""
         save_data()
         st.success(f"✅ {so_no} saved as {status}!")
         st.rerun()
@@ -1680,6 +1706,7 @@ elif nav_so == "➕ Create Sales Order":
     with sc3:
         if st.button("🗑 Clear All Lines", use_container_width=True):
             st.session_state["new_so_lines"] = []
+            st.session_state["_last_demand_loaded"] = ""
             st.rerun()
 
 
