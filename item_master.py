@@ -879,35 +879,43 @@ elif nav == "🔩 BOM Management":
     with bom_tab1:
         st.markdown('''<div class="warn-box">ℹ️ BOM mein components tab tab add honge jab vo pehle se Item Master mein create ho. Components existing items mein se select karein.</div>''', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        
+
         col1, col2 = st.columns(2)
         with col1:
             target_item = st.selectbox("Select Item for BOM *", [""] + list(st.session_state["items"].keys()))
         with col2:
             bom_number = st.selectbox("BOM Number", ["BOM-1 (Default)", "BOM-2 (Alt Fabric)", "BOM-3"])
             bom_desc = st.text_input("BOM Description", placeholder="e.g. 56 inch fabric width")
-        
+
         if target_item:
             item_sizes = st.session_state["items"][target_item].get("sizes", [])
-            
+            has_existing_bom = target_item in st.session_state["boms"]
+
+            if has_existing_bom:
+                st.markdown(f'<div class="ok-box">✅ <strong>{target_item}</strong> ka BOM already exists — edit kar sakte ho neeche. Lines load ho gayi hain.</div>', unsafe_allow_html=True)
+
             # BOM Type
             bom_type = st.radio("BOM Type", ["Common BOM (applies to all sizes)", "Size-wise BOM (different per size)"], horizontal=True)
-            
+
             if bom_type == "Size-wise BOM (different per size)" and item_sizes:
                 size_group = st.selectbox("Define BOM for size group:", item_sizes)
-            
+
             # Copy BOM feature
             existing_boms = list(st.session_state["boms"].keys())
             if existing_boms:
                 st.markdown("#### 📋 Copy from Existing BOM")
                 copy_from = st.selectbox("Copy BOM from item:", ["— Don't copy —"] + existing_boms)
-            
+
             # ── Session state keys ──────────────────────────────────────────
             bom_key  = f"bom_lines_{target_item}"
             proc_key = f"proc_lines_{target_item}"
 
             if bom_key not in st.session_state:
-                if 'copy_from' in dir() and copy_from != "\u2014 Don't copy \u2014" and copy_from in st.session_state["boms"]:
+                if has_existing_bom:
+                    # Load existing BOM lines for editing
+                    st.session_state[bom_key]  = st.session_state["boms"][target_item].get("lines", []).copy()
+                    st.session_state[proc_key] = st.session_state["boms"][target_item].get("process_lines", []).copy()
+                elif 'copy_from' in dir() and copy_from != "\u2014 Don't copy \u2014" and copy_from in st.session_state["boms"]:
                     st.session_state[bom_key]  = st.session_state["boms"][copy_from].get("lines", []).copy()
                     st.session_state[proc_key] = st.session_state["boms"][copy_from].get("process_lines", []).copy()
                 else:
@@ -916,6 +924,13 @@ elif nav == "🔩 BOM Management":
 
             if proc_key not in st.session_state:
                 st.session_state[proc_key] = []
+
+            # Reload button — force reload from saved BOM
+            if has_existing_bom:
+                if st.button("🔄 Reload from Saved BOM", key="reload_bom"):
+                    st.session_state[bom_key]  = st.session_state["boms"][target_item].get("lines", []).copy()
+                    st.session_state[proc_key] = st.session_state["boms"][target_item].get("process_lines", []).copy()
+                    st.rerun()
 
             # ================================================================
             # SECTION 1 - MATERIAL / COMPONENT LINES
