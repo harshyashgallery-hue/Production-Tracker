@@ -183,6 +183,7 @@ DEFAULT_DATA = {
     "mrp_so_list":    [],
     "mrp_run_time":   "",
     "reservations":   {},
+    "soft_reservations": {},
 }
 
 @st.cache_resource
@@ -2688,11 +2689,20 @@ def calculate_mrp(selected_so_nos):
             explode_bom(bom_item, qty, so_no, sku, buyer)
             add_packaging(bom_item, qty, so_no, sku, buyer)
 
-    # Calculate net requirement
+    # Calculate net requirement (considering soft reservations from previous MRP runs)
+    soft_res = SS.get("soft_reservations", {})
     for code, mat in result.items():
-        avail = mat["stock"] - mat["reserved"]
-        mat["available"] = max(0, avail)
-        mat["net_req"]   = max(0, round(mat["total_req"] - avail, 3))
+        hard_reserved = mat["reserved"]  # actual stock reserved (post-PO)
+        soft_reserved = sum(
+            qty for so_data in soft_res.get(code, {}).values()
+            for qty in so_data.values()
+        )
+        avail = mat["stock"] - hard_reserved
+        mat["available"]      = max(0, avail)
+        mat["soft_reserved"]  = soft_reserved
+        mat["net_available"]  = max(0, avail - soft_reserved)
+        mat["net_req"]        = max(0, round(mat["total_req"] - avail, 3))
+        mat["net_req_with_soft"] = max(0, round(mat["total_req"] - mat["net_available"], 3))
 
     return result
 
@@ -2888,18 +2898,20 @@ elif nav_mrp == "📦 Material Requirements":
             shortage = mat["net_req"] > 0
             level = mat.get("level", 0)
             level_label = "🔵 FG Component" if level == 0 else f"🟡 Level {level} (Sub-component)"
+            soft_res = mat.get("soft_reserved", 0)
             rows.append({
-                "Level":          level_label,
-                "Material Code":  code,
-                "Material Name":  mat["name"],
-                "Type":           mat["type"],
-                "Unit":           mat["unit"],
-                "Total Required": mat["total_req"],
-                "In Stock":       mat["stock"],
-                "Reserved":       mat["reserved"],
-                "Available":      mat["available"],
-                "Net Requirement": mat["net_req"],
-                "Status":         "🔴 Shortage" if shortage else "🟢 OK",
+                "Level":              level_label,
+                "Material Code":      code,
+                "Material Name":      mat["name"],
+                "Type":               mat["type"],
+                "Unit":               mat["unit"],
+                "Total Required":     mat["total_req"],
+                "In Stock":           mat["stock"],
+                "Hard Reserved":      mat["reserved"],
+                "Soft Reserved":      soft_res,
+                "Available":          mat["available"],
+                "Net Req (w/ Soft)":  mat.get("net_req_with_soft", mat["net_req"]),
+                "Status":             "🔴 Shortage" if shortage else "🟢 OK",
             })
 
         if rows:
@@ -2965,77 +2977,131 @@ elif nav_mrp == "📦 Material Requirements":
 
 # ── RESERVATIONS ──────────────────────────────────────────────────────────────
 elif nav_mrp == "🔒 Reservations":
-    st.markdown('<h1>Material Reservations</h1>', unsafe_allow_html=True)
-    st.markdown('<div class="info-box">Material requirements ke basis pe stock reserve karo — reserved stock available stock mein count nahi hoga future MRP mein.</div>', unsafe_allow_html=True)
+    st.markdown('<h1>Material Reservations (Soft)</h1>', unsafe_allow_html=True)
+    st.markdown('''<div class="info-box">
+        <strong>Soft Reservation</strong> — MRP ke basis pe material SO ke against plan karo.<br>
+        Soft Reserved material future MRP mein "Net Available" mein count nahi hoga.<br>
+        <strong>Hard Reservation</strong> PO module ke baad hogi jab material physically aayega.
+    </div>''', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
     if not SS.get("mrp_result"):
         st.markdown('<div class="warn-box">Pehle MRP run karo "▶ Run MRP" se.</div>', unsafe_allow_html=True)
     else:
         mrp_result = SS["mrp_result"]
-        items_data = st.session_state.get("items", {})
+        so_list_used = SS.get("mrp_so_list", [])
 
-        if "reservations" not in SS:
-            SS["reservations"] = {}
+        # soft_reservations structure:
+        # { material_code: { so_no: { sku: qty, ... }, ... } }
+        if "soft_reservations" not in SS:
+            SS["soft_reservations"] = {}
 
-        # Reserve all button
-        if st.button("🔒 Reserve All Available Stock for MRP", use_container_width=False):
+        # ── Soft Reserve All button ────────────────────────────────────────────
+        if st.button("🔒 Soft Reserve All (MRP ke basis pe)", use_container_width=False):
             for code, mat in mrp_result.items():
-                if mat["available"] > 0 and mat["net_req"] > 0:
-                    reserve_qty = min(mat["available"], mat["total_req"])
-                    if code in items_data:
-                        current_res = float(items_data[code].get("reserved", 0))
-                        st.session_state["items"][code]["reserved"] = current_res + reserve_qty
-                    # Track reservation
-                    SS["reservations"][code] = {
-                        "material_name": mat["name"],
-                        "reserved_qty": reserve_qty,
-                        "unit": mat["unit"],
-                        "mrp_run": SS.get("mrp_run_time",""),
-                        "so_list": SS.get("mrp_so_list",[]),
-                    }
+                if code not in SS["soft_reservations"]:
+                    SS["soft_reservations"][code] = {}
+                # Distribute requirement SO-wise from breakdown
+                for bd in mat.get("breakdown", []):
+                    so_no   = bd["so_no"]
+                    sku     = bd["sku"]
+                    qty_req = bd["qty_req"]
+                    if so_no not in SS["soft_reservations"][code]:
+                        SS["soft_reservations"][code][so_no] = {}
+                    prev = SS["soft_reservations"][code][so_no].get(sku, 0)
+                    SS["soft_reservations"][code][so_no][sku] = round(prev + qty_req, 3)
             save_data()
-            st.success("✅ Stock reserved!")
+            st.success("✅ Soft Reservation complete!")
             st.rerun()
 
-        # Reservation table
-        res_rows = []
-        for code, mat in mrp_result.items():
-            item = items_data.get(code, {})
-            reserved = float(item.get("reserved", 0))
-            res_rows.append({
-                "Material Code": code,
-                "Material Name": mat["name"],
-                "Total Required": mat["total_req"],
-                "In Stock":       mat["stock"],
-                "Reserved":       reserved,
-                "Available":      max(0, mat["stock"] - reserved),
-                "Net Req":        max(0, mat["total_req"] - max(0, mat["stock"] - reserved)),
-                "Unit":           mat["unit"],
-            })
+        st.markdown("---")
 
-        if res_rows:
-            st.dataframe(pd.DataFrame(res_rows), use_container_width=True, hide_index=True)
+        # ── Summary View ───────────────────────────────────────────────────────
+        st.markdown("#### 📊 Reservation Summary")
 
-            # Manual reserve
-            st.markdown("---")
-            st.markdown("#### Manual Reservation")
-            r1, r2, r3 = st.columns(3)
-            with r1:
-                res_mat = st.selectbox("Material", [""] + list(mrp_result.keys()),
-                                        format_func=lambda x: f"{x} – {mrp_result[x]['name']}" if x else "Select",
-                                        key="res_mat")
-            with r2:
-                res_qty = st.number_input("Reserve Qty", min_value=0.0, step=1.0, key="res_qty")
-            with r3:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🔒 Reserve", use_container_width=True) and res_mat and res_qty > 0:
-                    if res_mat in items_data:
-                        current = float(st.session_state["items"][res_mat].get("reserved", 0))
-                        st.session_state["items"][res_mat]["reserved"] = current + res_qty
+        tab_sum, tab_detail, tab_so = st.tabs(["Material-wise Summary", "SO-wise Detail", "Release Reservation"])
+
+        with tab_sum:
+            sum_rows = []
+            for code, mat in mrp_result.items():
+                soft_res = SS["soft_reservations"].get(code, {})
+                soft_total = sum(
+                    qty for so_data in soft_res.values()
+                    for qty in so_data.values()
+                )
+                in_stock  = mat.get("stock", 0)
+                hard_res  = mat.get("reserved", 0)  # will be used post-PO
+                available = max(0, in_stock - hard_res)
+                net_after_soft = max(0, mat["total_req"] - available - soft_total)
+
+                sum_rows.append({
+                    "Material":        f"{code} – {mat['name']}",
+                    "Type":            mat["type"],
+                    "Total Required":  mat["total_req"],
+                    "In Stock":        in_stock,
+                    "Soft Reserved":   soft_total,
+                    "Net Shortage":    net_after_soft,
+                    "Unit":            mat["unit"],
+                    "Status":          "🟡 Soft Reserved" if soft_total > 0 else ("🔴 Not Reserved" if mat["total_req"] > 0 else "🟢 OK"),
+                })
+            if sum_rows:
+                st.dataframe(pd.DataFrame(sum_rows), use_container_width=True, hide_index=True)
+
+        with tab_detail:
+            st.markdown("##### SO / SKU wise Reservation Detail")
+            for code, so_data in SS["soft_reservations"].items():
+                if not so_data:
+                    continue
+                mat_name = mrp_result.get(code, {}).get("name", code)
+                unit     = mrp_result.get(code, {}).get("unit", "")
+                total_soft = sum(q for sd in so_data.values() for q in sd.values())
+                with st.expander(f"📦 {code} – {mat_name} | Soft Reserved: {total_soft} {unit}"):
+                    det_rows = []
+                    for so_no, sku_data in so_data.items():
+                        so = SS["so_list"].get(so_no, {})
+                        for sku, qty in sku_data.items():
+                            det_rows.append({
+                                "SO #":   so_no,
+                                "Buyer":  so.get("buyer","—"),
+                                "SKU":    sku,
+                                "Soft Reserved Qty": qty,
+                                "Unit":   unit,
+                                "Delivery": so.get("delivery_date","—"),
+                            })
+                    if det_rows:
+                        st.dataframe(pd.DataFrame(det_rows), use_container_width=True, hide_index=True)
+
+        with tab_so:
+            st.markdown("##### Release / Clear Reservation")
+            st.markdown('<div class="warn-box">SO complete hone ke baad ya cancel hone pe reservation release karo.</div>', unsafe_allow_html=True)
+
+            rel_so = st.selectbox("SO select karo release ke liye",
+                                   [""] + list(SS["so_list"].keys()),
+                                   key="rel_so_sel")
+            if rel_so:
+                # Show what's reserved for this SO
+                rel_rows = []
+                for code, so_data in SS["soft_reservations"].items():
+                    if rel_so in so_data:
+                        mat_name = mrp_result.get(code, {}).get("name", code)
+                        unit     = mrp_result.get(code, {}).get("unit", "")
+                        for sku, qty in so_data[rel_so].items():
+                            rel_rows.append({
+                                "Material": f"{code} – {mat_name}",
+                                "SKU": sku, "Reserved Qty": qty, "Unit": unit
+                            })
+                if rel_rows:
+                    st.dataframe(pd.DataFrame(rel_rows), use_container_width=True, hide_index=True)
+                    if st.button(f"🔓 Release All Reservations for {rel_so}", use_container_width=False):
+                        for code in SS["soft_reservations"]:
+                            if rel_so in SS["soft_reservations"][code]:
+                                del SS["soft_reservations"][code][rel_so]
                         save_data()
-                        st.success(f"✅ {res_qty} {mrp_result[res_mat]['unit']} reserved for {res_mat}!")
+                        st.success(f"✅ {rel_so} ki reservations release ho gayi!")
                         st.rerun()
+                else:
+                    st.markdown(f'<div class="info-box">Is SO ke liye koi reservation nahi hai abhi.</div>', unsafe_allow_html=True)
+
 
 
 # ── MRP REPORTS ───────────────────────────────────────────────────────────────
