@@ -189,6 +189,9 @@ DEFAULT_DATA = {
 def get_gsheet():
     """Connect to Google Sheet — cached so only connects once per session"""
     try:
+        # Check if secrets are configured
+        if "SHEET_ID" not in st.secrets or "gcp_service_account" not in st.secrets:
+            return None
         creds_dict = dict(st.secrets["gcp_service_account"])
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -198,8 +201,7 @@ def get_gsheet():
         client = gspread.authorize(creds)
         sheet  = client.open_by_key(st.secrets["SHEET_ID"])
         return sheet
-    except Exception as e:
-        st.warning(f"Google Sheets connection failed: {e}")
+    except Exception:
         return None
 
 def _get_or_create_ws(sheet, name):
@@ -210,10 +212,25 @@ def _get_or_create_ws(sheet, name):
         return sheet.add_worksheet(title=name, rows=10, cols=3)
 
 def load_data():
-    """Load all data from Google Sheets into session state"""
+    """Load all data from Google Sheets, fallback to local file"""
     sheet = get_gsheet()
     if sheet is None:
-        # Fallback to defaults if sheet unavailable
+        # Try local file first
+        import os
+        if os.path.exists("erp_data.json"):
+            try:
+                with open("erp_data.json", "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                for key, default_val in DEFAULT_DATA.items():
+                    if key not in st.session_state:
+                        st.session_state[key] = saved.get(key, default_val)
+                for k, v in saved.get("_pkg_lines", {}).items():
+                    if k not in st.session_state:
+                        st.session_state[k] = v
+                return
+            except Exception:
+                pass
+        # Final fallback to defaults
         for key, val in DEFAULT_DATA.items():
             if key not in st.session_state:
                 st.session_state[key] = val
@@ -248,9 +265,18 @@ def load_data():
                 st.session_state[key] = val
 
 def save_data():
-    """Save all data to Google Sheets"""
+    """Save all data to Google Sheets, fallback to local file"""
     sheet = get_gsheet()
     if sheet is None:
+        # Local file fallback
+        try:
+            to_save = {key: st.session_state.get(key, DEFAULT_DATA.get(key)) for key in DEFAULT_DATA}
+            pkg_lines = {k: v for k, v in st.session_state.items() if k.startswith("pkg_lines_")}
+            to_save["_pkg_lines"] = pkg_lines
+            with open("erp_data.json", "w", encoding="utf-8") as f:
+                json.dump(to_save, f, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            pass
         return
 
     try:
@@ -1416,13 +1442,19 @@ elif nav_so == "📋 Demand Management":
 
         dem_lines = st.session_state[dem_lines_key]
         if dem_lines:
-            df_dem = pd.DataFrame(dem_lines)
-            _dem_show_cols = ["parent","sku","sku_name","size","demand_qty","uom","remarks"]
-            _dem_show_cols = [c for c in _dem_show_cols if c in df_dem.columns]
-            st.dataframe(df_dem[_dem_show_cols].rename(columns={
-                "parent":"Style Code","sku":"SKU Code","sku_name":"Description","size":"Size",
-                "demand_qty":"Demand Qty","uom":"UOM","remarks":"Remarks"
-            }), use_container_width=True, hide_index=True)
+            st.markdown(f"**{len(dem_lines)} lines added:**")
+            for idx, ln in enumerate(dem_lines):
+                dl1, dl2, dl3, dl4, dl5, dl6 = st.columns([1.5, 2, 1, 1, 1, 0.5])
+                with dl1: st.markdown(f'<div style="padding-top:8px;font-size:12px;font-family:monospace;color:#c8a96e;">{ln.get("parent","")}</div>', unsafe_allow_html=True)
+                with dl2: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln.get("sku","")}</strong> <span style="color:#94a3b8;">({ln.get("size","")})</span><br><span style="font-size:11px;color:#64748b;">{ln.get("sku_name","")}</span></div>', unsafe_allow_html=True)
+                with dl3: st.markdown(f'<div style="padding-top:8px;font-size:13px;">{ln.get("demand_qty",0)} {ln.get("uom","")}</div>', unsafe_allow_html=True)
+                with dl4: st.markdown(f'<div style="padding-top:8px;font-size:12px;color:#64748b;">{ln.get("remarks","")}</div>', unsafe_allow_html=True)
+                with dl5: st.markdown(f'<div style="padding-top:8px;"></div>', unsafe_allow_html=True)
+                with dl6:
+                    if st.button("🗑", key=f"del_dem_line_{idx}"):
+                        st.session_state[dem_lines_key].pop(idx)
+                        st.rerun()
+                st.markdown('<hr style="margin:2px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
 
             if st.button("💾 Save Demand"):
                 SS["demands"][dem_no] = {
