@@ -2613,30 +2613,31 @@ def calculate_mrp(selected_so_nos):
 
             # Use item_type from BOM line (more reliable than items dict lookup)
             comp_type_from_line = line.get("item_type", comp_type)
-            
-            # Check if this component has its own BOM — if yes, recurse regardless of type
+            final_type = comp_type_from_line if comp_type_from_line else comp_type
+
+            # Check if this component has its own BOM
             sub_bom_lines = boms.get(comp_code, {}).get("lines", [])
             has_sub_bom   = len([l for l in sub_bom_lines if l.get("line_type") != "Process"]) > 0
 
+            # ALWAYS add this component to result (P308 bhi chahiye, slub bhi)
+            if comp_code not in result:
+                result[comp_code] = {
+                    "name": comp_name, "type": final_type,
+                    "unit": unit, "total_req": 0,
+                    "stock": float(comp_item.get("stock", 0)),
+                    "reserved": float(comp_item.get("reserved", 0)),
+                    "breakdown": [],
+                    "level": depth,
+                }
+            result[comp_code]["total_req"] = round(result[comp_code]["total_req"] + total_qty, 3)
+            result[comp_code]["breakdown"].append({
+                "so_no": so_no, "sku": sku, "qty_req": total_qty,
+                "source": f"BOM: {item_code} → Level {depth}"
+            })
+
             if has_sub_bom:
-                # Go deeper — explode this component's BOM
+                # Also go deeper to get raw materials of this component
                 explode_bom(comp_code, total_qty, so_no, sku, buyer, depth+1)
-            else:
-                # Leaf node — this is raw material / accessory / packing
-                final_type = comp_type_from_line if comp_type_from_line else comp_type
-                if comp_code not in result:
-                    result[comp_code] = {
-                        "name": comp_name, "type": final_type,
-                        "unit": unit, "total_req": 0,
-                        "stock": float(comp_item.get("stock", 0)),
-                        "reserved": float(comp_item.get("reserved", 0)),
-                        "breakdown": []
-                    }
-                result[comp_code]["total_req"] = round(result[comp_code]["total_req"] + total_qty, 3)
-                result[comp_code]["breakdown"].append({
-                    "so_no": so_no, "sku": sku, "qty_req": total_qty,
-                    "source": f"BOM: {item_code} → Level {depth}"
-                })
 
     def add_packaging(item_code, qty, so_no, sku, buyer):
         """Add buyer-wise packaging requirements"""
@@ -2885,11 +2886,14 @@ elif nav_mrp == "📦 Material Requirements":
             if f_search and f_search.lower() not in code.lower() and f_search.lower() not in mat["name"].lower():
                 continue
             shortage = mat["net_req"] > 0
+            level = mat.get("level", 0)
+            level_label = "🔵 FG Component" if level == 0 else f"🟡 Level {level} (Sub-component)"
             rows.append({
-                "Material Code": code,
-                "Material Name": mat["name"],
-                "Type":          mat["type"],
-                "Unit":          mat["unit"],
+                "Level":          level_label,
+                "Material Code":  code,
+                "Material Name":  mat["name"],
+                "Type":           mat["type"],
+                "Unit":           mat["unit"],
                 "Total Required": mat["total_req"],
                 "In Stock":       mat["stock"],
                 "Reserved":       mat["reserved"],
