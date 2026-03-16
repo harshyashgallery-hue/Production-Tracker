@@ -4289,7 +4289,7 @@ elif nav_pur == "📋 Purchase Requisitions":
                     pr_lines_purchase.append({
                         "material_code": code, "material_name": mat["name"],
                         "material_type": mat["type"], "required_qty": mat["net_req"],
-                        "received_qty": 0, "unit": mat["unit"],
+                        "po_created_qty": 0, "received_qty": 0, "unit": mat["unit"],
                         "so_ref": so_ref, "mrp_req": mat["total_req"],
                     })
 
@@ -4448,44 +4448,238 @@ elif nav_pur == "📋 Purchase Requisitions":
 
         pr_list = SS.get("pr_list", {})
         if not pr_list:
-            st.markdown('<div class="warn-box">Koi PR nahi hai.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="warn-box">Koi PR nahi hai. "From MRP" tab se generate karo.</div>', unsafe_allow_html=True)
         else:
             for pr_no, pr in reversed(list(pr_list.items())):
                 if pf_type   != "All" and pr.get("pr_type","") != pf_type: continue
                 if pf_status != "All" and pr.get("status","")  != pf_status: continue
                 if pf_search and pf_search.lower() not in pr_no.lower() and pf_search.lower() not in pr.get("so_ref","").lower(): continue
 
-                r1,r2,r3,r4,r5,r6 = st.columns([1.2,1.2,1.5,1,1.5,1.5])
-                with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{pr_no}</div>', unsafe_allow_html=True)
-                with r2: st.markdown(f'<div style="padding-top:8px;font-size:12px;"><span class="tag tag-blue">{pr.get("pr_type","")}</span></div>', unsafe_allow_html=True)
-                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">SO: {pr.get("so_ref","—")}<br>Req By: {pr.get("required_date","—")}</div>', unsafe_allow_html=True)
-                with r4: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{len(pr.get("lines",[]))} items</div>', unsafe_allow_html=True)
-                with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(pr.get("status",""))}</div>', unsafe_allow_html=True)
-                with r6:
-                    # Action buttons based on status
-                    if pr.get("status") == "Pending Approval":
-                        ac1, ac2 = st.columns(2)
-                        with ac1:
-                            if st.button("✅ Approve", key=f"apr_pr_{pr_no}", use_container_width=True):
-                                SS["pr_list"][pr_no]["status"] = "Approved"
-                                save_data(); st.rerun()
-                        with ac2:
-                            if st.button("❌ Reject", key=f"rej_pr_{pr_no}", use_container_width=True):
-                                SS["pr_list"][pr_no]["status"] = "Rejected"
-                                save_data(); st.rerun()
-                    elif pr.get("status") == "Approved":
-                        if pr.get("pr_type") == "Purchase":
-                            if st.button("📦 Create PO", key=f"po_pr_{pr_no}", use_container_width=True):
-                                st.session_state["pr_to_po"] = pr_no
-                                st.session_state["current_page"] = "📦 Purchase Orders"
-                                st.rerun()
-                        else:
-                            if st.button("🔧 Create JWO", key=f"jwo_pr_{pr_no}", use_container_width=True):
-                                st.session_state["pr_to_jwo"] = pr_no
-                                st.session_state["current_page"] = "🔧 Job Work Orders"
-                                st.rerun()
+                # Calculate pending qty across all lines
+                total_req  = sum(ln.get("required_qty",0) for ln in pr.get("lines",[]))
+                total_po   = sum(ln.get("po_created_qty",0) for ln in pr.get("lines",[]))
+                total_pend = max(0, total_req - total_po)
 
-                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+                with st.expander(
+                    f"{'📦' if pr.get('pr_type')=='Purchase' else '🔧'} {pr_no} | {pr.get('pr_type','')} | SO: {pr.get('so_ref','—')} | {len(pr.get('lines',[]))} items | Pending: {total_pend:.0f}",
+                    expanded=False
+                ):
+                    # Header
+                    ph1, ph2, ph3, ph4 = st.columns(4)
+                    with ph1: st.markdown(f'<div class="sec-label">PR Info</div><div style="font-size:13px;">Date: {pr.get("pr_date","")}<br>Req By: {pr.get("required_date","")}</div>', unsafe_allow_html=True)
+                    with ph2: st.markdown(f'<div class="sec-label">Source</div><div style="font-size:13px;">SO: {pr.get("so_ref","—")}<br>From: {pr.get("created_from","")}</div>', unsafe_allow_html=True)
+                    with ph3: st.markdown(f'<div class="sec-label">Status</div>{pur_badge(pr.get("status",""))}', unsafe_allow_html=True)
+                    with ph4:
+                        if pr.get("status") == "Pending Approval":
+                            ap1,ap2 = st.columns(2)
+                            with ap1:
+                                if st.button("✅ Approve", key=f"apr_{pr_no}", use_container_width=True):
+                                    SS["pr_list"][pr_no]["status"] = "Approved"
+                                    save_data(); st.rerun()
+                            with ap2:
+                                if st.button("❌ Reject", key=f"rej_{pr_no}", use_container_width=True):
+                                    SS["pr_list"][pr_no]["status"] = "Rejected"
+                                    save_data(); st.rerun()
+
+                    st.markdown("---")
+
+                    # Lines table with pending qty
+                    st.markdown("**PR Lines — Pending Qty:**")
+                    line_rows = []
+                    for ln in pr.get("lines",[]):
+                        req  = ln.get("required_qty",0)
+                        done = ln.get("po_created_qty",0)
+                        pend = max(0, req - done)
+                        line_rows.append({
+                            "Material":      f"{ln['material_code']} – {ln['material_name']}",
+                            "Type":          ln.get("material_type",""),
+                            "Required Qty":  req,
+                            "PO Created":    done,
+                            "Pending":       pend,
+                            "Unit":          ln.get("unit",""),
+                        })
+                    st.dataframe(pd.DataFrame(line_rows), use_container_width=True, hide_index=True)
+
+                    # Create PO/JWO inline
+                    if pr.get("status") == "Approved" and total_pend > 0:
+                        st.markdown("---")
+                        if pr.get("pr_type") == "Purchase":
+                            st.markdown("#### 📦 Create Purchase Order from this PR")
+                            suppliers = SS.get("suppliers",{})
+                            supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items() if "Job Work" not in v.get("type","")]
+                            ic1,ic2,ic3 = st.columns(3)
+                            with ic1:
+                                inline_supp = st.selectbox("Supplier *", supp_opts, key=f"inline_supp_{pr_no}")
+                            with ic2:
+                                inline_del  = st.date_input("Delivery Date", value=date.today()+timedelta(days=14), key=f"inline_del_{pr_no}")
+                            with ic3:
+                                inline_pay  = st.selectbox("Payment Terms", SS.get("payment_terms",[""]), key=f"inline_pay_{pr_no}")
+
+                            # Show pending lines with qty & rate input
+                            st.markdown("**Lines to PO (sirf pending qty):**")
+                            inline_lines = []
+                            for i, ln in enumerate(pr.get("lines",[])):
+                                req  = ln.get("required_qty",0)
+                                done = ln.get("po_created_qty",0)
+                                pend = max(0, req - done)
+                                if pend <= 0: continue
+                                lc1,lc2,lc3,lc4 = st.columns([3,1,1,1])
+                                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}</div>', unsafe_allow_html=True)
+                                with lc2:
+                                    po_qty = st.number_input("PO Qty", min_value=0.0, max_value=float(pend),
+                                                              value=float(pend), step=1.0, key=f"po_qty_{pr_no}_{i}")
+                                with lc3:
+                                    po_rate = st.number_input("Rate (₹)", min_value=0.0, step=0.5, key=f"po_rate_{pr_no}_{i}")
+                                with lc4:
+                                    po_gst = st.selectbox("GST%", GST_RATES, index=2, key=f"po_gst_{pr_no}_{i}")
+                                inline_lines.append({
+                                    "material_code": ln["material_code"],
+                                    "material_name": ln["material_name"],
+                                    "material_type": ln.get("material_type",""),
+                                    "required_qty":  req,
+                                    "po_qty":        po_qty,
+                                    "received_qty":  0,
+                                    "unit":          ln.get("unit",""),
+                                    "rate":          po_rate,
+                                    "gst_pct":       po_gst,
+                                    "amount":        round(po_qty * po_rate, 2),
+                                    "so_ref":        ln.get("so_ref",""),
+                                    "pr_line_idx":   i,
+                                })
+
+                            if inline_supp and inline_lines:
+                                subtotal = sum(l["amount"] for l in inline_lines)
+                                gst_amt  = sum(l["amount"]*l["gst_pct"]/100 for l in inline_lines)
+                                total    = subtotal + gst_amt
+                                st.markdown(f'<div class="info-box" style="text-align:right;">Subtotal: ₹{subtotal:,.2f} | GST: ₹{gst_amt:,.2f} | <strong>Total: ₹{total:,.2f}</strong></div>', unsafe_allow_html=True)
+
+                                if st.button(f"✅ Create PO from {pr_no}", key=f"create_po_{pr_no}", use_container_width=False):
+                                    supp_code = inline_supp.split(" – ")[0] if " – " in inline_supp else inline_supp
+                                    po_no = next_po()
+                                    SS["po_list"][po_no] = {
+                                        "po_no": po_no, "po_date": str(date.today()),
+                                        "supplier_code": supp_code,
+                                        "supplier_name": SS["suppliers"].get(supp_code,{}).get("name", supp_code),
+                                        "pr_ref": pr_no, "so_ref": pr.get("so_ref",""),
+                                        "delivery_date": str(inline_del),
+                                        "payment_terms": inline_pay, "currency": "INR",
+                                        "lines": inline_lines,
+                                        "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
+                                        "status": "Draft",
+                                        "created_at": datetime.now().isoformat(),
+                                    }
+                                    # Update PR line po_created_qty
+                                    for il in inline_lines:
+                                        idx = il["pr_line_idx"]
+                                        prev = SS["pr_list"][pr_no]["lines"][idx].get("po_created_qty",0)
+                                        SS["pr_list"][pr_no]["lines"][idx]["po_created_qty"] = prev + il["po_qty"]
+
+                                    # Check if all lines fully covered
+                                    all_done = all(
+                                        ln.get("po_created_qty",0) >= ln.get("required_qty",0)
+                                        for ln in SS["pr_list"][pr_no]["lines"]
+                                    )
+                                    SS["pr_list"][pr_no]["status"] = "PO Created" if all_done else "Approved"
+                                    save_data()
+                                    st.success(f"✅ {po_no} created from {pr_no}!")
+                                    st.rerun()
+
+                        else:  # Job Work
+                            st.markdown("#### 🔧 Create Job Work Order from this PR")
+                            suppliers  = SS.get("suppliers",{})
+                            jw_supps   = {k:v for k,v in suppliers.items() if "Job Work" in v.get("type","")}
+                            jw_opts    = [""] + [f"{k} – {v['name']}" for k,v in jw_supps.items()]
+                            jc1,jc2,jc3 = st.columns(3)
+                            with jc1:
+                                inline_proc = st.selectbox("Processor *", jw_opts, key=f"inline_proc_{pr_no}")
+                            with jc2:
+                                inline_jw_del = st.date_input("Expected Return", value=date.today()+timedelta(days=10), key=f"inline_jw_del_{pr_no}")
+                            with jc3:
+                                inline_jw_rate = st.number_input("Job Work Rate (₹/unit)", min_value=0.0, step=1.0, key=f"inline_jw_rate_{pr_no}")
+
+                            items_data = st.session_state.get("items",{})
+                            boms_data  = st.session_state.get("boms",{})
+                            jwo_inline_lines = []
+                            for i, ln in enumerate(pr.get("lines",[])):
+                                req  = ln.get("required_qty",0)
+                                done = ln.get("po_created_qty",0)
+                                pend = max(0, req - done)
+                                if pend <= 0: continue
+                                # Get input material from BOM
+                                bom_inputs = [b for b in boms_data.get(ln["material_code"],{}).get("lines",[]) if b.get("line_type") != "Process"]
+                                jl1,jl2,jl3 = st.columns([3,1,1])
+                                with jl1:
+                                    st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT: {ln["material_code"]}</strong> — {ln["material_name"]} | Pending: {pend} {ln.get("unit","")}</div>', unsafe_allow_html=True)
+                                    if bom_inputs:
+                                        in_code = bom_inputs[0].get("item_code","")
+                                        in_qty  = round(float(bom_inputs[0].get("qty",0)) * pend, 3)
+                                        st.markdown(f'<div style="font-size:12px;color:#64748b;">IN: {in_code} — {in_qty} {bom_inputs[0].get("unit","")}</div>', unsafe_allow_html=True)
+                                with jl2:
+                                    jw_qty = st.number_input("Qty", min_value=0.0, max_value=float(pend), value=float(pend), step=1.0, key=f"jw_qty_{pr_no}_{i}")
+                                with jl3:
+                                    jw_line_rate = st.number_input("Rate", min_value=0.0, step=0.5, value=float(inline_jw_rate), key=f"jw_lrate_{pr_no}_{i}")
+
+                                in_mat = bom_inputs[0].get("item_code","") if bom_inputs else ""
+                                in_qty_val = round(float(bom_inputs[0].get("qty",0)) * jw_qty, 3) if bom_inputs else 0
+                                jwo_inline_lines.append({
+                                    "output_material": ln["material_code"],
+                                    "output_name":     ln["material_name"],
+                                    "output_qty":      jw_qty,
+                                    "output_unit":     ln.get("unit",""),
+                                    "input_material":  in_mat,
+                                    "input_name":      items_data.get(in_mat,{}).get("name","") if in_mat else "",
+                                    "input_qty":       in_qty_val,
+                                    "input_unit":      bom_inputs[0].get("unit","") if bom_inputs else "",
+                                    "rate":            jw_line_rate,
+                                    "received_qty":    0.0,
+                                    "pr_line_idx":     i,
+                                })
+
+                            if inline_proc and jwo_inline_lines:
+                                jw_total = sum(l["output_qty"]*l["rate"] for l in jwo_inline_lines)
+                                st.markdown(f'<div class="info-box" style="text-align:right;"><strong>JW Total: ₹{jw_total:,.2f}</strong></div>', unsafe_allow_html=True)
+
+                                if st.button(f"✅ Create JWO from {pr_no}", key=f"create_jwo_{pr_no}", use_container_width=False):
+                                    proc_code = inline_proc.split(" – ")[0] if " – " in inline_proc else inline_proc
+                                    jwo_no = next_jwo()
+
+                                    # Issue input materials from stock
+                                    for jl in jwo_inline_lines:
+                                        in_c = jl.get("input_material","")
+                                        in_q = float(jl.get("input_qty",0))
+                                        if in_c and in_q > 0 and in_c in st.session_state["items"]:
+                                            cur = float(st.session_state["items"][in_c].get("stock",0))
+                                            st.session_state["items"][in_c]["stock"] = max(0, cur - in_q)
+
+                                    SS["jwo_list"][jwo_no] = {
+                                        "jwo_no":         jwo_no,
+                                        "jwo_date":       str(date.today()),
+                                        "processor_code": proc_code,
+                                        "processor_name": suppliers.get(proc_code,{}).get("name", proc_code),
+                                        "pr_ref":         pr_no,
+                                        "so_ref":         pr.get("so_ref",""),
+                                        "expected_date":  str(inline_jw_del),
+                                        "lines":          jwo_inline_lines,
+                                        "total":          jw_total,
+                                        "status":         "Issued to Processor",
+                                        "created_at":     datetime.now().isoformat(),
+                                    }
+                                    # Update PR line po_created_qty
+                                    for jl in jwo_inline_lines:
+                                        idx = jl["pr_line_idx"]
+                                        prev = SS["pr_list"][pr_no]["lines"][idx].get("po_created_qty",0)
+                                        SS["pr_list"][pr_no]["lines"][idx]["po_created_qty"] = prev + jl["output_qty"]
+
+                                    all_done = all(
+                                        ln.get("po_created_qty",0) >= ln.get("required_qty",0)
+                                        for ln in SS["pr_list"][pr_no]["lines"]
+                                    )
+                                    SS["pr_list"][pr_no]["status"] = "JWO Created" if all_done else "Approved"
+                                    save_data()
+                                    st.success(f"✅ {jwo_no} created! Input materials issued from stock.")
+                                    st.rerun()
+
+                st.markdown('<hr style="margin:4px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
 
 
 # ── PURCHASE ORDERS ───────────────────────────────────────────────────────────
