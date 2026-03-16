@@ -179,6 +179,10 @@ DEFAULT_DATA = {
     "sales_teams":    ["Team Alpha", "Team Beta", "North Zone", "South Zone", "Export Desk"],
     "payment_terms":  ["Immediate", "Net 15", "Net 30", "Net 45", "Net 60", "Against LC"],
     "skus":           {},
+    "mrp_result":     {},
+    "mrp_so_list":    [],
+    "mrp_run_time":   "",
+    "reservations":   {},
 }
 
 @st.cache_resource
@@ -295,9 +299,15 @@ ALL_PAGES = [
     ("SO", "📂 SO List & Tracking"),
     ("SO", "📈 SO Reports"),
     ("SO", "⚙️ SO Settings"),
+    ("MRP", "🏭 MRP Dashboard"),
+    ("MRP", "▶ Run MRP"),
+    ("MRP", "📦 Material Requirements"),
+    ("MRP", "🔒 Reservations"),
+    ("MRP", "📊 MRP Reports"),
 ]
-IM_PAGES = [p for m, p in ALL_PAGES if m == "IM"]
-SO_PAGES = [p for m, p in ALL_PAGES if m == "SO"]
+IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
+SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
+MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
 
 if "current_page" not in st.session_state:
     st.session_state["current_page"] = "📊 Item Master Dashboard"
@@ -322,6 +332,13 @@ with st.sidebar:
             st.session_state["current_page"] = pg
             st.rerun()
 
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">MRP</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="MRP"]:
+        _active = st.session_state["current_page"] == pg
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
     st.markdown("---")
     _ni = len(st.session_state.get("items", {}))
     _nb = len(st.session_state.get("boms", {}))
@@ -330,8 +347,9 @@ with st.sidebar:
 
 # Route to correct page
 _cp  = st.session_state["current_page"]
-nav    = _cp if _cp in IM_PAGES else None
-nav_so = _cp if _cp in SO_PAGES else None
+nav     = _cp if _cp in IM_PAGES  else None
+nav_so  = _cp if _cp in SO_PAGES  else None
+nav_mrp = _cp if _cp in MRP_PAGES else None
 
 SS = st.session_state
 
@@ -2480,3 +2498,516 @@ elif nav_so == "⚙️ SO Settings":
                         st.rerun()
                 except Exception as e:
                     st.error(f"File read error: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MRP MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def calculate_mrp(selected_so_nos):
+    """
+    Core MRP engine:
+    For each SO → each line → BOM → explode materials recursively
+    + buyer-wise packaging from item's buyer_packaging
+    Returns: dict of {material_code: {name, type, total_req, stock, net_req, unit, breakdown[]}}
+    """
+    items    = st.session_state.get("items", {})
+    boms     = st.session_state.get("boms", {})
+    so_list  = SS.get("so_list", {})
+    result   = {}  # material_code -> aggregated requirement
+
+    def get_bom_lines(item_code):
+        """Get BOM lines for an item"""
+        bom = boms.get(item_code, {})
+        return bom.get("lines", [])
+
+    def explode_bom(item_code, qty, so_no, sku, buyer, depth=0):
+        """Recursively explode BOM — multi-level support"""
+        if depth > 5:
+            return  # prevent infinite loop
+        lines = get_bom_lines(item_code)
+        if not lines:
+            # Leaf node — this IS the raw material
+            return
+        for line in lines:
+            comp_code = line.get("item_code", "")
+            if not comp_code:
+                continue
+            comp_item  = items.get(comp_code, {})
+            comp_name  = comp_item.get("name", comp_code)
+            comp_type  = comp_item.get("item_type", "Raw Material (RM)")
+            line_qty   = float(line.get("qty", 0))
+            shrinkage  = float(line.get("shrinkage", 0)) / 100
+            wastage    = float(line.get("wastage", 0)) / 100
+            # Adjusted qty per piece
+            adj_qty = line_qty * (1 + shrinkage + wastage)
+            total_qty = round(adj_qty * qty, 3)
+            unit = line.get("uom", comp_item.get("unit", "Pcs"))
+
+            # Check if component itself has a BOM (multi-level)
+            if comp_code in boms and boms[comp_code].get("lines"):
+                explode_bom(comp_code, total_qty, so_no, sku, buyer, depth+1)
+            else:
+                # Add to result
+                if comp_code not in result:
+                    result[comp_code] = {
+                        "name": comp_name, "type": comp_type,
+                        "unit": unit, "total_req": 0,
+                        "stock": float(items.get(comp_code, {}).get("stock", 0)),
+                        "reserved": float(items.get(comp_code, {}).get("reserved", 0)),
+                        "breakdown": []
+                    }
+                result[comp_code]["total_req"] += total_qty
+                result[comp_code]["breakdown"].append({
+                    "so_no": so_no, "sku": sku, "qty_req": total_qty,
+                    "source": f"BOM: {item_code}"
+                })
+
+    def add_packaging(item_code, qty, so_no, sku, buyer):
+        """Add buyer-wise packaging requirements"""
+        item = items.get(item_code, {})
+        pkg  = item.get("buyer_packaging", {})
+        # Use buyer-specific packaging, fallback to first available
+        pkg_lines = pkg.get(buyer, [])
+        if not pkg_lines and pkg:
+            pkg_lines = list(pkg.values())[0]
+
+        for ln in pkg_lines:
+            comp_code = ln.get("item_code", "")
+            if not comp_code:
+                continue
+            comp_item = items.get(comp_code, {})
+            comp_name = comp_item.get("name", comp_code)
+            comp_type = comp_item.get("item_type", "Packing Materials")
+            line_qty  = float(ln.get("qty", 1))
+            unit      = ln.get("uom", "Pcs")
+            total_qty = round(line_qty * qty, 3)
+
+            if comp_code not in result:
+                result[comp_code] = {
+                    "name": comp_name, "type": comp_type,
+                    "unit": unit, "total_req": 0,
+                    "stock": float(items.get(comp_code, {}).get("stock", 0)),
+                    "reserved": float(items.get(comp_code, {}).get("reserved", 0)),
+                    "breakdown": []
+                }
+            result[comp_code]["total_req"] += total_qty
+            result[comp_code]["breakdown"].append({
+                "so_no": so_no, "sku": sku, "qty_req": total_qty,
+                "source": f"Packaging ({buyer})"
+            })
+
+    # Main loop
+    for so_no in selected_so_nos:
+        so = so_list.get(so_no, {})
+        buyer = so.get("buyer", "")
+        for line in so.get("lines", []):
+            sku = line.get("sku", "")
+            qty = line.get("qty", 0)
+            # Get parent item for BOM (size variant may not have BOM, parent does)
+            sku_item = items.get(sku, {})
+            parent   = sku_item.get("parent", sku)
+            bom_item = parent if parent in boms else sku
+
+            explode_bom(bom_item, qty, so_no, sku, buyer)
+            add_packaging(bom_item, qty, so_no, sku, buyer)
+
+    # Calculate net requirement
+    for code, mat in result.items():
+        avail = mat["stock"] - mat["reserved"]
+        mat["available"] = max(0, avail)
+        mat["net_req"]   = max(0, round(mat["total_req"] - avail, 3))
+
+    return result
+
+
+# ── MRP DASHBOARD ─────────────────────────────────────────────────────────────
+if nav_mrp == "🏭 MRP Dashboard":
+    st.markdown('<h1>MRP Dashboard</h1>', unsafe_allow_html=True)
+
+    so_list = SS.get("so_list", {})
+    open_sos = {k: v for k, v in so_list.items() if v.get("status") not in ["Closed","Cancelled","Fully Received"]}
+    total_items = len(st.session_state.get("items", {}))
+    total_boms  = len(st.session_state.get("boms", {}))
+    items_without_bom = sum(1 for code, item in st.session_state.get("items",{}).items()
+                            if item.get("item_type") == "Finished Goods (FG)"
+                            and not item.get("parent")
+                            and code not in st.session_state.get("boms",{}))
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f'''<div class="metric-box">
+            <div class="metric-value">{len(open_sos)}</div>
+            <div class="metric-label">Open Sales Orders</div>
+        </div>''', unsafe_allow_html=True)
+    with c2:
+        total_pending = sum(
+            line["qty"] - line.get("produced_qty", 0)
+            for so in open_sos.values()
+            for line in so.get("lines", [])
+        )
+        st.markdown(f'''<div class="metric-box">
+            <div class="metric-value">{total_pending:,}</div>
+            <div class="metric-label">Pending Production Qty</div>
+        </div>''', unsafe_allow_html=True)
+    with c3:
+        st.markdown(f'''<div class="metric-box">
+            <div class="metric-value">{total_boms}</div>
+            <div class="metric-label">BOMs Defined</div>
+        </div>''', unsafe_allow_html=True)
+    with c4:
+        st.markdown(f'''<div class="metric-box {"red" if items_without_bom > 0 else ""}">
+            <div class="metric-value">{items_without_bom}</div>
+            <div class="metric-label">FG Items Without BOM</div>
+        </div>''', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Open SOs summary
+    if open_sos:
+        st.markdown("#### 📋 Open Sales Orders (MRP Eligible)")
+        rows = []
+        for so_no, so in open_sos.items():
+            total_q = sum(l["qty"] for l in so.get("lines", []))
+            prod_q  = sum(l.get("produced_qty", 0) for l in so.get("lines", []))
+            has_bom = all(
+                (items.get(l.get("sku",{})[:l.get("sku","").rfind("-")] if "-" in l.get("sku","") else l.get("sku",""), {}))
+                for l in so.get("lines", [])
+            )
+            rows.append({
+                "SO #": so_no, "Buyer": so.get("buyer",""), "Delivery": so.get("delivery_date",""),
+                "Total Qty": total_q, "Produced": prod_q, "Pending": total_q - prod_q,
+                "Status": so.get("status",""), "Lines": len(so.get("lines",[]))
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.markdown('<div class="warn-box">Koi open Sales Order nahi hai. Pehle SO banao.</div>', unsafe_allow_html=True)
+
+    if items_without_bom > 0:
+        st.markdown("---")
+        st.markdown("#### ⚠️ FG Items Without BOM")
+        boms_data = st.session_state.get("boms", {})
+        for code, item in st.session_state.get("items", {}).items():
+            if item.get("item_type") == "Finished Goods (FG)" and not item.get("parent") and code not in boms_data:
+                st.markdown(f'<span class="tag tag-red">⚠️ {code} – {item.get("name","")}</span>', unsafe_allow_html=True)
+
+
+# ── RUN MRP ───────────────────────────────────────────────────────────────────
+elif nav_mrp == "▶ Run MRP":
+    st.markdown('<h1>Run Material Requirement Planning</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Select karo kaunse Sales Orders ke liye MRP run karni hai — system automatically BOM aur Packaging se material requirement calculate karega.</div>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    so_list   = SS.get("so_list", {})
+    open_sos  = {k: v for k, v in so_list.items() if v.get("status") not in ["Closed","Cancelled","Fully Received"]}
+
+    if not open_sos:
+        st.markdown('<div class="warn-box">Koi open SO nahi hai. Pehle Sales Order banao.</div>', unsafe_allow_html=True)
+    else:
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            filter_buyer = st.selectbox("Filter by Buyer", ["All"] + SS.get("buyers", []), key="mrp_buyer")
+        with f2:
+            date_from = st.date_input("Delivery From", value=date.today(), key="mrp_from")
+        with f3:
+            date_to   = st.date_input("Delivery To", value=date.today() + timedelta(days=90), key="mrp_to")
+
+        # Filter SOs
+        eligible = {}
+        for so_no, so in open_sos.items():
+            if filter_buyer != "All" and so.get("buyer") != filter_buyer:
+                continue
+            del_date = so.get("delivery_date", "9999-99-99")
+            if str(date_from) <= del_date <= str(date_to):
+                eligible[so_no] = so
+
+        if not eligible:
+            st.markdown('<div class="warn-box">Filter mein koi SO nahi aaya. Dates ya Buyer filter change karo.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f"**{len(eligible)} SOs eligible hain:**")
+            selected_sos = st.multiselect(
+                "SOs select karo (sabhi by default selected hain)",
+                options=list(eligible.keys()),
+                default=list(eligible.keys()),
+                format_func=lambda x: f"{x} – {eligible.get(x,{}).get('buyer','')} – Delivery: {eligible.get(x,{}).get('delivery_date','')}",
+                key="mrp_selected_sos"
+            )
+
+            if selected_sos:
+                # Show summary of selected
+                total_lines = sum(len(eligible[s].get("lines",[])) for s in selected_sos)
+                total_qty   = sum(l["qty"] for s in selected_sos for l in eligible[s].get("lines",[]))
+                st.markdown(f'<div class="info-box">Selected: <strong>{len(selected_sos)}</strong> SOs | <strong>{total_lines}</strong> SKU lines | <strong>{total_qty:,}</strong> total pcs</div>', unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🚀 Run MRP Now", use_container_width=False):
+                    with st.spinner("MRP calculate ho rahi hai..."):
+                        mrp_result = calculate_mrp(selected_sos)
+                        SS["mrp_result"]   = mrp_result
+                        SS["mrp_so_list"]  = selected_sos
+                        SS["mrp_run_time"] = datetime.now().strftime("%d-%m-%Y %H:%M")
+                        save_data()
+                    st.success(f"✅ MRP complete! {len(mrp_result)} materials found.")
+                    st.session_state["current_page"] = "📦 Material Requirements"
+                    st.rerun()
+
+
+# ── MATERIAL REQUIREMENTS ─────────────────────────────────────────────────────
+elif nav_mrp == "📦 Material Requirements":
+    st.markdown('<h1>Material Requirements</h1>', unsafe_allow_html=True)
+
+    if not SS.get("mrp_result"):
+        st.markdown('<div class="warn-box">MRP nahi chali abhi tak. Pehle "▶ Run MRP" se MRP run karo.</div>', unsafe_allow_html=True)
+    else:
+        mrp_result = SS["mrp_result"]
+        run_time   = SS.get("mrp_run_time", "")
+        so_list_used = SS.get("mrp_so_list", [])
+
+        st.markdown(f'<div class="ok-box">Last MRP run: <strong>{run_time}</strong> | SOs: <strong>{", ".join(so_list_used)}</strong></div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Filters
+        mf1, mf2, mf3 = st.columns(3)
+        with mf1:
+            mat_types = list(set(m["type"] for m in mrp_result.values()))
+            f_type = st.selectbox("Filter by Type", ["All"] + mat_types, key="mrp_mat_type")
+        with mf2:
+            f_shortage = st.checkbox("Only show shortage items", key="mrp_shortage")
+        with mf3:
+            f_search = st.text_input("🔍 Search material", key="mrp_search")
+
+        # Summary table
+        rows = []
+        for code, mat in mrp_result.items():
+            if f_type != "All" and mat["type"] != f_type:
+                continue
+            if f_shortage and mat["net_req"] <= 0:
+                continue
+            if f_search and f_search.lower() not in code.lower() and f_search.lower() not in mat["name"].lower():
+                continue
+            shortage = mat["net_req"] > 0
+            rows.append({
+                "Material Code": code,
+                "Material Name": mat["name"],
+                "Type":          mat["type"],
+                "Unit":          mat["unit"],
+                "Total Required": mat["total_req"],
+                "In Stock":       mat["stock"],
+                "Reserved":       mat["reserved"],
+                "Available":      mat["available"],
+                "Net Requirement": mat["net_req"],
+                "Status":         "🔴 Shortage" if shortage else "🟢 OK",
+            })
+
+        if rows:
+            df_mrp = pd.DataFrame(rows)
+            st.dataframe(df_mrp, use_container_width=True, hide_index=True)
+
+            # Summary KPIs
+            shortage_count = sum(1 for r in rows if r["Net Requirement"] > 0)
+            ok_count = len(rows) - shortage_count
+            k1, k2, k3 = st.columns(3)
+            with k1: st.markdown(f'<div class="metric-box red"><div class="metric-value">{shortage_count}</div><div class="metric-label">Shortage Materials</div></div>', unsafe_allow_html=True)
+            with k2: st.markdown(f'<div class="metric-box green"><div class="metric-value">{ok_count}</div><div class="metric-label">Stock OK Materials</div></div>', unsafe_allow_html=True)
+            with k3: st.markdown(f'<div class="metric-box"><div class="metric-value">{len(rows)}</div><div class="metric-label">Total Materials</div></div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # Drill-down
+            st.markdown("#### 🔍 Material Drill-Down (Breakup by SO / SKU)")
+            drill_opts = {code: f"{code} – {mat['name']}" for code, mat in mrp_result.items()
+                         if (f_type == "All" or mat["type"] == f_type)}
+            drill_sel = st.selectbox("Material select karo detail dekhne ke liye", [""] + list(drill_opts.keys()),
+                                      format_func=lambda x: drill_opts.get(x, x) if x else "— Select —",
+                                      key="mrp_drill")
+            if drill_sel and drill_sel in mrp_result:
+                mat = mrp_result[drill_sel]
+                st.markdown(f'''<div class="card card-left" style="margin-bottom:12px;">
+                    <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;">
+                        <div><span style="color:#94a3b8;">Material</span><br><strong>{drill_sel} – {mat["name"]}</strong></div>
+                        <div><span style="color:#94a3b8;">Total Required</span><br><strong>{mat["total_req"]} {mat["unit"]}</strong></div>
+                        <div><span style="color:#94a3b8;">Available Stock</span><br><strong>{mat["available"]} {mat["unit"]}</strong></div>
+                        <div><span style="color:#94a3b8;">Net Requirement</span><br><strong style="color:{"#ef4444" if mat["net_req"]>0 else "#059669"};">{mat["net_req"]} {mat["unit"]}</strong></div>
+                    </div>
+                </div>''', unsafe_allow_html=True)
+
+                bd_rows = []
+                for bd in mat.get("breakdown", []):
+                    so = SS["so_list"].get(bd["so_no"], {})
+                    bd_rows.append({
+                        "SO #":    bd["so_no"],
+                        "Buyer":   so.get("buyer", "—"),
+                        "SKU":     bd["sku"],
+                        "Source":  bd["source"],
+                        "Qty Required": bd["qty_req"],
+                        "Unit":    mat["unit"],
+                    })
+                if bd_rows:
+                    st.dataframe(pd.DataFrame(bd_rows), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+
+            # Excel Export
+            st.markdown("#### 📥 Export")
+            import base64
+            csv_data = df_mrp.to_csv(index=False)
+            b64_csv = base64.b64encode(csv_data.encode()).decode()
+            st.markdown(f'''<a href="data:text/csv;base64,{b64_csv}" download="MRP_Requirements_{datetime.now().strftime("%Y%m%d")}.csv">
+                <button style="background:#1c1c2e;color:white;border:none;padding:8px 20px;border-radius:8px;font-weight:700;cursor:pointer;">
+                    ⬇️ Download CSV (Excel mein open karo)
+                </button></a>''', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="warn-box">Filter ke hisaab se koi material nahi mila.</div>', unsafe_allow_html=True)
+
+
+# ── RESERVATIONS ──────────────────────────────────────────────────────────────
+elif nav_mrp == "🔒 Reservations":
+    st.markdown('<h1>Material Reservations</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Material requirements ke basis pe stock reserve karo — reserved stock available stock mein count nahi hoga future MRP mein.</div>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if not SS.get("mrp_result"):
+        st.markdown('<div class="warn-box">Pehle MRP run karo "▶ Run MRP" se.</div>', unsafe_allow_html=True)
+    else:
+        mrp_result = SS["mrp_result"]
+        items_data = st.session_state.get("items", {})
+
+        if "reservations" not in SS:
+            SS["reservations"] = {}
+
+        # Reserve all button
+        if st.button("🔒 Reserve All Available Stock for MRP", use_container_width=False):
+            for code, mat in mrp_result.items():
+                if mat["available"] > 0 and mat["net_req"] > 0:
+                    reserve_qty = min(mat["available"], mat["total_req"])
+                    if code in items_data:
+                        current_res = float(items_data[code].get("reserved", 0))
+                        st.session_state["items"][code]["reserved"] = current_res + reserve_qty
+                    # Track reservation
+                    SS["reservations"][code] = {
+                        "material_name": mat["name"],
+                        "reserved_qty": reserve_qty,
+                        "unit": mat["unit"],
+                        "mrp_run": SS.get("mrp_run_time",""),
+                        "so_list": SS.get("mrp_so_list",[]),
+                    }
+            save_data()
+            st.success("✅ Stock reserved!")
+            st.rerun()
+
+        # Reservation table
+        res_rows = []
+        for code, mat in mrp_result.items():
+            item = items_data.get(code, {})
+            reserved = float(item.get("reserved", 0))
+            res_rows.append({
+                "Material Code": code,
+                "Material Name": mat["name"],
+                "Total Required": mat["total_req"],
+                "In Stock":       mat["stock"],
+                "Reserved":       reserved,
+                "Available":      max(0, mat["stock"] - reserved),
+                "Net Req":        max(0, mat["total_req"] - max(0, mat["stock"] - reserved)),
+                "Unit":           mat["unit"],
+            })
+
+        if res_rows:
+            st.dataframe(pd.DataFrame(res_rows), use_container_width=True, hide_index=True)
+
+            # Manual reserve
+            st.markdown("---")
+            st.markdown("#### Manual Reservation")
+            r1, r2, r3 = st.columns(3)
+            with r1:
+                res_mat = st.selectbox("Material", [""] + list(mrp_result.keys()),
+                                        format_func=lambda x: f"{x} – {mrp_result[x]['name']}" if x else "Select",
+                                        key="res_mat")
+            with r2:
+                res_qty = st.number_input("Reserve Qty", min_value=0.0, step=1.0, key="res_qty")
+            with r3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔒 Reserve", use_container_width=True) and res_mat and res_qty > 0:
+                    if res_mat in items_data:
+                        current = float(st.session_state["items"][res_mat].get("reserved", 0))
+                        st.session_state["items"][res_mat]["reserved"] = current + res_qty
+                        save_data()
+                        st.success(f"✅ {res_qty} {mrp_result[res_mat]['unit']} reserved for {res_mat}!")
+                        st.rerun()
+
+
+# ── MRP REPORTS ───────────────────────────────────────────────────────────────
+elif nav_mrp == "📊 MRP Reports":
+    st.markdown('<h1>MRP Reports</h1>', unsafe_allow_html=True)
+
+    if not SS.get("mrp_result"):
+        st.markdown('<div class="warn-box">Pehle MRP run karo.</div>', unsafe_allow_html=True)
+    else:
+        mrp_result = SS["mrp_result"]
+
+        rep = st.selectbox("Report select karo", [
+            "1. Material Requirement Report (All)",
+            "2. Fabric Requirement Report",
+            "3. Accessories Requirement Report",
+            "4. Packaging Requirement Report",
+            "5. Buyer Order Requirement Report",
+        ], key="mrp_rep_sel")
+
+        def mat_table(type_filter=None):
+            rows = []
+            for code, mat in mrp_result.items():
+                if type_filter and mat["type"] not in type_filter:
+                    continue
+                rows.append({
+                    "Code": code, "Material": mat["name"], "Type": mat["type"],
+                    "Required": mat["total_req"], "Stock": mat["stock"],
+                    "Available": mat["available"], "Net Req": mat["net_req"],
+                    "Unit": mat["unit"],
+                    "Status": "🔴 Short" if mat["net_req"] > 0 else "🟢 OK"
+                })
+            return rows
+
+        if rep.startswith("1"):
+            rows = mat_table()
+            st.markdown(f"**Total {len(rows)} materials**")
+            if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        elif rep.startswith("2"):
+            rows = mat_table(["Raw Material (RM)"])
+            fabric_rows = [r for r in rows if any(w in r["Material"].lower() for w in ["fabric","cloth","grey","printed","dyed","lycra","cotton","polyester","silk","linen","khadi"])]
+            st.markdown(f"**Fabric items: {len(fabric_rows)}**")
+            if fabric_rows: st.dataframe(pd.DataFrame(fabric_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("Koi fabric item nahi mila. All Raw Materials:")
+                if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        elif rep.startswith("3"):
+            rows = mat_table(["Accessories"])
+            st.markdown(f"**Accessories: {len(rows)}**")
+            if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            else: st.markdown('<div class="warn-box">Koi accessories item nahi mila.</div>', unsafe_allow_html=True)
+
+        elif rep.startswith("4"):
+            rows = mat_table(["Packing Materials"])
+            st.markdown(f"**Packaging items: {len(rows)}**")
+            if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            else: st.markdown('<div class="warn-box">Koi packaging item nahi mila.</div>', unsafe_allow_html=True)
+
+        elif rep.startswith("5"):
+            # Buyer-wise breakdown
+            so_list_used = SS.get("mrp_so_list", [])
+            buyer_data = {}
+            for code, mat in mrp_result.items():
+                for bd in mat.get("breakdown", []):
+                    so = SS["so_list"].get(bd["so_no"], {})
+                    buyer = so.get("buyer", "Unknown")
+                    if buyer not in buyer_data:
+                        buyer_data[buyer] = {}
+                    if code not in buyer_data[buyer]:
+                        buyer_data[buyer][code] = {"name": mat["name"], "type": mat["type"], "qty": 0, "unit": mat["unit"]}
+                    buyer_data[buyer][code]["qty"] += bd["qty_req"]
+
+            for buyer, mats in buyer_data.items():
+                with st.expander(f"🛍️ {buyer} — {len(mats)} materials"):
+                    brows = [{"Code": c, "Material": m["name"], "Type": m["type"],
+                              "Required": round(m["qty"],2), "Unit": m["unit"]} for c, m in mats.items()]
+                    st.dataframe(pd.DataFrame(brows), use_container_width=True, hide_index=True)
