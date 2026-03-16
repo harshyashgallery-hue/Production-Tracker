@@ -927,10 +927,20 @@ elif nav == "🔩 BOM Management":
 
             # Reload button — force reload from saved BOM
             if has_existing_bom:
-                if st.button("🔄 Reload from Saved BOM", key="reload_bom"):
-                    st.session_state[bom_key]  = st.session_state["boms"][target_item].get("lines", []).copy()
-                    st.session_state[proc_key] = st.session_state["boms"][target_item].get("process_lines", []).copy()
-                    st.rerun()
+                rb1, rb2 = st.columns(2)
+                with rb1:
+                    if st.button("🔄 Reload from Saved BOM", key="reload_bom"):
+                        st.session_state[bom_key]  = st.session_state["boms"][target_item].get("lines", []).copy()
+                        st.session_state[proc_key] = st.session_state["boms"][target_item].get("process_lines", []).copy()
+                        st.rerun()
+                with rb2:
+                    if st.button("🗑 Delete Existing BOM & Fresh Start", key="del_bom"):
+                        del st.session_state["boms"][target_item]
+                        st.session_state[bom_key]  = []
+                        st.session_state[proc_key] = []
+                        save_data()
+                        st.success(f"✅ {target_item} ka BOM delete ho gaya — ab fresh BOM banao!")
+                        st.rerun()
 
             # ================================================================
             # SECTION 1 - MATERIAL / COMPONENT LINES
