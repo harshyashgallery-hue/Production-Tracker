@@ -1090,6 +1090,12 @@ elif nav == "🔩 BOM Management":
 
             # Save BOM
             st.markdown("---")
+
+            # Show warning if BOM is certified
+            _bom_status = st.session_state["boms"].get(target_item, {}).get("status", "")
+            if _bom_status == "Certified":
+                st.markdown('<div class="warn-box">⚠️ Yeh BOM "Certified" hai — save karne par status "Draft" ho jaayega. Lines add karo phir dobara Certify karo.</div>', unsafe_allow_html=True)
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button("💾 Save BOM (Draft)", use_container_width=True):
