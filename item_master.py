@@ -188,6 +188,15 @@ DEFAULT_DATA = {
     "tna_counter": 1,
     "tna_templates": {},
     "tna_activity_groups": ["Merchandising","Fabric","Sampling","CAD","Purchase","Printing","Dyeing","Cutting","Stitching","Finishing","Packing","Quality","Dispatch","Logistics"],
+    "suppliers": {},
+    "pr_list": {},
+    "po_list": {},
+    "jwo_list": {},
+    "grn_list": {},
+    "pr_counter": 1,
+    "po_counter": 1,
+    "jwo_counter": 1,
+    "grn_counter": 1,
 }
 
 @st.cache_resource
@@ -340,11 +349,19 @@ ALL_PAGES = [
     ("TNA", "📋 TNA List"),
     ("TNA", "📁 TNA Templates"),
     ("TNA", "📊 TNA Reports"),
+    ("PUR", "🛒 Purchase Dashboard"),
+    ("PUR", "📋 Purchase Requisitions"),
+    ("PUR", "📦 Purchase Orders"),
+    ("PUR", "🔧 Job Work Orders"),
+    ("PUR", "📥 GRN"),
+    ("PUR", "👥 Supplier Master"),
+    ("PUR", "📊 Purchase Reports"),
 ]
 IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
 SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
 MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
 TNA_PAGES = [p for m, p in ALL_PAGES if m == "TNA"]
+PUR_PAGES = [p for m, p in ALL_PAGES if m == "PUR"]
 
 if "current_page" not in st.session_state:
     st.session_state["current_page"] = "📊 Item Master Dashboard"
@@ -383,6 +400,13 @@ with st.sidebar:
             st.session_state["current_page"] = pg
             st.rerun()
 
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">PURCHASE</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="PUR"]:
+        _active = st.session_state["current_page"] == pg
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
     st.markdown("---")
     _ni = len(st.session_state.get("items", {}))
     _nb = len(st.session_state.get("boms", {}))
@@ -395,6 +419,7 @@ nav     = _cp if _cp in IM_PAGES  else None
 nav_so  = _cp if _cp in SO_PAGES  else None
 nav_mrp = _cp if _cp in MRP_PAGES else None
 nav_tna = _cp if _cp in TNA_PAGES else None
+nav_pur = _cp if _cp in PUR_PAGES else None
 
 SS = st.session_state
 
@@ -4081,3 +4106,1015 @@ elif nav_tna == "📊 TNA Reports":
         rows = [{"Person":k,"Pending":v["pending"],"Completed":v["completed"],"Delayed":v["delayed"]} for k,v in resp_rows.items()]
         if rows:
             st.dataframe(pd.DataFrame(rows).sort_values("Delayed",ascending=False), use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PURCHASE MODULE — PR / PO / JWO / GRN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PR_STATUS  = ["Draft","Pending Approval","Approved","Rejected","PO Created","JWO Created","Closed"]
+PO_STATUS  = ["Draft","Sent to Supplier","Confirmed","Partial Received","Received","Closed","Cancelled"]
+JWO_STATUS = ["Draft","Issued to Processor","In Process","Partial Received","Received","Closed","Cancelled"]
+GRN_STATUS = ["Draft","Verified","Posted"]
+
+def next_pr():
+    n = f"PR-{SS['pr_counter']:04d}"; SS["pr_counter"] += 1; return n
+def next_po():
+    n = f"PO-{SS['po_counter']:04d}"; SS["po_counter"] += 1; return n
+def next_jwo():
+    n = f"JWO-{SS['jwo_counter']:04d}"; SS["jwo_counter"] += 1; return n
+def next_grn():
+    n = f"GRN-{SS['grn_counter']:04d}"; SS["grn_counter"] += 1; return n
+
+def pur_badge(status):
+    colors = {
+        "Draft":"#64748b","Pending Approval":"#8b5cf6","Approved":"#059669",
+        "Rejected":"#ef4444","PO Created":"#0ea5e9","JWO Created":"#0ea5e9",
+        "Closed":"#475569","Sent to Supplier":"#d97706","Confirmed":"#059669",
+        "Partial Received":"#d97706","Received":"#059669","Cancelled":"#ef4444",
+        "Issued to Processor":"#d97706","In Process":"#d97706","Posted":"#059669",
+        "Verified":"#0ea5e9",
+    }
+    bg = {
+        "Draft":"#f1f5f9","Pending Approval":"#ede9fe","Approved":"#d1fae5",
+        "Rejected":"#fee2e2","PO Created":"#dbeafe","JWO Created":"#dbeafe",
+        "Closed":"#f1f5f9","Sent to Supplier":"#fef3c7","Confirmed":"#d1fae5",
+        "Partial Received":"#fef3c7","Received":"#d1fae5","Cancelled":"#fee2e2",
+        "Issued to Processor":"#fef3c7","In Process":"#fef3c7","Posted":"#d1fae5",
+        "Verified":"#dbeafe",
+    }
+    c = colors.get(status,"#64748b"); b = bg.get(status,"#f1f5f9")
+    return f'<span style="background:{b};color:{c};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;">{status}</span>'
+
+
+# ── PURCHASE DASHBOARD ────────────────────────────────────────────────────────
+if nav_pur == "🛒 Purchase Dashboard":
+    st.markdown('<h1>Purchase Dashboard</h1>', unsafe_allow_html=True)
+
+    pr_list  = SS.get("pr_list", {})
+    po_list  = SS.get("po_list", {})
+    jwo_list = SS.get("jwo_list", {})
+    grn_list = SS.get("grn_list", {})
+
+    # KPIs
+    open_prs  = sum(1 for p in pr_list.values()  if p.get("status") in ["Pending Approval","Draft"])
+    open_pos  = sum(1 for p in po_list.values()  if p.get("status") not in ["Received","Closed","Cancelled"])
+    open_jwos = sum(1 for p in jwo_list.values() if p.get("status") not in ["Received","Closed","Cancelled"])
+    pending_grn = sum(1 for p in po_list.values() if p.get("status") in ["Confirmed","Partial Received"]) + \
+                  sum(1 for p in jwo_list.values() if p.get("status") in ["Issued to Processor","In Process","Partial Received"])
+
+    c1,c2,c3,c4 = st.columns(4)
+    for col, val, label, cls in [
+        (c1, open_prs,   "Open PRs",       "amber" if open_prs else ""),
+        (c2, open_pos,   "Open POs",       ""),
+        (c3, open_jwos,  "Open JWOs",      ""),
+        (c4, pending_grn,"Pending Receipt", "amber" if pending_grn else ""),
+    ]:
+        with col:
+            st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{label}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    pd1, pd2, pd3 = st.columns(3)
+
+    with pd1:
+        st.markdown("#### 📋 Recent PRs")
+        if pr_list:
+            for pr_no, pr in list(pr_list.items())[-5:]:
+                st.markdown(f'<div class="card" style="padding:8px 12px;margin:3px 0;"><div style="display:flex;justify-content:space-between;"><span style="font-family:monospace;font-size:12px;color:#c8a96e;">{pr_no}</span>{pur_badge(pr.get("status",""))}</div><div style="font-size:12px;margin-top:2px;">{len(pr.get("lines",[]))} items | {pr.get("so_ref","—")}</div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="warn-box">Koi PR nahi.</div>', unsafe_allow_html=True)
+
+    with pd2:
+        st.markdown("#### 📦 Open POs")
+        if po_list:
+            for po_no, po in po_list.items():
+                if po.get("status") not in ["Received","Closed","Cancelled"]:
+                    st.markdown(f'<div class="card" style="padding:8px 12px;margin:3px 0;"><div style="display:flex;justify-content:space-between;"><span style="font-family:monospace;font-size:12px;color:#c8a96e;">{po_no}</span>{pur_badge(po.get("status",""))}</div><div style="font-size:12px;">{po.get("supplier_name","—")} | Due: {po.get("delivery_date","—")}</div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="warn-box">Koi open PO nahi.</div>', unsafe_allow_html=True)
+
+    with pd3:
+        st.markdown("#### 🔧 Open JWOs")
+        if jwo_list:
+            for jwo_no, jwo in jwo_list.items():
+                if jwo.get("status") not in ["Received","Closed","Cancelled"]:
+                    st.markdown(f'<div class="card" style="padding:8px 12px;margin:3px 0;"><div style="display:flex;justify-content:space-between;"><span style="font-family:monospace;font-size:12px;color:#c8a96e;">{jwo_no}</span>{pur_badge(jwo.get("status",""))}</div><div style="font-size:12px;">{jwo.get("processor_name","—")} | {jwo.get("material_name","—")}</div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="warn-box">Koi open JWO nahi.</div>', unsafe_allow_html=True)
+
+
+# ── PURCHASE REQUISITIONS ─────────────────────────────────────────────────────
+elif nav_pur == "📋 Purchase Requisitions":
+    st.markdown('<h1>Purchase Requisitions</h1>', unsafe_allow_html=True)
+
+    if "selected_pr" not in st.session_state:
+        st.session_state["selected_pr"] = None
+
+    pr_tab1, pr_tab2, pr_tab3 = st.tabs(["📋 PR List", "➕ Create PR", "🔄 From MRP"])
+
+    with pr_tab3:
+        st.markdown("#### Generate PRs from MRP")
+        mrp_result = SS.get("mrp_result", {})
+        if not mrp_result:
+            st.markdown('<div class="warn-box">Pehle MRP run karo.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="info-box">MRP results se materials categorize karo — RM/Accessories ke liye Purchase PR, SFG ke liye Job Work ya Purchase choose karo.</div>', unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            so_ref = st.selectbox("SO Reference", [""] + SS.get("mrp_so_list",[]), key="pr_so_ref")
+            req_date = st.date_input("Required By Date", value=date.today() + timedelta(days=14), key="pr_req_date")
+
+            # Categorize materials
+            rm_items  = {c: m for c,m in mrp_result.items() if m["type"] in ["Raw Material (RM)","Accessories"] and m["net_req"] > 0}
+            sfg_items = {c: m for c,m in mrp_result.items() if m["type"] == "Semi Finished Goods (SFG)" and m["net_req"] > 0}
+
+            if rm_items:
+                st.markdown("#### 🛒 Purchase PR — Raw Materials & Accessories")
+                rm_rows = []
+                for code, mat in rm_items.items():
+                    rm_rows.append({
+                        "Material Code": code, "Material Name": mat["name"],
+                        "Type": mat["type"], "Required": mat["net_req"], "Unit": mat["unit"]
+                    })
+                st.dataframe(pd.DataFrame(rm_rows), use_container_width=True, hide_index=True)
+
+            if sfg_items:
+                st.markdown("#### 🔧 SFG Materials — Choose Purchase or Job Work")
+                sfg_choices = {}
+                for code, mat in sfg_items.items():
+                    c1,c2,c3 = st.columns([2,2,2])
+                    with c1: st.markdown(f'<div style="padding-top:8px;"><strong>{code}</strong> — {mat["name"]}<br><span style="font-size:12px;color:#64748b;">Required: {mat["net_req"]} {mat["unit"]}</span></div>', unsafe_allow_html=True)
+                    with c2: choice = st.radio("Action", ["Job Work", "Direct Purchase"], key=f"sfg_choice_{code}", horizontal=True)
+                    with c3:
+                        if choice == "Job Work":
+                            processors = {k:v for k,v in SS.get("suppliers",{}).items() if "Job Work" in v.get("type","")}
+                            if processors:
+                                proc = st.selectbox("Processor", [""] + [f"{k} – {v['name']}" for k,v in processors.items()], key=f"sfg_proc_{code}")
+                            else:
+                                st.caption("Add Job Work suppliers in Supplier Master")
+                        sfg_choices[code] = choice
+
+            if st.button("✅ Generate PRs", use_container_width=False):
+                pr_lines_purchase = []
+                pr_lines_jw = {}
+
+                # RM/Accessories → Purchase PR
+                for code, mat in rm_items.items():
+                    pr_lines_purchase.append({
+                        "material_code": code, "material_name": mat["name"],
+                        "material_type": mat["type"], "required_qty": mat["net_req"],
+                        "received_qty": 0, "unit": mat["unit"],
+                        "so_ref": so_ref, "mrp_req": mat["total_req"],
+                    })
+
+                # SFG → Purchase or JWO
+                for code, mat in sfg_items.items():
+                    choice = sfg_choices.get(code, "Direct Purchase")
+                    if choice == "Direct Purchase":
+                        pr_lines_purchase.append({
+                            "material_code": code, "material_name": mat["name"],
+                            "material_type": mat["type"], "required_qty": mat["net_req"],
+                            "received_qty": 0, "unit": mat["unit"],
+                            "so_ref": so_ref, "mrp_req": mat["total_req"],
+                        })
+                    else:
+                        proc_key = st.session_state.get(f"sfg_proc_{code}", "")
+                        proc_code = proc_key.split(" – ")[0] if " – " in proc_key else ""
+                        pr_lines_jw[code] = {
+                            "material_code": code, "material_name": mat["name"],
+                            "required_qty": mat["net_req"], "unit": mat["unit"],
+                            "processor": proc_code, "so_ref": so_ref,
+                        }
+
+                # Create Purchase PR
+                if pr_lines_purchase:
+                    pr_no = next_pr()
+                    SS["pr_list"][pr_no] = {
+                        "pr_no": pr_no, "pr_date": str(date.today()),
+                        "pr_type": "Purchase", "so_ref": so_ref,
+                        "required_date": str(req_date),
+                        "lines": pr_lines_purchase,
+                        "status": "Pending Approval",
+                        "created_from": "MRP",
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    st.success(f"✅ Purchase PR {pr_no} created — {len(pr_lines_purchase)} items")
+
+                # Create JW PRs
+                for code, jw_data in pr_lines_jw.items():
+                    pr_no = next_pr()
+                    SS["pr_list"][pr_no] = {
+                        "pr_no": pr_no, "pr_date": str(date.today()),
+                        "pr_type": "Job Work", "so_ref": so_ref,
+                        "required_date": str(req_date),
+                        "lines": [jw_data],
+                        "status": "Pending Approval",
+                        "created_from": "MRP",
+                        "processor": jw_data.get("processor",""),
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    st.success(f"✅ Job Work PR {pr_no} created for {jw_data['material_name']}")
+
+                save_data()
+                st.rerun()
+
+    with pr_tab2:
+        st.markdown("#### Manual PR Create")
+        items_data = st.session_state.get("items", {})
+
+        mp1, mp2 = st.columns(2)
+        with mp1:
+            pr_type_manual = st.selectbox("PR Type", ["Purchase","Job Work"], key="pr_m_type")
+            pr_so_ref      = st.selectbox("SO Reference (optional)", [""]+list(SS.get("so_list",{}).keys()), key="pr_m_so")
+            pr_req_dt      = st.date_input("Required Date", value=date.today()+timedelta(days=14), key="pr_m_dt")
+        with mp2:
+            pr_remarks = st.text_area("Remarks", height=80, key="pr_m_rem")
+
+        if "manual_pr_lines" not in st.session_state:
+            st.session_state["manual_pr_lines"] = []
+
+        with st.expander("➕ Add Material Line"):
+            ml1, ml2, ml3 = st.columns(3)
+            with ml1:
+                all_items_pr = {k: v["name"] for k,v in items_data.items()}
+                pr_mat = st.selectbox("Material *", [""] + list(all_items_pr.keys()),
+                                       format_func=lambda x: f"{x} – {all_items_pr.get(x,'')}" if x else "Select",
+                                       key="pr_mat_sel")
+            with ml2:
+                pr_qty  = st.number_input("Required Qty *", min_value=0.0, step=1.0, key="pr_qty")
+                pr_unit = st.selectbox("Unit", UNITS, key="pr_unit")
+            with ml3:
+                pr_remarks_line = st.text_input("Remarks", key="pr_line_rem")
+
+            if st.button("➕ Add Line") and pr_mat and pr_qty > 0:
+                st.session_state["manual_pr_lines"].append({
+                    "material_code": pr_mat,
+                    "material_name": items_data.get(pr_mat,{}).get("name", pr_mat),
+                    "material_type": items_data.get(pr_mat,{}).get("item_type",""),
+                    "required_qty": pr_qty, "received_qty": 0,
+                    "unit": pr_unit, "so_ref": pr_so_ref,
+                    "remarks": pr_remarks_line,
+                })
+                st.rerun()
+
+        if st.session_state["manual_pr_lines"]:
+            for idx, ln in enumerate(st.session_state["manual_pr_lines"]):
+                lc1,lc2,lc3,lc4 = st.columns([2,2,1,0.5])
+                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}</div>', unsafe_allow_html=True)
+                with lc2: st.markdown(f'<div style="padding-top:8px;font-size:13px;">{ln["required_qty"]} {ln["unit"]}</div>', unsafe_allow_html=True)
+                with lc3: st.markdown(f'<div style="padding-top:8px;font-size:12px;color:#64748b;">{ln["material_type"]}</div>', unsafe_allow_html=True)
+                with lc4:
+                    if st.button("🗑", key=f"del_pr_line_{idx}"):
+                        st.session_state["manual_pr_lines"].pop(idx); st.rerun()
+                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+            if st.button("💾 Save PR", use_container_width=False):
+                pr_no = next_pr()
+                SS["pr_list"][pr_no] = {
+                    "pr_no": pr_no, "pr_date": str(date.today()),
+                    "pr_type": pr_type_manual, "so_ref": pr_so_ref,
+                    "required_date": str(pr_req_dt),
+                    "lines": st.session_state["manual_pr_lines"].copy(),
+                    "status": "Pending Approval",
+                    "created_from": "Manual",
+                    "remarks": pr_remarks,
+                    "created_at": datetime.now().isoformat(),
+                }
+                st.session_state["manual_pr_lines"] = []
+                save_data()
+                st.success(f"✅ {pr_no} created!")
+                st.rerun()
+
+    with pr_tab1:
+        # Filters
+        pf1, pf2, pf3 = st.columns(3)
+        with pf1: pf_type   = st.selectbox("Type", ["All","Purchase","Job Work"], key="prl_type")
+        with pf2: pf_status = st.selectbox("Status", ["All"]+PR_STATUS, key="prl_sts")
+        with pf3: pf_search = st.text_input("🔍 PR # / SO", key="prl_search")
+
+        pr_list = SS.get("pr_list", {})
+        if not pr_list:
+            st.markdown('<div class="warn-box">Koi PR nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            for pr_no, pr in reversed(list(pr_list.items())):
+                if pf_type   != "All" and pr.get("pr_type","") != pf_type: continue
+                if pf_status != "All" and pr.get("status","")  != pf_status: continue
+                if pf_search and pf_search.lower() not in pr_no.lower() and pf_search.lower() not in pr.get("so_ref","").lower(): continue
+
+                r1,r2,r3,r4,r5,r6 = st.columns([1.2,1.2,1.5,1,1.5,1.5])
+                with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{pr_no}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:8px;font-size:12px;"><span class="tag tag-blue">{pr.get("pr_type","")}</span></div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">SO: {pr.get("so_ref","—")}<br>Req By: {pr.get("required_date","—")}</div>', unsafe_allow_html=True)
+                with r4: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{len(pr.get("lines",[]))} items</div>', unsafe_allow_html=True)
+                with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(pr.get("status",""))}</div>', unsafe_allow_html=True)
+                with r6:
+                    # Action buttons based on status
+                    if pr.get("status") == "Pending Approval":
+                        ac1, ac2 = st.columns(2)
+                        with ac1:
+                            if st.button("✅ Approve", key=f"apr_pr_{pr_no}", use_container_width=True):
+                                SS["pr_list"][pr_no]["status"] = "Approved"
+                                save_data(); st.rerun()
+                        with ac2:
+                            if st.button("❌ Reject", key=f"rej_pr_{pr_no}", use_container_width=True):
+                                SS["pr_list"][pr_no]["status"] = "Rejected"
+                                save_data(); st.rerun()
+                    elif pr.get("status") == "Approved":
+                        if pr.get("pr_type") == "Purchase":
+                            if st.button("📦 Create PO", key=f"po_pr_{pr_no}", use_container_width=True):
+                                st.session_state["pr_to_po"] = pr_no
+                                st.session_state["current_page"] = "📦 Purchase Orders"
+                                st.rerun()
+                        else:
+                            if st.button("🔧 Create JWO", key=f"jwo_pr_{pr_no}", use_container_width=True):
+                                st.session_state["pr_to_jwo"] = pr_no
+                                st.session_state["current_page"] = "🔧 Job Work Orders"
+                                st.rerun()
+
+                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+
+
+# ── PURCHASE ORDERS ───────────────────────────────────────────────────────────
+elif nav_pur == "📦 Purchase Orders":
+    st.markdown('<h1>Purchase Orders</h1>', unsafe_allow_html=True)
+
+    suppliers = SS.get("suppliers", {})
+    pr_list   = SS.get("pr_list", {})
+
+    po_tab1, po_tab2 = st.tabs(["📋 PO List", "➕ Create PO"])
+
+    with po_tab2:
+        # Pre-fill from PR if coming from PR page
+        pr_ref = st.session_state.get("pr_to_po", "")
+
+        st.markdown("#### PO Header")
+        pc1, pc2, pc3 = st.columns(3)
+        with pc1:
+            supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items() if v.get("type","") != "Job Work"]
+            sel_supp  = st.selectbox("Supplier *", supp_opts, key="po_supp")
+            po_date   = st.date_input("PO Date", value=date.today(), key="po_date")
+            po_del_dt = st.date_input("Expected Delivery", value=date.today()+timedelta(days=14), key="po_del")
+        with pc2:
+            pr_opts = [""] + [k for k,v in pr_list.items() if v.get("status")=="Approved" and v.get("pr_type")=="Purchase"]
+            sel_pr  = st.selectbox("PR Reference", pr_opts, index=pr_opts.index(pr_ref) if pr_ref in pr_opts else 0, key="po_pr_ref")
+            po_so_ref = st.text_input("SO Reference", value=pr_list.get(sel_pr,{}).get("so_ref","") if sel_pr else "", key="po_so")
+            po_currency = st.selectbox("Currency", ["INR","USD","EUR"], key="po_curr")
+        with pc3:
+            po_payment = st.selectbox("Payment Terms", SS.get("payment_terms",[]), key="po_pay")
+            po_remarks = st.text_area("Remarks", height=70, key="po_rem")
+
+        # Load lines from PR or manual
+        if "po_lines" not in st.session_state:
+            st.session_state["po_lines"] = []
+
+        if sel_pr and sel_pr in pr_list and not st.session_state["po_lines"]:
+            for ln in pr_list[sel_pr].get("lines",[]):
+                st.session_state["po_lines"].append({
+                    "material_code": ln["material_code"],
+                    "material_name": ln["material_name"],
+                    "material_type": ln.get("material_type",""),
+                    "required_qty":  ln["required_qty"],
+                    "po_qty":        ln["required_qty"],
+                    "received_qty":  0,
+                    "unit":          ln["unit"],
+                    "rate":          0.0,
+                    "gst_pct":       12,
+                    "amount":        0.0,
+                    "so_ref":        ln.get("so_ref",""),
+                })
+
+        # Add manual line
+        with st.expander("➕ Add Line"):
+            items_data = st.session_state.get("items",{})
+            al1,al2,al3 = st.columns(3)
+            with al1:
+                po_mat = st.selectbox("Material", [""] + list(items_data.keys()),
+                                       format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
+                                       key="po_mat_add")
+                po_add_qty = st.number_input("Qty", min_value=0.0, step=1.0, key="po_add_qty")
+            with al2:
+                po_add_rate = st.number_input("Rate (₹)", min_value=0.0, step=1.0, key="po_add_rate")
+                po_add_gst  = st.selectbox("GST %", GST_RATES, index=2, key="po_add_gst")
+            with al3:
+                po_add_unit = st.selectbox("Unit", UNITS, key="po_add_unit")
+                if st.button("➕ Add", key="po_add_btn") and po_mat and po_add_qty > 0:
+                    st.session_state["po_lines"].append({
+                        "material_code": po_mat,
+                        "material_name": items_data.get(po_mat,{}).get("name",po_mat),
+                        "material_type": items_data.get(po_mat,{}).get("item_type",""),
+                        "required_qty": po_add_qty, "po_qty": po_add_qty,
+                        "received_qty": 0, "unit": po_add_unit,
+                        "rate": po_add_rate, "gst_pct": po_add_gst,
+                        "amount": round(po_add_qty * po_add_rate, 2),
+                    })
+                    st.rerun()
+
+        # Show PO lines (editable)
+        if st.session_state["po_lines"]:
+            st.markdown("#### PO Lines")
+            edit_po = pd.DataFrame([{
+                "Material":    ln["material_code"],
+                "Name":        ln["material_name"],
+                "PO Qty":      ln["po_qty"],
+                "Unit":        ln["unit"],
+                "Rate (₹)":   ln["rate"],
+                "GST %":       ln["gst_pct"],
+                "Amount (₹)": ln["amount"],
+            } for ln in st.session_state["po_lines"]])
+
+            edited_po = st.data_editor(edit_po, use_container_width=True, hide_index=False,
+                column_config={
+                    "Material": st.column_config.TextColumn(disabled=True),
+                    "Name":     st.column_config.TextColumn(disabled=True),
+                    "PO Qty":   st.column_config.NumberColumn(min_value=0, step=1),
+                    "Rate (₹)":st.column_config.NumberColumn(min_value=0.0, step=0.5),
+                    "GST %":   st.column_config.SelectboxColumn(options=GST_RATES),
+                }, key="po_editor")
+
+            # Apply edits
+            for i, row in edited_po.iterrows():
+                if i < len(st.session_state["po_lines"]):
+                    qty  = float(row["PO Qty"])
+                    rate = float(row["Rate (₹)"])
+                    gst  = int(row["GST %"]) if row["GST %"] else 12
+                    st.session_state["po_lines"][i]["po_qty"]  = qty
+                    st.session_state["po_lines"][i]["rate"]    = rate
+                    st.session_state["po_lines"][i]["gst_pct"] = gst
+                    st.session_state["po_lines"][i]["amount"]  = round(qty * rate, 2)
+
+            subtotal = sum(ln["amount"] for ln in st.session_state["po_lines"])
+            gst_amt  = sum(ln["amount"] * ln["gst_pct"] / 100 for ln in st.session_state["po_lines"])
+            total    = subtotal + gst_amt
+            st.markdown(f'<div class="card card-left" style="text-align:right;padding:12px 20px;">Subtotal: ₹{subtotal:,.2f} | GST: ₹{gst_amt:,.2f} | <strong style="font-size:16px;color:#c8a96e;">Total: ₹{total:,.2f}</strong></div>', unsafe_allow_html=True)
+
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                if st.button("💾 Save as Draft", use_container_width=True):
+                    po_no = next_po()
+                    supp_code = sel_supp.split(" – ")[0] if " – " in sel_supp else sel_supp
+                    SS["po_list"][po_no] = {
+                        "po_no": po_no, "po_date": str(po_date),
+                        "supplier_code": supp_code,
+                        "supplier_name": suppliers.get(supp_code,{}).get("name", supp_code),
+                        "pr_ref": sel_pr, "so_ref": po_so_ref,
+                        "delivery_date": str(po_del_dt),
+                        "payment_terms": po_payment, "currency": po_currency,
+                        "lines": st.session_state["po_lines"].copy(),
+                        "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
+                        "status": "Draft", "remarks": po_remarks,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
+                    st.session_state["po_lines"] = []
+                    st.session_state["pr_to_po"] = ""
+                    save_data()
+                    st.success(f"✅ {po_no} saved!")
+                    st.rerun()
+            with sc2:
+                if st.button("📤 Save & Send to Supplier", use_container_width=True):
+                    po_no = next_po()
+                    supp_code = sel_supp.split(" – ")[0] if " – " in sel_supp else sel_supp
+                    SS["po_list"][po_no] = {
+                        "po_no": po_no, "po_date": str(po_date),
+                        "supplier_code": supp_code,
+                        "supplier_name": suppliers.get(supp_code,{}).get("name", supp_code),
+                        "pr_ref": sel_pr, "so_ref": po_so_ref,
+                        "delivery_date": str(po_del_dt),
+                        "payment_terms": po_payment, "currency": po_currency,
+                        "lines": st.session_state["po_lines"].copy(),
+                        "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
+                        "status": "Sent to Supplier", "remarks": po_remarks,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
+                    st.session_state["po_lines"] = []
+                    st.session_state["pr_to_po"] = ""
+                    save_data()
+                    st.success(f"✅ {po_no} sent to supplier!")
+                    st.rerun()
+            with sc3:
+                if st.button("🗑 Clear Lines", use_container_width=True):
+                    st.session_state["po_lines"] = []; st.rerun()
+
+    with po_tab1:
+        po_list = SS.get("po_list", {})
+        pof1, pof2 = st.columns(2)
+        with pof1: pof_sts = st.selectbox("Status", ["All"]+PO_STATUS, key="pol_sts")
+        with pof2: pof_srch = st.text_input("🔍 PO # / Supplier", key="pol_srch")
+
+        if not po_list:
+            st.markdown('<div class="warn-box">Koi PO nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            for po_no, po in reversed(list(po_list.items())):
+                if pof_sts != "All" and po.get("status","") != pof_sts: continue
+                if pof_srch and pof_srch.lower() not in po_no.lower() and pof_srch.lower() not in po.get("supplier_name","").lower(): continue
+
+                r1,r2,r3,r4,r5,r6 = st.columns([1.2,2,1.5,1.2,1.5,1.5])
+                with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{po_no}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{po.get("supplier_name","—")}</div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">Del: {po.get("delivery_date","—")}<br>SO: {po.get("so_ref","—")}</div>', unsafe_allow_html=True)
+                with r4: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{po.get("total",0):,.0f}</div>', unsafe_allow_html=True)
+                with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(po.get("status",""))}</div>', unsafe_allow_html=True)
+                with r6:
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if po.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]:
+                            if st.button("📥 GRN", key=f"grn_po_{po_no}", use_container_width=True):
+                                st.session_state["grn_from_po"] = po_no
+                                st.session_state["current_page"] = "📥 GRN"
+                                st.rerun()
+                    with col_b:
+                        new_po_sts = st.selectbox("", PO_STATUS,
+                                                    index=PO_STATUS.index(po.get("status","Draft")),
+                                                    key=f"po_sts_{po_no}", label_visibility="collapsed")
+                        if new_po_sts != po.get("status"):
+                            SS["po_list"][po_no]["status"] = new_po_sts
+                            save_data(); st.rerun()
+
+                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+
+
+# ── JOB WORK ORDERS ───────────────────────────────────────────────────────────
+elif nav_pur == "🔧 Job Work Orders":
+    st.markdown('<h1>Job Work Orders</h1>', unsafe_allow_html=True)
+
+    suppliers  = SS.get("suppliers", {})
+    pr_list    = SS.get("pr_list", {})
+    items_data = st.session_state.get("items", {})
+
+    jw_tab1, jw_tab2 = st.tabs(["📋 JWO List", "➕ Create JWO"])
+
+    with jw_tab2:
+        pr_ref_jw = st.session_state.get("pr_to_jwo", "")
+        st.markdown("#### JWO Header")
+
+        jc1, jc2 = st.columns(2)
+        with jc1:
+            # Job work suppliers
+            jw_supps = {k:v for k,v in suppliers.items() if "Job Work" in v.get("type","")}
+            jw_supp_opts = [""] + [f"{k} – {v['name']}" for k,v in jw_supps.items()]
+            sel_processor = st.selectbox("Processor / Job Worker *", jw_supp_opts, key="jwo_proc")
+            jwo_date      = st.date_input("JWO Date", value=date.today(), key="jwo_date")
+            jwo_del_dt    = st.date_input("Expected Return Date", value=date.today()+timedelta(days=10), key="jwo_del")
+        with jc2:
+            jw_pr_opts = [""] + [k for k,v in pr_list.items() if v.get("status")=="Approved" and v.get("pr_type")=="Job Work"]
+            sel_jw_pr  = st.selectbox("PR Reference", jw_pr_opts,
+                                       index=jw_pr_opts.index(pr_ref_jw) if pr_ref_jw in jw_pr_opts else 0,
+                                       key="jwo_pr")
+            jwo_so_ref = st.text_input("SO Reference", value=pr_list.get(sel_jw_pr,{}).get("so_ref","") if sel_jw_pr else "", key="jwo_so")
+            jwo_remarks = st.text_area("Remarks", height=60, key="jwo_rem")
+
+        st.markdown("---")
+        st.markdown("#### Material to be Processed")
+
+        if "jwo_lines" not in st.session_state:
+            st.session_state["jwo_lines"] = []
+
+        # Load from PR
+        if sel_jw_pr and sel_jw_pr in pr_list and not st.session_state["jwo_lines"]:
+            for ln in pr_list[sel_jw_pr].get("lines",[]):
+                st.session_state["jwo_lines"].append({
+                    "output_material": ln["material_code"],
+                    "output_name":     ln["material_name"],
+                    "output_qty":      ln["required_qty"],
+                    "output_unit":     ln["unit"],
+                    "input_material":  "",
+                    "input_name":      "",
+                    "input_qty":       0.0,
+                    "input_unit":      "",
+                    "rate":            0.0,
+                    "received_qty":    0.0,
+                    "so_ref":          ln.get("so_ref",""),
+                })
+
+        with st.expander("➕ Add Job Work Line"):
+            jl1, jl2 = st.columns(2)
+            with jl1:
+                st.markdown("**Output Material (jo receive hoga)**")
+                jw_out = st.selectbox("Output Material *", [""] + list(items_data.keys()),
+                                       format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
+                                       key="jwo_out_mat")
+                jw_out_qty  = st.number_input("Output Qty", min_value=0.0, step=1.0, key="jwo_out_qty")
+                jw_out_unit = st.selectbox("Output Unit", UNITS, key="jwo_out_unit")
+            with jl2:
+                st.markdown("**Input Material (jo issue karna hai)**")
+                jw_in = st.selectbox("Input Material (Grey Fabric etc.)", [""] + list(items_data.keys()),
+                                      format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
+                                      key="jwo_in_mat")
+                jw_in_qty  = st.number_input("Input Qty to Issue", min_value=0.0, step=1.0, key="jwo_in_qty")
+                jw_in_unit = st.selectbox("Input Unit", UNITS, key="jwo_in_unit")
+                jw_rate    = st.number_input("Job Work Rate (₹/unit)", min_value=0.0, step=1.0, key="jwo_rate")
+
+            if st.button("➕ Add JW Line") and jw_out and jw_out_qty > 0:
+                in_code = jw_in.split(" – ")[0] if " – " in jw_in else jw_in
+                out_code = jw_out.split(" – ")[0] if " – " in jw_out else jw_out
+                st.session_state["jwo_lines"].append({
+                    "output_material": out_code,
+                    "output_name":     items_data.get(out_code,{}).get("name", out_code),
+                    "output_qty":      jw_out_qty,
+                    "output_unit":     jw_out_unit,
+                    "input_material":  in_code,
+                    "input_name":      items_data.get(in_code,{}).get("name", in_code) if in_code else "",
+                    "input_qty":       jw_in_qty,
+                    "input_unit":      jw_in_unit,
+                    "rate":            jw_rate,
+                    "received_qty":    0.0,
+                })
+                st.rerun()
+
+        if st.session_state["jwo_lines"]:
+            st.markdown("#### JWO Lines")
+            for idx, ln in enumerate(st.session_state["jwo_lines"]):
+                lc1,lc2,lc3,lc4 = st.columns([2,2,2,0.5])
+                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT:</strong> {ln["output_material"]} — {ln["output_name"]}<br>{ln["output_qty"]} {ln["output_unit"]}</div>', unsafe_allow_html=True)
+                with lc2: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>IN:</strong> {ln.get("input_material","—")} — {ln.get("input_name","—")}<br>{ln.get("input_qty",0)} {ln.get("input_unit","")}</div>', unsafe_allow_html=True)
+                with lc3: st.markdown(f'<div style="padding-top:8px;font-size:13px;">Rate: ₹{ln["rate"]}/unit<br>Amount: ₹{ln["output_qty"]*ln["rate"]:,.2f}</div>', unsafe_allow_html=True)
+                with lc4:
+                    if st.button("🗑", key=f"del_jw_{idx}"):
+                        st.session_state["jwo_lines"].pop(idx); st.rerun()
+                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+            jw_total = sum(ln["output_qty"]*ln["rate"] for ln in st.session_state["jwo_lines"])
+            st.markdown(f'<div class="card card-left" style="text-align:right;padding:10px 20px;"><strong style="color:#c8a96e;">Job Work Total: ₹{jw_total:,.2f}</strong></div>', unsafe_allow_html=True)
+
+            if st.button("✅ Create JWO & Issue Material", use_container_width=False):
+                proc_code = sel_processor.split(" – ")[0] if " – " in sel_processor else sel_processor
+                jwo_no    = next_jwo()
+
+                # Issue input materials from stock
+                for ln in st.session_state["jwo_lines"]:
+                    in_code = ln.get("input_material","")
+                    in_qty  = float(ln.get("input_qty", 0))
+                    if in_code and in_qty > 0 and in_code in st.session_state["items"]:
+                        cur_stock = float(st.session_state["items"][in_code].get("stock", 0))
+                        st.session_state["items"][in_code]["stock"] = max(0, cur_stock - in_qty)
+
+                SS["jwo_list"][jwo_no] = {
+                    "jwo_no":         jwo_no,
+                    "jwo_date":       str(jwo_date),
+                    "processor_code": proc_code,
+                    "processor_name": suppliers.get(proc_code,{}).get("name", proc_code),
+                    "pr_ref":         sel_jw_pr,
+                    "so_ref":         jwo_so_ref,
+                    "expected_date":  str(jwo_del_dt),
+                    "lines":          st.session_state["jwo_lines"].copy(),
+                    "total":          jw_total,
+                    "status":         "Issued to Processor",
+                    "remarks":        jwo_remarks,
+                    "created_at":     datetime.now().isoformat(),
+                }
+                if sel_jw_pr: SS["pr_list"][sel_jw_pr]["status"] = "JWO Created"
+                st.session_state["jwo_lines"] = []
+                st.session_state["pr_to_jwo"] = ""
+                save_data()
+                st.success(f"✅ {jwo_no} created! Input materials issued from stock.")
+                st.rerun()
+
+    with jw_tab1:
+        jwo_list = SS.get("jwo_list", {})
+        if not jwo_list:
+            st.markdown('<div class="warn-box">Koi JWO nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            for jwo_no, jwo in reversed(list(jwo_list.items())):
+                r1,r2,r3,r4,r5,r6 = st.columns([1.2,2,1.5,1.2,1.5,1.5])
+                with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{jwo_no}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{jwo.get("processor_name","—")}</div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">Return: {jwo.get("expected_date","—")}<br>{len(jwo.get("lines",[]))} items</div>', unsafe_allow_html=True)
+                with r4: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{jwo.get("total",0):,.0f}</div>', unsafe_allow_html=True)
+                with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(jwo.get("status",""))}</div>', unsafe_allow_html=True)
+                with r6:
+                    if jwo.get("status") in ["Issued to Processor","In Process","Partial Received"]:
+                        if st.button("📥 Receive", key=f"rec_jwo_{jwo_no}", use_container_width=True):
+                            st.session_state["grn_from_jwo"] = jwo_no
+                            st.session_state["current_page"] = "📥 GRN"
+                            st.rerun()
+                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+
+
+# ── GRN ───────────────────────────────────────────────────────────────────────
+elif nav_pur == "📥 GRN":
+    st.markdown('<h1>GRN — Goods Receipt Note</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">PO ya JWO ke against material receive karo — stock automatically update hoga.</div>', unsafe_allow_html=True)
+
+    grn_tab1, grn_tab2 = st.tabs(["📋 GRN List", "➕ Create GRN"])
+
+    with grn_tab2:
+        po_ref_grn  = st.session_state.get("grn_from_po", "")
+        jwo_ref_grn = st.session_state.get("grn_from_jwo", "")
+
+        gc1, gc2 = st.columns(2)
+        with gc1:
+            grn_type = st.radio("GRN Type", ["PO Receipt","JWO Receipt"], horizontal=True, key="grn_type")
+        with gc2:
+            grn_date = st.date_input("Receipt Date", value=date.today(), key="grn_date")
+
+        if grn_type == "PO Receipt":
+            po_opts = [""] + [k for k,v in SS.get("po_list",{}).items() if v.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]]
+            sel_grn_po = st.selectbox("PO Select *", po_opts,
+                                       index=po_opts.index(po_ref_grn) if po_ref_grn in po_opts else 0,
+                                       key="grn_po_sel")
+            if sel_grn_po:
+                po = SS["po_list"][sel_grn_po]
+                st.markdown(f'<div class="ok-box">Supplier: <strong>{po.get("supplier_name","")}</strong> | PO Date: {po.get("po_date","")} | Total: ₹{po.get("total",0):,.0f}</div>', unsafe_allow_html=True)
+
+                st.markdown("#### Receipt Lines")
+                grn_lines = []
+                for i, ln in enumerate(po.get("lines",[])):
+                    pending = ln["po_qty"] - ln.get("received_qty",0)
+                    if pending <= 0: continue
+                    gc1,gc2,gc3,gc4 = st.columns([2,1,1,1])
+                    with gc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}</div>', unsafe_allow_html=True)
+                    with gc2: st.markdown(f'<div style="padding-top:8px;font-size:12px;">PO Qty: {ln["po_qty"]}<br>Pending: {pending}</div>', unsafe_allow_html=True)
+                    with gc3:
+                        recv_qty = st.number_input(f"Recv Qty", min_value=0.0, max_value=float(pending),
+                                                    value=float(pending), step=1.0, key=f"grn_recv_{sel_grn_po}_{i}")
+                    with gc4:
+                        qc_status = st.selectbox("QC", ["Pass","Fail","Hold"], key=f"grn_qc_{sel_grn_po}_{i}")
+                    grn_lines.append({
+                        "material_code": ln["material_code"],
+                        "material_name": ln["material_name"],
+                        "unit":          ln["unit"],
+                        "po_qty":        ln["po_qty"],
+                        "received_qty":  recv_qty,
+                        "rate":          ln.get("rate",0),
+                        "qc_status":     qc_status,
+                        "amount":        round(recv_qty * ln.get("rate",0), 2),
+                    })
+                    st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+                grn_remarks = st.text_area("Remarks", key="grn_rem_po")
+                if st.button("✅ Post GRN & Update Stock", use_container_width=False) and grn_lines:
+                    grn_no = next_grn()
+                    total_recv = sum(ln["received_qty"] for ln in grn_lines)
+
+                    # Update stock
+                    for ln in grn_lines:
+                        mat_code = ln["material_code"]
+                        recv_q   = float(ln["received_qty"])
+                        if ln["qc_status"] == "Pass" and mat_code in st.session_state["items"]:
+                            cur = float(st.session_state["items"][mat_code].get("stock", 0))
+                            st.session_state["items"][mat_code]["stock"] = round(cur + recv_q, 3)
+
+                    # Update PO received qty
+                    for i, ln in enumerate(SS["po_list"][sel_grn_po]["lines"]):
+                        grn_ln = next((g for g in grn_lines if g["material_code"]==ln["material_code"]), None)
+                        if grn_ln:
+                            SS["po_list"][sel_grn_po]["lines"][i]["received_qty"] = \
+                                ln.get("received_qty",0) + grn_ln["received_qty"]
+
+                    # Update PO status
+                    all_recv = all(ln["po_qty"] <= ln.get("received_qty",0)
+                                   for ln in SS["po_list"][sel_grn_po]["lines"])
+                    SS["po_list"][sel_grn_po]["status"] = "Received" if all_recv else "Partial Received"
+
+                    SS["grn_list"][grn_no] = {
+                        "grn_no": grn_no, "grn_date": str(grn_date),
+                        "grn_type": "PO Receipt", "ref_no": sel_grn_po,
+                        "lines": grn_lines, "status": "Posted",
+                        "total_received": total_recv, "remarks": grn_remarks,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    st.session_state["grn_from_po"] = ""
+                    save_data()
+                    st.success(f"✅ {grn_no} posted! Stock updated.")
+                    st.rerun()
+
+        else:  # JWO Receipt
+            jwo_opts = [""] + [k for k,v in SS.get("jwo_list",{}).items() if v.get("status") in ["Issued to Processor","In Process","Partial Received"]]
+            sel_grn_jwo = st.selectbox("JWO Select *", jwo_opts,
+                                        index=jwo_opts.index(jwo_ref_grn) if jwo_ref_grn in jwo_opts else 0,
+                                        key="grn_jwo_sel")
+            if sel_grn_jwo:
+                jwo = SS["jwo_list"][sel_grn_jwo]
+                st.markdown(f'<div class="ok-box">Processor: <strong>{jwo.get("processor_name","")}</strong> | Expected: {jwo.get("expected_date","")}</div>', unsafe_allow_html=True)
+
+                st.markdown("#### Receipt Lines (Processed Material)")
+                jwo_grn_lines = []
+                for i, ln in enumerate(jwo.get("lines",[])):
+                    pending = ln["output_qty"] - float(ln.get("received_qty",0))
+                    if pending <= 0: continue
+                    jc1,jc2,jc3 = st.columns([3,1,1])
+                    with jc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["output_material"]}</strong> — {ln["output_name"]}<br>Ordered: {ln["output_qty"]} | Pending: {pending:.0f}</div>', unsafe_allow_html=True)
+                    with jc2:
+                        jwo_recv = st.number_input("Recv Qty", min_value=0.0, max_value=float(pending),
+                                                    value=float(pending), step=1.0, key=f"jwo_recv_{sel_grn_jwo}_{i}")
+                    with jc3:
+                        jwo_qc = st.selectbox("QC", ["Pass","Fail","Hold"], key=f"jwo_qc_{sel_grn_jwo}_{i}")
+                    jwo_grn_lines.append({
+                        "material_code": ln["output_material"],
+                        "material_name": ln["output_name"],
+                        "unit":          ln["output_unit"],
+                        "ordered_qty":   ln["output_qty"],
+                        "received_qty":  jwo_recv,
+                        "qc_status":     jwo_qc,
+                    })
+                    st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+                jwo_grn_rem = st.text_area("Remarks", key="jwo_grn_rem")
+                if st.button("✅ Post GRN & Update Stock", use_container_width=False, key="post_jwo_grn") and jwo_grn_lines:
+                    grn_no = next_grn()
+                    # Update stock for received processed material
+                    for ln in jwo_grn_lines:
+                        if ln["qc_status"] == "Pass" and ln["material_code"] in st.session_state["items"]:
+                            cur = float(st.session_state["items"][ln["material_code"]].get("stock", 0))
+                            st.session_state["items"][ln["material_code"]]["stock"] = round(cur + ln["received_qty"], 3)
+                        # Update JWO received qty
+                        for i, jln in enumerate(SS["jwo_list"][sel_grn_jwo]["lines"]):
+                            if jln["output_material"] == ln["material_code"]:
+                                SS["jwo_list"][sel_grn_jwo]["lines"][i]["received_qty"] = \
+                                    float(jln.get("received_qty",0)) + ln["received_qty"]
+
+                    all_recv = all(ln["output_qty"] <= float(ln.get("received_qty",0))
+                                   for ln in SS["jwo_list"][sel_grn_jwo]["lines"])
+                    SS["jwo_list"][sel_grn_jwo]["status"] = "Received" if all_recv else "Partial Received"
+
+                    SS["grn_list"][grn_no] = {
+                        "grn_no": grn_no, "grn_date": str(grn_date),
+                        "grn_type": "JWO Receipt", "ref_no": sel_grn_jwo,
+                        "lines": jwo_grn_lines, "status": "Posted",
+                        "remarks": jwo_grn_rem,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    st.session_state["grn_from_jwo"] = ""
+                    save_data()
+                    st.success(f"✅ {grn_no} posted! Processed material stock updated.")
+                    st.rerun()
+
+    with grn_tab1:
+        grn_list = SS.get("grn_list", {})
+        if not grn_list:
+            st.markdown('<div class="warn-box">Koi GRN nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            grn_rows = []
+            for grn_no, grn in reversed(list(grn_list.items())):
+                grn_rows.append({
+                    "GRN #": grn_no, "Date": grn.get("grn_date",""),
+                    "Type": grn.get("grn_type",""), "Ref": grn.get("ref_no",""),
+                    "Items": len(grn.get("lines",[])),
+                    "Status": grn.get("status",""),
+                })
+            st.dataframe(pd.DataFrame(grn_rows), use_container_width=True, hide_index=True)
+
+
+# ── SUPPLIER MASTER ───────────────────────────────────────────────────────────
+elif nav_pur == "👥 Supplier Master":
+    st.markdown('<h1>Supplier Master</h1>', unsafe_allow_html=True)
+
+    sup_tab1, sup_tab2 = st.tabs(["📋 Supplier List", "➕ Add Supplier"])
+
+    with sup_tab2:
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            sup_code    = st.text_input("Supplier Code *", placeholder="e.g. SUP001", key="sup_code")
+            sup_name    = st.text_input("Supplier Name *", placeholder="e.g. Sharma Textiles", key="sup_name")
+            sup_type    = st.multiselect("Supplier Type", ["Raw Material","Accessories","Packing","Job Work","Fabric","Printing","Dyeing"], key="sup_type")
+            sup_contact = st.text_input("Contact Person", key="sup_contact")
+        with sc2:
+            sup_phone   = st.text_input("Phone", key="sup_phone")
+            sup_email   = st.text_input("Email", key="sup_email")
+            sup_gst     = st.text_input("GST Number", key="sup_gst")
+            sup_payment = st.selectbox("Payment Terms", SS.get("payment_terms",[]), key="sup_pay")
+            sup_city    = st.text_input("City", key="sup_city")
+            sup_remarks = st.text_area("Remarks", height=60, key="sup_rem")
+
+        if st.button("💾 Save Supplier", use_container_width=False):
+            if sup_code and sup_name:
+                SS["suppliers"][sup_code] = {
+                    "name": sup_name, "type": ", ".join(sup_type),
+                    "contact": sup_contact, "phone": sup_phone,
+                    "email": sup_email, "gst": sup_gst,
+                    "payment_terms": sup_payment, "city": sup_city,
+                    "remarks": sup_remarks,
+                    "created_at": datetime.now().isoformat(),
+                }
+                save_data()
+                st.success(f"✅ Supplier '{sup_name}' saved!")
+                st.rerun()
+            else:
+                st.error("Code and Name required!")
+
+    with sup_tab1:
+        suppliers = SS.get("suppliers", {})
+        if not suppliers:
+            st.markdown('<div class="warn-box">Koi supplier nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            sup_rows = []
+            for code, sup in suppliers.items():
+                sup_rows.append({
+                    "Code": code, "Name": sup["name"], "Type": sup.get("type",""),
+                    "Contact": sup.get("contact",""), "Phone": sup.get("phone",""),
+                    "City": sup.get("city",""), "GST": sup.get("gst",""),
+                    "Payment": sup.get("payment_terms",""),
+                })
+            st.dataframe(pd.DataFrame(sup_rows), use_container_width=True, hide_index=True)
+
+            # Edit/Delete
+            st.markdown("---")
+            del_sup = st.selectbox("Supplier delete karo", [""] + list(suppliers.keys()), key="del_sup_sel",
+                                    format_func=lambda x: f"{x} – {suppliers.get(x,{}).get('name','')}" if x else "Select")
+            if del_sup:
+                if st.button(f"🗑 Delete {del_sup}", key="del_sup_btn"):
+                    del SS["suppliers"][del_sup]
+                    save_data()
+                    st.success("Deleted!")
+                    st.rerun()
+
+
+# ── PURCHASE REPORTS ──────────────────────────────────────────────────────────
+elif nav_pur == "📊 Purchase Reports":
+    st.markdown('<h1>Purchase Reports</h1>', unsafe_allow_html=True)
+
+    rep = st.selectbox("Report", [
+        "1. PR Status Report",
+        "2. PO Status Report",
+        "3. JWO Status Report",
+        "4. Supplier-wise Purchase",
+        "5. Material-wise Purchase",
+        "6. Pending Receipt Report",
+        "7. GRN Summary",
+    ], key="pur_rep")
+
+    pr_list  = SS.get("pr_list", {})
+    po_list  = SS.get("po_list", {})
+    jwo_list = SS.get("jwo_list", {})
+    grn_list = SS.get("grn_list", {})
+
+    if rep.startswith("1"):
+        rows = [{"PR #":k,"Type":v.get("pr_type",""),"SO":v.get("so_ref",""),
+                 "Items":len(v.get("lines",[])),"Req Date":v.get("required_date",""),
+                 "Status":v.get("status",""),"Source":v.get("created_from","")}
+                for k,v in pr_list.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.info("Koi PR nahi.")
+
+    elif rep.startswith("2"):
+        rows = [{"PO #":k,"Supplier":v.get("supplier_name",""),"SO":v.get("so_ref",""),
+                 "Total":f"₹{v.get('total',0):,.0f}","Delivery":v.get("delivery_date",""),
+                 "Status":v.get("status","")}
+                for k,v in po_list.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.info("Koi PO nahi.")
+
+    elif rep.startswith("3"):
+        rows = [{"JWO #":k,"Processor":v.get("processor_name",""),"SO":v.get("so_ref",""),
+                 "Total":f"₹{v.get('total',0):,.0f}","Expected":v.get("expected_date",""),
+                 "Status":v.get("status","")}
+                for k,v in jwo_list.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.info("Koi JWO nahi.")
+
+    elif rep.startswith("4"):
+        sup_summary = {}
+        for po_no, po in po_list.items():
+            s = po.get("supplier_name","Unknown")
+            if s not in sup_summary: sup_summary[s] = {"po_count":0,"total":0}
+            sup_summary[s]["po_count"] += 1
+            sup_summary[s]["total"] += po.get("total",0)
+        rows = [{"Supplier":k,"PO Count":v["po_count"],"Total Value":f"₹{v['total']:,.0f}"}
+                for k,v in sup_summary.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.info("Koi data nahi.")
+
+    elif rep.startswith("5"):
+        mat_summary = {}
+        for po in po_list.values():
+            for ln in po.get("lines",[]):
+                c = ln["material_code"]
+                if c not in mat_summary: mat_summary[c] = {"name":ln["material_name"],"qty":0,"amount":0}
+                mat_summary[c]["qty"]    += ln.get("po_qty",0)
+                mat_summary[c]["amount"] += ln.get("amount",0)
+        rows = [{"Code":k,"Material":v["name"],"Total Qty":v["qty"],"Total Amount":f"₹{v['amount']:,.0f}"}
+                for k,v in mat_summary.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.info("Koi data nahi.")
+
+    elif rep.startswith("6"):
+        rows = []
+        for po_no, po in po_list.items():
+            if po.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]:
+                for ln in po.get("lines",[]):
+                    pending = ln["po_qty"] - ln.get("received_qty",0)
+                    if pending > 0:
+                        rows.append({"PO #":po_no,"Supplier":po.get("supplier_name",""),
+                                     "Material":ln["material_name"],"PO Qty":ln["po_qty"],
+                                     "Received":ln.get("received_qty",0),"Pending":pending,
+                                     "Unit":ln["unit"],"Due":po.get("delivery_date","")})
+        for jwo_no, jwo in jwo_list.items():
+            if jwo.get("status") in ["Issued to Processor","In Process","Partial Received"]:
+                for ln in jwo.get("lines",[]):
+                    pending = ln["output_qty"] - float(ln.get("received_qty",0))
+                    if pending > 0:
+                        rows.append({"PO #":jwo_no,"Supplier":jwo.get("processor_name",""),
+                                     "Material":ln["output_name"],"PO Qty":ln["output_qty"],
+                                     "Received":ln.get("received_qty",0),"Pending":pending,
+                                     "Unit":ln["output_unit"],"Due":jwo.get("expected_date","")})
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.markdown('<div class="ok-box">Koi pending receipt nahi!</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("7"):
+        rows = [{"GRN #":k,"Date":v.get("grn_date",""),"Type":v.get("grn_type",""),
+                 "Ref":v.get("ref_no",""),"Items":len(v.get("lines",[])),"Status":v.get("status","")}
+                for k,v in grn_list.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else: st.info("Koi GRN nahi.")
