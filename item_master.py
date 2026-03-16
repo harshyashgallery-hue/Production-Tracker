@@ -1758,17 +1758,20 @@ elif nav_so == "➕ Create Sales Order":
             if st.button("✅ Apply Edits", use_container_width=False):
                 updated_lines = []
                 for i, row in edited.iterrows():
-                    if pd.isna(row.get("SKU")) or row.get("SKU","") == "":
-                        continue  # skip deleted rows
+                    # Skip deleted rows (SKU Code empty or NaN)
+                    sku_val = row.get("SKU Code", "")
+                    if not sku_val or (isinstance(sku_val, float) and pd.isna(sku_val)):
+                        continue
                     qty     = int(row["Qty"]) if not pd.isna(row["Qty"]) else 0
                     rate    = float(row["Rate (₹)"]) if not pd.isna(row["Rate (₹)"]) else 0.0
-                    gst     = int(row["GST %"]) if not pd.isna(row["GST %"]) else 12
+                    gst_raw = row.get("GST %", 12)
+                    gst     = int(gst_raw) if gst_raw and not (isinstance(gst_raw, float) and pd.isna(gst_raw)) else 12
                     taxable = qty * rate
                     gst_amt = taxable * gst / 100
-                    # Preserve original line data, update editable fields
-                    # match by SKU Code column
-                    orig_sku = row.get("SKU Code","")
-                    orig = next((l for l in so_lines if l["sku"] == orig_sku), so_lines[i] if i < len(so_lines) else {})
+                    # Find original line by SKU Code
+                    orig = next((l for l in so_lines if l["sku"] == sku_val), {})
+                    if not orig:
+                        orig = so_lines[i] if i < len(so_lines) else {}
                     updated_lines.append({
                         **orig,
                         "qty":          qty,
@@ -1783,7 +1786,7 @@ elif nav_so == "➕ Create Sales Order":
                         "total":        round(taxable + gst_amt, 2),
                     })
                 st.session_state["new_so_lines"] = updated_lines
-                st.success("✅ Lines updated!")
+                st.success(f"✅ {len(updated_lines)} lines updated!")
                 st.rerun()
 
             # Summary
