@@ -2580,18 +2580,22 @@ def calculate_mrp(selected_so_nos):
             total_qty  = round(adj_qty * qty, 3)
             unit       = line.get("unit", comp_item.get("unit", "Pcs"))
 
-            # Check if this component is SFG/FG with its own BOM — recurse
-            has_sub_bom = comp_code in boms and len(boms[comp_code].get("lines", [])) > 0
-            comp_is_intermediate = comp_type in ["Semi Finished Goods (SFG)", "Finished Goods (FG)"]
+            # Use item_type from BOM line (more reliable than items dict lookup)
+            comp_type_from_line = line.get("item_type", comp_type)
+            
+            # Check if this component has its own BOM — if yes, recurse regardless of type
+            sub_bom_lines = boms.get(comp_code, {}).get("lines", [])
+            has_sub_bom   = len([l for l in sub_bom_lines if l.get("line_type") != "Process"]) > 0
 
-            if has_sub_bom and comp_is_intermediate:
+            if has_sub_bom:
                 # Go deeper — explode this component's BOM
                 explode_bom(comp_code, total_qty, so_no, sku, buyer, depth+1)
             else:
-                # Leaf node — this is raw material / accessory
+                # Leaf node — this is raw material / accessory / packing
+                final_type = comp_type_from_line if comp_type_from_line else comp_type
                 if comp_code not in result:
                     result[comp_code] = {
-                        "name": comp_name, "type": comp_type,
+                        "name": comp_name, "type": final_type,
                         "unit": unit, "total_req": 0,
                         "stock": float(comp_item.get("stock", 0)),
                         "reserved": float(comp_item.get("reserved", 0)),
@@ -2600,7 +2604,7 @@ def calculate_mrp(selected_so_nos):
                 result[comp_code]["total_req"] = round(result[comp_code]["total_req"] + total_qty, 3)
                 result[comp_code]["breakdown"].append({
                     "so_no": so_no, "sku": sku, "qty_req": total_qty,
-                    "source": f"BOM: {item_code} (Level {depth})"
+                    "source": f"BOM: {item_code} → Level {depth}"
                 })
 
     def add_packaging(item_code, qty, so_no, sku, buyer):
@@ -2788,6 +2792,22 @@ elif nav_mrp == "▶ Run MRP":
                 st.markdown(f'<div class="info-box">Selected: <strong>{len(selected_sos)}</strong> SOs | <strong>{total_lines}</strong> SKU lines | <strong>{total_qty:,}</strong> total pcs</div>', unsafe_allow_html=True)
 
                 st.markdown("<br>", unsafe_allow_html=True)
+
+                # Debug: Show BOM structure
+                with st.expander("🔍 BOM Structure Debug (check karo sahi hai ya nahi)"):
+                    boms_data = st.session_state.get("boms", {})
+                    items_data = st.session_state.get("items", {})
+                    if not boms_data:
+                        st.warning("Koi BOM nahi bana abhi tak!")
+                    for bom_code, bom in boms_data.items():
+                        mat_lines = [l for l in bom.get("lines",[]) if l.get("line_type") != "Process"]
+                        st.markdown(f"**BOM: {bom_code}** — {len(mat_lines)} material lines")
+                        for l in mat_lines:
+                            comp = l.get("item_code","")
+                            comp_type = items_data.get(comp,{}).get("item_type","?")
+                            has_sub = comp in boms_data
+                            st.markdown(f"&nbsp;&nbsp;&nbsp;→ `{comp}` ({comp_type}) | Qty: {l.get('qty',0)} {l.get('unit','')} | Has sub-BOM: {'✅' if has_sub else '❌'}")
+
                 if st.button("🚀 Run MRP Now", use_container_width=False):
                     with st.spinner("MRP calculate ho rahi hai..."):
                         mrp_result = calculate_mrp(selected_sos)
