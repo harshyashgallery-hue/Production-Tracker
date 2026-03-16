@@ -186,6 +186,8 @@ DEFAULT_DATA = {
     "soft_reservations": {},
     "tna_list": {},
     "tna_counter": 1,
+    "tna_templates": {},
+    "tna_activity_groups": ["Merchandising","Fabric","Sampling","CAD","Purchase","Printing","Dyeing","Cutting","Stitching","Finishing","Packing","Quality","Dispatch","Logistics"],
 }
 
 @st.cache_resource
@@ -336,6 +338,8 @@ ALL_PAGES = [
     ("TNA", "📅 TNA Dashboard"),
     ("TNA", "➕ Create TNA"),
     ("TNA", "📋 TNA List"),
+    ("TNA", "📁 TNA Templates"),
+    ("TNA", "📊 TNA Reports"),
 ]
 IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
 SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
@@ -3197,173 +3201,172 @@ elif nav_mrp == "📊 MRP Reports":
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TNA MODULE
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TNA MODULE — Time & Action Calendar
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Standard TNA activities with lead days (backward from delivery)
-TNA_STANDARD_ACTIVITIES = [
-    # (activity_name, lead_days_before_delivery, category, depends_on)
-    ("Delivery / Shipment",         0,  "Delivery",     None),
-    ("Final Inspection",            2,  "QC",           "Delivery / Shipment"),
-    ("Packing Complete",            4,  "Production",   "Final Inspection"),
-    ("Packing Start",               6,  "Production",   "Packing Complete"),
-    ("Finishing Complete",          9,  "Production",   "Packing Start"),
-    ("Finishing Start",             12, "Production",   "Finishing Complete"),
-    ("Stitching Complete",          18, "Production",   "Finishing Start"),
-    ("Stitching Start",             22, "Production",   "Stitching Complete"),
-    ("Cutting Complete",            25, "Production",   "Stitching Start"),
-    ("Cutting Start",               27, "Production",   "Cutting Complete"),
-    ("PP Sample Approval",          30, "Pre-Production","Cutting Start"),
-    ("Accessories Receive",         28, "Procurement",  "Cutting Start"),
-    ("Accessories Booking",         35, "Procurement",  "Accessories Receive"),
-    ("Fabric Receive",              30, "Procurement",  "Cutting Start"),
-    ("Fabric Booking / PO",         38, "Procurement",  "Fabric Receive"),
-    ("BOM Finalization",            40, "Pre-Production","Fabric Booking / PO"),
-    ("Size Set Sample Approval",    42, "Pre-Production","BOM Finalization"),
-    ("Style / Order Confirmation",  45, "Pre-Production","Size Set Sample Approval"),
+# ── Constants ─────────────────────────────────────────────────────────────────
+TNA_ACTIVITY_GROUPS = [
+    "Merchandising","Fabric","Sampling","CAD","Purchase",
+    "Printing","Dyeing","Cutting","Stitching","Finishing",
+    "Packing","Quality","Dispatch","Logistics"
 ]
 
-def get_tna_activities_for_item(item_code):
-    """Get TNA activities — routing processes from BOM + standard activities"""
-    routings = st.session_state.get("routings", {})
-    items    = st.session_state.get("items", {})
+TNA_STATUS_OPTIONS = [
+    "Not Started","In Progress","Completed","Hold","Delayed","Cancelled","Partially Completed","Awaiting Approval"
+]
 
-    # Get parent item routing (size variant → parent)
-    item     = items.get(item_code, {})
-    parent   = item.get("parent", item_code)
-    route    = routings.get(parent, routings.get(item_code, []))
+TNA_PRIORITY = ["Normal","High","Urgent"]
 
-    # Build activity list — standard ones, replacing production steps with BOM routing
-    activities = []
-    production_inserted = False
+# Standard templates
+TNA_DEFAULT_TEMPLATES = {
+    "Domestic Order TNA": [
+        {"sr":1,  "activity":"Buyer Order Receive",          "group":"Merchandising","lead_days":45,"depends_on":""},
+        {"sr":2,  "activity":"Tech Pack Receive",             "group":"Merchandising","lead_days":42,"depends_on":"Buyer Order Receive"},
+        {"sr":3,  "activity":"Costing Final",                 "group":"Merchandising","lead_days":40,"depends_on":"Tech Pack Receive"},
+        {"sr":4,  "activity":"BOM Final",                     "group":"Merchandising","lead_days":38,"depends_on":"Costing Final"},
+        {"sr":5,  "activity":"Fabric Requirement Final",      "group":"Fabric",       "lead_days":37,"depends_on":"BOM Final"},
+        {"sr":6,  "activity":"Accessories Requirement Final", "group":"Purchase",     "lead_days":37,"depends_on":"BOM Final"},
+        {"sr":7,  "activity":"Grey Fabric Booking",           "group":"Fabric",       "lead_days":35,"depends_on":"Fabric Requirement Final"},
+        {"sr":8,  "activity":"Accessories Purchase",          "group":"Purchase",     "lead_days":34,"depends_on":"Accessories Requirement Final"},
+        {"sr":9,  "activity":"Size Set Approval",             "group":"Sampling",     "lead_days":32,"depends_on":"BOM Final"},
+        {"sr":10, "activity":"Grey Fabric Inward",            "group":"Fabric",       "lead_days":28,"depends_on":"Grey Fabric Booking"},
+        {"sr":11, "activity":"Accessories Inward",            "group":"Purchase",     "lead_days":26,"depends_on":"Accessories Purchase"},
+        {"sr":12, "activity":"PP Sample",                     "group":"Sampling",     "lead_days":25,"depends_on":"Grey Fabric Inward"},
+        {"sr":13, "activity":"Buyer Approval",                "group":"Merchandising","lead_days":22,"depends_on":"PP Sample"},
+        {"sr":14, "activity":"Cutting Start",                 "group":"Cutting",      "lead_days":20,"depends_on":"Buyer Approval"},
+        {"sr":15, "activity":"Cutting Complete",              "group":"Cutting",      "lead_days":17,"depends_on":"Cutting Start"},
+        {"sr":16, "activity":"Stitching Start",               "group":"Stitching",    "lead_days":16,"depends_on":"Cutting Complete"},
+        {"sr":17, "activity":"Stitching Complete",            "group":"Stitching",    "lead_days":11,"depends_on":"Stitching Start"},
+        {"sr":18, "activity":"Finishing Start",               "group":"Finishing",    "lead_days":10,"depends_on":"Stitching Complete"},
+        {"sr":19, "activity":"Finishing Complete",            "group":"Finishing",    "lead_days":8, "depends_on":"Finishing Start"},
+        {"sr":20, "activity":"Packing Start",                 "group":"Packing",      "lead_days":7, "depends_on":"Finishing Complete"},
+        {"sr":21, "activity":"Packing Complete",              "group":"Packing",      "lead_days":5, "depends_on":"Packing Start"},
+        {"sr":22, "activity":"Final QC",                      "group":"Quality",      "lead_days":4, "depends_on":"Packing Complete"},
+        {"sr":23, "activity":"Inspection",                    "group":"Quality",      "lead_days":3, "depends_on":"Final QC"},
+        {"sr":24, "activity":"Dispatch Planning",             "group":"Dispatch",     "lead_days":2, "depends_on":"Inspection"},
+        {"sr":25, "activity":"Dispatch",                      "group":"Dispatch",     "lead_days":1, "depends_on":"Dispatch Planning"},
+        {"sr":26, "activity":"Delivery",                      "group":"Logistics",    "lead_days":0, "depends_on":"Dispatch"},
+    ],
+    "Export Order TNA": [
+        {"sr":1,  "activity":"Buyer Order Receive",          "group":"Merchandising","lead_days":90,"depends_on":""},
+        {"sr":2,  "activity":"Tech Pack Receive",             "group":"Merchandising","lead_days":85,"depends_on":"Buyer Order Receive"},
+        {"sr":3,  "activity":"Costing Final",                 "group":"Merchandising","lead_days":82,"depends_on":"Tech Pack Receive"},
+        {"sr":4,  "activity":"BOM Final",                     "group":"Merchandising","lead_days":80,"depends_on":"Costing Final"},
+        {"sr":5,  "activity":"Lab Dip Approval",              "group":"Fabric",       "lead_days":78,"depends_on":"BOM Final"},
+        {"sr":6,  "activity":"Shade Approval",                "group":"Fabric",       "lead_days":75,"depends_on":"Lab Dip Approval"},
+        {"sr":7,  "activity":"Grey Fabric Booking",           "group":"Fabric",       "lead_days":72,"depends_on":"Shade Approval"},
+        {"sr":8,  "activity":"Accessories Requirement Final", "group":"Purchase",     "lead_days":78,"depends_on":"BOM Final"},
+        {"sr":9,  "activity":"Accessories Purchase",          "group":"Purchase",     "lead_days":70,"depends_on":"Accessories Requirement Final"},
+        {"sr":10, "activity":"Proto Sample",                  "group":"Sampling",     "lead_days":75,"depends_on":"BOM Final"},
+        {"sr":11, "activity":"Fit Sample",                    "group":"Sampling",     "lead_days":68,"depends_on":"Proto Sample"},
+        {"sr":12, "activity":"Size Set Approval",             "group":"Sampling",     "lead_days":62,"depends_on":"Fit Sample"},
+        {"sr":13, "activity":"Grey Fabric Inward",            "group":"Fabric",       "lead_days":60,"depends_on":"Grey Fabric Booking"},
+        {"sr":14, "activity":"Accessories Inward",            "group":"Purchase",     "lead_days":55,"depends_on":"Accessories Purchase"},
+        {"sr":15, "activity":"PP Sample",                     "group":"Sampling",     "lead_days":52,"depends_on":"Grey Fabric Inward"},
+        {"sr":16, "activity":"Buyer Approval",                "group":"Merchandising","lead_days":45,"depends_on":"PP Sample"},
+        {"sr":17, "activity":"Cutting Start",                 "group":"Cutting",      "lead_days":40,"depends_on":"Buyer Approval"},
+        {"sr":18, "activity":"Cutting Complete",              "group":"Cutting",      "lead_days":35,"depends_on":"Cutting Start"},
+        {"sr":19, "activity":"Stitching Start",               "group":"Stitching",    "lead_days":34,"depends_on":"Cutting Complete"},
+        {"sr":20, "activity":"Stitching Complete",            "group":"Stitching",    "lead_days":25,"depends_on":"Stitching Start"},
+        {"sr":21, "activity":"Finishing Complete",            "group":"Finishing",    "lead_days":20,"depends_on":"Stitching Complete"},
+        {"sr":22, "activity":"Packing Complete",              "group":"Packing",      "lead_days":15,"depends_on":"Finishing Complete"},
+        {"sr":23, "activity":"Final QC",                      "group":"Quality",      "lead_days":12,"depends_on":"Packing Complete"},
+        {"sr":24, "activity":"Inspection",                    "group":"Quality",      "lead_days":10,"depends_on":"Final QC"},
+        {"sr":25, "activity":"Dispatch",                      "group":"Dispatch",     "lead_days":7, "depends_on":"Inspection"},
+        {"sr":26, "activity":"Shipment",                      "group":"Logistics",    "lead_days":3, "depends_on":"Dispatch"},
+        {"sr":27, "activity":"Delivery",                      "group":"Logistics",    "lead_days":0, "depends_on":"Shipment"},
+    ],
+    "Printed Fabric TNA": [
+        {"sr":1,  "activity":"Buyer Order Receive",          "group":"Merchandising","lead_days":45,"depends_on":""},
+        {"sr":2,  "activity":"BOM Final",                     "group":"Merchandising","lead_days":42,"depends_on":"Buyer Order Receive"},
+        {"sr":3,  "activity":"CAD Final",                     "group":"CAD",          "lead_days":40,"depends_on":"BOM Final"},
+        {"sr":4,  "activity":"Grey Fabric Booking",           "group":"Fabric",       "lead_days":38,"depends_on":"BOM Final"},
+        {"sr":5,  "activity":"Grey Fabric Inward",            "group":"Fabric",       "lead_days":32,"depends_on":"Grey Fabric Booking"},
+        {"sr":6,  "activity":"Printing Approval",             "group":"Printing",     "lead_days":30,"depends_on":"CAD Final"},
+        {"sr":7,  "activity":"Printed Fabric Inward",         "group":"Printing",     "lead_days":25,"depends_on":"Printing Approval"},
+        {"sr":8,  "activity":"PP Sample",                     "group":"Sampling",     "lead_days":23,"depends_on":"Printed Fabric Inward"},
+        {"sr":9,  "activity":"Buyer Approval",                "group":"Merchandising","lead_days":20,"depends_on":"PP Sample"},
+        {"sr":10, "activity":"Cutting Start",                 "group":"Cutting",      "lead_days":18,"depends_on":"Buyer Approval"},
+        {"sr":11, "activity":"Cutting Complete",              "group":"Cutting",      "lead_days":15,"depends_on":"Cutting Start"},
+        {"sr":12, "activity":"Stitching Complete",            "group":"Stitching",    "lead_days":10,"depends_on":"Cutting Complete"},
+        {"sr":13, "activity":"Finishing Complete",            "group":"Finishing",    "lead_days":7, "depends_on":"Stitching Complete"},
+        {"sr":14, "activity":"Packing Complete",              "group":"Packing",      "lead_days":4, "depends_on":"Finishing Complete"},
+        {"sr":15, "activity":"Final QC",                      "group":"Quality",      "lead_days":3, "depends_on":"Packing Complete"},
+        {"sr":16, "activity":"Dispatch",                      "group":"Dispatch",     "lead_days":1, "depends_on":"Final QC"},
+        {"sr":17, "activity":"Delivery",                      "group":"Logistics",    "lead_days":0, "depends_on":"Dispatch"},
+    ],
+}
 
-    for act_name, lead_days, category, depends_on in TNA_STANDARD_ACTIVITIES:
-        if category == "Production" and not production_inserted and route:
-            # Insert routing processes instead of standard production steps
-            # Calculate lead days for routing (spread across 25 days)
-            n = len(route)
-            prod_start_days = 27  # Cutting Start equivalent
-            prod_end_days   = 4   # Packing Complete equivalent
-            spread = (prod_start_days - prod_end_days) / max(n, 1)
+def get_all_templates():
+    custom   = SS.get("tna_templates", {})
+    combined = dict(TNA_DEFAULT_TEMPLATES)
+    combined.update(custom)
+    return combined
 
-            for i, proc in enumerate(reversed(route)):
-                proc_lead = round(prod_end_days + i * spread)
-                dep = route[-(i)] if i > 0 else "Final Inspection"
-                activities.append({
-                    "activity":  proc,
-                    "lead_days": proc_lead,
-                    "category":  "Production",
-                    "depends_on": dep,
-                })
-            production_inserted = True
-        elif category != "Production":
-            activities.append({
-                "activity":  act_name,
-                "lead_days": lead_days,
-                "category":  category,
-                "depends_on": depends_on,
-            })
+def build_tna_lines(template_acts, delivery_date):
+    """Build TNA lines from template activities + delivery date"""
+    lines = []
+    del_dt = date.fromisoformat(str(delivery_date))
+    for act in template_acts:
+        planned_end = del_dt - timedelta(days=act["lead_days"])
+        planned_start = planned_end - timedelta(days=1)
+        lines.append({
+            "sr":           act["sr"],
+            "activity":     act["activity"],
+            "group":        act["group"],
+            "responsible":  "",
+            "backup":       "",
+            "planned_start": str(planned_start),
+            "planned_end":   str(planned_end),
+            "actual_start":  "",
+            "actual_end":    "",
+            "status":        "Not Started",
+            "delay_days":    0,
+            "delay_reason":  "",
+            "remarks":       "",
+            "depends_on":    act.get("depends_on",""),
+            "seq":           act["sr"],
+            "history":       [],
+        })
+    return lines
 
-    # If no routing, use standard production steps
-    if not production_inserted:
-        for act_name, lead_days, category, depends_on in TNA_STANDARD_ACTIVITIES:
-            if category == "Production":
-                activities.append({
-                    "activity":  act_name,
-                    "lead_days": lead_days,
-                    "category":  category,
-                    "depends_on": depends_on,
-                })
-
-    # Sort by lead_days descending (earliest activity first)
-    activities.sort(key=lambda x: x["lead_days"], reverse=True)
-    return activities
-
-def generate_tna_for_so(so_no):
-    """Generate TNA plan for a SO — one TNA per unique style/parent"""
-    so       = SS["so_list"].get(so_no, {})
-    items    = st.session_state.get("items", {})
-    del_date = date.fromisoformat(so.get("delivery_date", str(date.today())))
-    buyer    = so.get("buyer", "")
-
-    tna_entries = {}  # parent_item -> TNA
-
-    for line in so.get("lines", []):
-        sku    = line.get("sku", "")
-        item   = items.get(sku, {})
-        parent = item.get("parent", sku)
-
-        if parent in tna_entries:
-            continue  # Already created for this style
-
-        activities = get_tna_activities_for_item(sku)
-        tna_lines  = []
-        for act in activities:
-            planned_date = del_date - timedelta(days=act["lead_days"])
-            tna_lines.append({
-                "activity":    act["activity"],
-                "category":    act["category"],
-                "depends_on":  act.get("depends_on", ""),
-                "lead_days":   act["lead_days"],
-                "planned_date": str(planned_date),
-                "actual_date":  "",
-                "status":      "Pending",
-                "remarks":     "",
-                "responsible": "",
-            })
-
-        tna_entries[parent] = {
-            "tna_no":       f"TNA-{SS['tna_counter']:04d}",
-            "so_no":        so_no,
-            "style":        parent,
-            "style_name":   items.get(parent, {}).get("name", parent),
-            "buyer":        buyer,
-            "delivery_date": str(del_date),
-            "lines":        tna_lines,
-            "status":       "Active",
-            "created_at":   datetime.now().isoformat(),
-        }
-        SS["tna_counter"] += 1
-
-    return tna_entries
-
-
-def tna_status_color(status):
-    return {"Completed": "#059669", "In Progress": "#d97706",
-            "Delayed": "#ef4444", "Pending": "#94a3b8"}.get(status, "#94a3b8")
-
-def recalculate_tna_status(tna):
-    """Update each line status based on actual vs planned date"""
+def recalc_tna(tna):
+    """Recalculate status + delay days for all lines"""
     today = str(date.today())
     for ln in tna.get("lines", []):
-        if ln.get("actual_date"):
-            ln["status"] = "Completed"
-        elif ln.get("planned_date","") < today and not ln.get("actual_date"):
+        if ln.get("status") == "Cancelled":
+            continue
+        if ln.get("actual_end"):
+            actual = ln["actual_end"]
+            planned = ln["planned_end"]
+            delay = (date.fromisoformat(actual) - date.fromisoformat(planned)).days
+            ln["delay_days"] = max(0, delay)
+            if ln["status"] not in ["Cancelled","Hold"]:
+                ln["status"] = "Completed"
+        elif ln.get("planned_end","") < today and ln["status"] not in ["Completed","Cancelled","Hold"]:
             ln["status"] = "Delayed"
-        elif ln.get("planned_date","") == today:
+            ln["delay_days"] = (date.today() - date.fromisoformat(ln["planned_end"])).days
+        elif ln.get("actual_start") and not ln.get("actual_end"):
             ln["status"] = "In Progress"
-        else:
-            ln["status"] = "Pending"
     return tna
 
-def cascade_delay(tna, delayed_activity, new_actual_date):
-    """When an activity is delayed, shift all dependent activities"""
-    lines = tna.get("lines", [])
-    act_map = {ln["activity"]: i for i, ln in enumerate(lines)}
+def cascade_delays(tna, changed_activity, new_end_date):
+    """Cascade delay from one activity to all dependents"""
+    lines    = tna.get("lines", [])
+    act_map  = {ln["activity"]: i for i, ln in enumerate(lines)}
+    idx      = act_map.get(changed_activity)
+    if idx is None: return tna
 
-    delayed_idx = act_map.get(delayed_activity)
-    if delayed_idx is None:
-        return tna
+    orig_end = date.fromisoformat(lines[idx]["planned_end"])
+    new_end  = date.fromisoformat(new_end_date)
+    delay    = (new_end - orig_end).days
+    if delay <= 0: return tna
 
-    orig_planned = date.fromisoformat(lines[delayed_idx]["planned_date"])
-    new_date     = date.fromisoformat(new_actual_date)
-    delay_days   = (new_date - orig_planned).days
-
-    if delay_days <= 0:
-        return tna
-
-    # Find all activities that depend on this (directly or indirectly)
-    delayed_set = {delayed_activity}
+    # BFS to find all dependents
+    delayed_set = {changed_activity}
     changed = True
     while changed:
         changed = False
@@ -3372,14 +3375,44 @@ def cascade_delay(tna, delayed_activity, new_actual_date):
                 delayed_set.add(ln["activity"])
                 changed = True
 
-    # Shift planned dates for dependent activities
+    # Shift dates
     for ln in lines:
-        if ln["activity"] in delayed_set and ln["activity"] != delayed_activity:
-            if ln.get("planned_date") and not ln.get("actual_date"):
-                old = date.fromisoformat(ln["planned_date"])
-                ln["planned_date"] = str(old + timedelta(days=delay_days))
-
+        if ln["activity"] in delayed_set and ln["activity"] != changed_activity:
+            if not ln.get("actual_end"):
+                for field in ["planned_start","planned_end"]:
+                    if ln.get(field):
+                        d = date.fromisoformat(ln[field])
+                        ln[field] = str(d + timedelta(days=delay))
     return tna
+
+def shipment_risk(tna):
+    """Determine shipment risk based on critical delayed activities"""
+    critical = {"Cutting Start","Stitching Start","Packing Complete","Final QC","Dispatch","Shipment"}
+    delivery_str = tna.get("delivery_date","")
+    if not delivery_str: return "Safe"
+    days_to_delivery = (date.fromisoformat(delivery_str) - date.today()).days
+    delayed_critical = [
+        ln for ln in tna.get("lines",[])
+        if ln["activity"] in critical and ln.get("status") == "Delayed"
+    ]
+    if len(delayed_critical) >= 3 or (delayed_critical and days_to_delivery < 7):
+        return "High Risk"
+    elif delayed_critical or days_to_delivery < 14:
+        return "Moderate Risk"
+    return "Safe"
+
+def risk_badge(risk):
+    colors = {"High Risk":"#ef4444","Moderate Risk":"#d97706","Safe":"#059669"}
+    bg     = {"High Risk":"#fee2e2","Moderate Risk":"#fef3c7","Safe":"#d1fae5"}
+    c = colors.get(risk,"#64748b"); b = bg.get(risk,"#f1f5f9")
+    return f'<span style="background:{b};color:{c};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;">{risk}</span>'
+
+def status_dot(status):
+    colors = {"Completed":"#059669","In Progress":"#d97706","Delayed":"#ef4444",
+              "Not Started":"#94a3b8","Hold":"#6366f1","Cancelled":"#475569",
+              "Partially Completed":"#0ea5e9","Awaiting Approval":"#8b5cf6"}
+    c = colors.get(status,"#94a3b8")
+    return f'<span style="background:{c};width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;"></span>'
 
 
 # ── TNA DASHBOARD ─────────────────────────────────────────────────────────────
@@ -3387,144 +3420,259 @@ if nav_tna == "📅 TNA Dashboard":
     st.markdown('<h1>TNA Dashboard</h1>', unsafe_allow_html=True)
 
     tna_list = SS.get("tna_list", {})
+    # Recalc all
+    for k in tna_list: tna_list[k] = recalc_tna(tna_list[k])
 
-    # KPI cards
-    total_tna    = len(tna_list)
-    delayed_acts = sum(
-        1 for t in tna_list.values()
-        for ln in t.get("lines", [])
-        if ln.get("status") == "Delayed"
-    )
-    due_today = sum(
-        1 for t in tna_list.values()
-        for ln in t.get("lines", [])
-        if ln.get("planned_date") == str(date.today()) and not ln.get("actual_date")
-    )
-    completed_tna = sum(1 for t in tna_list.values() if t.get("status") == "Completed")
+    total      = len(tna_list)
+    delayed_ct = sum(1 for t in tna_list.values() for ln in t.get("lines",[]) if ln["status"]=="Delayed")
+    due_today  = sum(1 for t in tna_list.values() for ln in t.get("lines",[])
+                     if ln.get("planned_end")==str(date.today()) and ln["status"] not in ["Completed","Cancelled"])
+    overdue_ct = sum(1 for t in tna_list.values() for ln in t.get("lines",[])
+                     if ln["status"]=="Delayed")
+    risk_ct    = sum(1 for t in tna_list.values() if shipment_risk(t) != "Safe")
+    completed_ct = sum(1 for t in tna_list.values() if t.get("status")=="Completed")
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(f'''<div class="metric-box"><div class="metric-value">{total_tna}</div>
-            <div class="metric-label">Active TNAs</div></div>''', unsafe_allow_html=True)
-    with c2:
-        st.markdown(f'''<div class="metric-box {"red" if delayed_acts > 0 else ""}">
-            <div class="metric-value">{delayed_acts}</div>
-            <div class="metric-label">Delayed Activities</div></div>''', unsafe_allow_html=True)
-    with c3:
-        st.markdown(f'''<div class="metric-box amber"><div class="metric-value">{due_today}</div>
-            <div class="metric-label">Due Today</div></div>''', unsafe_allow_html=True)
-    with c4:
-        st.markdown(f'''<div class="metric-box green"><div class="metric-value">{completed_tna}</div>
-            <div class="metric-label">Completed</div></div>''', unsafe_allow_html=True)
+    c1,c2,c3,c4,c5,c6 = st.columns(6)
+    for col, val, label, cls in [
+        (c1, total,       "Total TNAs",          ""),
+        (c2, delayed_ct,  "Delayed Activities",  "red" if delayed_ct else ""),
+        (c3, due_today,   "Due Today",           "amber" if due_today else ""),
+        (c4, overdue_ct,  "Overdue",             "red" if overdue_ct else ""),
+        (c5, risk_ct,     "Shipment Risk",       "red" if risk_ct else ""),
+        (c6, completed_ct,"Completed",           "green"),
+    ]:
+        with col:
+            st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{label}</div></div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
     if not tna_list:
-        st.markdown('<div class="warn-box">Koi TNA nahi bana abhi tak. "➕ Create TNA" se banao.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">Koi TNA nahi bana abhi tak.</div>', unsafe_allow_html=True)
     else:
-        # Delayed activities alert
-        if delayed_acts > 0:
-            st.markdown("#### 🚨 Delayed Activities")
-            for tna_no, tna in tna_list.items():
-                for ln in tna.get("lines", []):
-                    if ln.get("status") == "Delayed":
-                        days_late = (date.today() - date.fromisoformat(ln["planned_date"])).days
-                        st.markdown(f'''<div class="danger-box" style="margin:3px 0;">
-                            <strong>{tna.get("style_name","")} ({tna.get("so_no","")})</strong> →
-                            <strong>{ln["activity"]}</strong> —
-                            Was due: {ln["planned_date"]} —
-                            <span style="color:#ef4444;font-weight:700;">{days_late} days late</span>
-                        </div>''', unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
+        dt1, dt2, dt3, dt4 = st.tabs(["🚨 Alerts", "👤 Responsible-wise", "🏢 Department-wise", "📋 All Orders"])
 
-        # Due today
-        if due_today > 0:
-            st.markdown("#### ⏰ Due Today")
+        with dt1:
+            # Overdue
+            st.markdown("#### 🔴 Overdue Activities")
+            found = False
             for tna_no, tna in tna_list.items():
-                for ln in tna.get("lines", []):
-                    if ln.get("planned_date") == str(date.today()) and not ln.get("actual_date"):
-                        st.markdown(f'''<div class="warn-box" style="margin:3px 0;">
-                            <strong>{tna.get("style_name","")} ({tna.get("so_no","")})</strong> →
-                            <strong>{ln["activity"]}</strong>
+                for ln in tna.get("lines",[]):
+                    if ln["status"] == "Delayed":
+                        found = True
+                        st.markdown(f'''<div class="danger-box" style="margin:2px 0;display:flex;justify-content:space-between;">
+                            <span><strong>{tna.get("style_name","")} / {tna.get("buyer","")}</strong> — {ln["activity"]} ({ln["group"]})</span>
+                            <span>Due: {ln["planned_end"]} | <strong style="color:#ef4444;">{ln["delay_days"]}d overdue</strong> | Assigned: {ln.get("responsible","—")}</span>
                         </div>''', unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
+            if not found: st.markdown('<div class="ok-box">Koi overdue activity nahi hai! 🎉</div>', unsafe_allow_html=True)
 
-        # All TNAs summary
-        st.markdown("#### 📋 All TNAs")
-        tna_rows = []
-        for tna_no, tna in tna_list.items():
-            lines     = tna.get("lines", [])
-            total_acts = len(lines)
-            done_acts  = sum(1 for ln in lines if ln.get("status") == "Completed")
-            delay_acts = sum(1 for ln in lines if ln.get("status") == "Delayed")
-            pct        = int(done_acts / total_acts * 100) if total_acts > 0 else 0
-            tna_rows.append({
-                "TNA #":       tna_no,
-                "SO #":        tna.get("so_no",""),
-                "Style":       tna.get("style",""),
-                "Style Name":  tna.get("style_name",""),
-                "Buyer":       tna.get("buyer",""),
-                "Delivery":    tna.get("delivery_date",""),
-                "Total Acts":  total_acts,
-                "Completed":   done_acts,
-                "Delayed":     delay_acts,
-                "Progress %":  pct,
-                "Status":      tna.get("status",""),
-            })
-        st.dataframe(pd.DataFrame(tna_rows), use_container_width=True, hide_index=True)
+            st.markdown("#### 🟡 Due Today / Tomorrow")
+            tomorrow = str(date.today() + timedelta(days=1))
+            found2 = False
+            for tna_no, tna in tna_list.items():
+                for ln in tna.get("lines",[]):
+                    if ln.get("planned_end") in [str(date.today()), tomorrow] and ln["status"] not in ["Completed","Cancelled"]:
+                        found2 = True
+                        color = "#ef4444" if ln["planned_end"] == str(date.today()) else "#d97706"
+                        st.markdown(f'''<div class="warn-box" style="margin:2px 0;">
+                            <strong>{tna.get("style_name","")}</strong> — {ln["activity"]} — Due: <strong style="color:{color};">{ln["planned_end"]}</strong> — {ln.get("responsible","—")}
+                        </div>''', unsafe_allow_html=True)
+            if not found2: st.markdown('<div class="ok-box">Koi activity due nahi today/tomorrow.</div>', unsafe_allow_html=True)
+
+        with dt2:
+            st.markdown("#### 👤 Responsible Person-wise Pending")
+            resp_data = {}
+            for tna_no, tna in tna_list.items():
+                for ln in tna.get("lines",[]):
+                    if ln["status"] not in ["Completed","Cancelled"]:
+                        resp = ln.get("responsible","Unassigned") or "Unassigned"
+                        if resp not in resp_data: resp_data[resp] = []
+                        resp_data[resp].append({
+                            "TNA": tna_no, "Style": tna.get("style_name",""),
+                            "Activity": ln["activity"], "Due": ln["planned_end"],
+                            "Status": ln["status"], "Delay": ln["delay_days"],
+                        })
+            for resp, acts in sorted(resp_data.items()):
+                with st.expander(f"👤 {resp} — {len(acts)} pending"):
+                    st.dataframe(pd.DataFrame(acts), use_container_width=True, hide_index=True)
+
+        with dt3:
+            st.markdown("#### 🏢 Department-wise Pending")
+            dept_data = {}
+            for tna_no, tna in tna_list.items():
+                for ln in tna.get("lines",[]):
+                    if ln["status"] not in ["Completed","Cancelled"]:
+                        grp = ln.get("group","Other")
+                        if grp not in dept_data: dept_data[grp] = []
+                        dept_data[grp].append({
+                            "TNA": tna_no, "Style": tna.get("style_name",""),
+                            "Activity": ln["activity"], "Due": ln["planned_end"],
+                            "Status": ln["status"],
+                        })
+            for dept, acts in sorted(dept_data.items()):
+                delayed_in_dept = sum(1 for a in acts if a["Status"]=="Delayed")
+                with st.expander(f"🏢 {dept} — {len(acts)} pending {'🔴 '+str(delayed_in_dept)+' delayed' if delayed_in_dept else ''}"):
+                    st.dataframe(pd.DataFrame(acts), use_container_width=True, hide_index=True)
+
+        with dt4:
+            st.markdown("#### 📋 All Orders TNA Summary")
+            order_rows = []
+            for tna_no, tna in tna_list.items():
+                lines      = tna.get("lines",[])
+                done       = sum(1 for ln in lines if ln["status"]=="Completed")
+                delayed    = sum(1 for ln in lines if ln["status"]=="Delayed")
+                pct        = int(done/len(lines)*100) if lines else 0
+                risk       = shipment_risk(tna)
+                del_dt     = tna.get("delivery_date","")
+                days_left  = (date.fromisoformat(del_dt)-date.today()).days if del_dt else 0
+                order_rows.append({
+                    "TNA #": tna_no, "Style": tna.get("style_name",""),
+                    "Buyer": tna.get("buyer",""), "SO #": tna.get("so_no",""),
+                    "Delivery": del_dt, "Days Left": days_left,
+                    "Progress%": pct, "Done": done, "Delayed": delayed,
+                    "Risk": risk, "Priority": tna.get("priority","Normal"),
+                })
+            if order_rows:
+                st.dataframe(pd.DataFrame(order_rows), use_container_width=True, hide_index=True)
 
 
 # ── CREATE TNA ────────────────────────────────────────────────────────────────
 elif nav_tna == "➕ Create TNA":
     st.markdown('<h1>Create TNA</h1>', unsafe_allow_html=True)
-    st.markdown('<div class="info-box">SO select karo — delivery date se 45 days backward TNA automatically generate hoga. Production steps BOM routing se aayenge.</div>', unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
 
-    so_list = SS.get("so_list", {})
-    # Only show SOs that don't have TNA yet
-    existing_tna_sos = {t.get("so_no") for t in SS.get("tna_list", {}).values()}
-    eligible_sos = {k: v for k, v in so_list.items()
-                   if v.get("status") not in ["Cancelled","Closed"]
-                   and k not in existing_tna_sos}
+    so_list   = SS.get("so_list", {})
+    templates = get_all_templates()
 
-    if not eligible_sos:
-        st.markdown('<div class="warn-box">Koi eligible SO nahi hai TNA ke liye. Pehle Sales Order banao.</div>', unsafe_allow_html=True)
-    else:
-        sel_so = st.selectbox(
-            "SO select karo",
-            [""] + list(eligible_sos.keys()),
-            format_func=lambda x: f"{x} – {eligible_sos.get(x,{}).get('buyer','')} – Delivery: {eligible_sos.get(x,{}).get('delivery_date','')}" if x else "— Select SO —",
-            key="tna_so_sel"
-        )
+    create_tab1, create_tab2 = st.tabs(["📋 From SO / Buyer PO", "✍️ Manual Create"])
 
-        if sel_so:
-            so = eligible_sos[sel_so]
+    with create_tab1:
+        st.markdown('<div class="info-box">SO select karo → Template select karo → TNA auto-generate hoga delivery date se backward.</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-            # Preview TNA
-            preview = generate_tna_for_so(sel_so)
+        existing_tna_sos = {t.get("so_no") for t in SS.get("tna_list",{}).values()}
 
-            st.markdown(f"**{len(preview)} style(s) ke liye TNA generate hoga:**")
-            for parent, tna_data in preview.items():
-                st.markdown(f'<div class="ok-box">Style: <strong>{tna_data["style_name"]}</strong> | TNA #: <strong>{tna_data["tna_no"]}</strong> | Activities: <strong>{len(tna_data["lines"])}</strong></div>', unsafe_allow_html=True)
+        cf1, cf2 = st.columns(2)
+        with cf1:
+            sel_so = st.selectbox("SO select karo *",
+                [""] + list(so_list.keys()),
+                format_func=lambda x: f"{x} – {so_list.get(x,{}).get('buyer','')} | Del: {so_list.get(x,{}).get('delivery_date','')}" if x else "— Select —",
+                key="tna_create_so")
+        with cf2:
+            tmpl_name = st.selectbox("TNA Template *", list(templates.keys()), key="tna_tmpl_sel")
 
-                # Show preview table
-                with st.expander(f"Preview TNA lines — {tna_data['style_name']}"):
-                    prev_rows = [{
-                        "Activity":     ln["activity"],
-                        "Category":     ln["category"],
-                        "Planned Date": ln["planned_date"],
-                        "Lead Days":    ln["lead_days"],
-                    } for ln in tna_data["lines"]]
-                    st.dataframe(pd.DataFrame(prev_rows), use_container_width=True, hide_index=True)
+        if sel_so and sel_so in so_list:
+            so = so_list[sel_so]
+            if sel_so in existing_tna_sos:
+                st.markdown(f'<div class="warn-box">⚠️ {sel_so} ke liye TNA already exist karta hai.</div>', unsafe_allow_html=True)
+            else:
+                # Header fields
+                st.markdown("#### TNA Header Details")
+                h1, h2, h3 = st.columns(3)
+                with h1:
+                    tna_buyer    = st.text_input("Buyer Name", value=so.get("buyer",""), key="tna_h_buyer")
+                    tna_po_no    = st.text_input("Buyer PO Number", value=so.get("ref_number",""), key="tna_h_po")
+                    tna_so_no    = st.text_input("SO Number", value=sel_so, disabled=True, key="tna_h_so")
+                    tna_merchant = st.text_input("Merchant Code", value=so.get("merchant",""), key="tna_h_merch")
+                with h2:
+                    tna_style    = st.text_input("Style Code", key="tna_h_style",
+                                                  value=so.get("lines",[{}])[0].get("parent","") if so.get("lines") else "")
+                    tna_style_nm = st.text_input("Style Name", key="tna_h_stylenm",
+                                                  value=so.get("lines",[{}])[0].get("sku_name","") if so.get("lines") else "")
+                    tna_brand    = st.text_input("Brand", key="tna_h_brand")
+                    tna_season   = st.selectbox("Season", SEASONS, key="tna_h_season")
+                with h3:
+                    tna_del_date = st.date_input("Buyer Delivery Date",
+                                                  value=date.fromisoformat(so.get("delivery_date", str(date.today()))),
+                                                  key="tna_h_del")
+                    tna_exfac    = st.date_input("Ex-Factory Date", value=tna_del_date - timedelta(days=3), key="tna_h_exfac")
+                    tna_ship     = st.date_input("Shipment Date", value=tna_del_date - timedelta(days=1), key="tna_h_ship")
+                    tna_priority = st.selectbox("Priority", TNA_PRIORITY, key="tna_h_pri")
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("✅ Create TNA", use_container_width=False):
-                for parent, tna_data in preview.items():
-                    SS["tna_list"][tna_data["tna_no"]] = tna_data
-                save_data()
-                st.success(f"✅ {len(preview)} TNA(s) created!")
-                st.session_state["current_page"] = "📋 TNA List"
-                st.rerun()
+                h4, h5 = st.columns(2)
+                with h4:
+                    tna_ord_qty  = st.number_input("Order Quantity", value=sum(l.get("qty",0) for l in so.get("lines",[])), key="tna_h_qty")
+                    tna_uom      = st.selectbox("UOM", ["Pieces","Set","Dozen"], key="tna_h_uom")
+                    tna_prod_unit = st.text_input("Production Unit / Vendor", key="tna_h_pu")
+                with h5:
+                    tna_merchandiser = st.text_input("Merchandiser Name", key="tna_h_merch_nm")
+                    tna_remarks  = st.text_area("Remarks", height=70, key="tna_h_rem")
+
+                # Preview activities
+                tmpl_acts = templates.get(tmpl_name, [])
+                lines     = build_tna_lines(tmpl_acts, tna_del_date)
+
+                st.markdown(f"#### Preview — {len(lines)} activities from '{tmpl_name}'")
+                prev_df = pd.DataFrame([{
+                    "Sr": ln["sr"], "Activity": ln["activity"], "Group": ln["group"],
+                    "Planned Start": ln["planned_start"], "Planned End": ln["planned_end"],
+                    "Depends On": ln["depends_on"],
+                } for ln in lines])
+                st.dataframe(prev_df, use_container_width=True, hide_index=True)
+
+                if st.button("✅ Create TNA", use_container_width=False):
+                    tna_no = f"TNA-{SS['tna_counter']:04d}"
+                    SS["tna_list"][tna_no] = {
+                        "tna_no":       tna_no,
+                        "tna_date":     str(date.today()),
+                        "so_no":        sel_so,
+                        "buyer":        tna_buyer,
+                        "po_number":    tna_po_no,
+                        "style":        tna_style,
+                        "style_name":   tna_style_nm,
+                        "brand":        tna_brand,
+                        "merchant":     tna_merchant,
+                        "season":       tna_season,
+                        "order_qty":    tna_ord_qty,
+                        "uom":          tna_uom,
+                        "delivery_date": str(tna_del_date),
+                        "exfactory_date": str(tna_exfac),
+                        "shipment_date": str(tna_ship),
+                        "production_unit": tna_prod_unit,
+                        "merchandiser": tna_merchandiser,
+                        "priority":     tna_priority,
+                        "remarks":      tna_remarks,
+                        "template":     tmpl_name,
+                        "lines":        lines,
+                        "status":       "Active",
+                        "created_at":   datetime.now().isoformat(),
+                        "history":      [],
+                    }
+                    SS["tna_counter"] += 1
+                    save_data()
+                    st.success(f"✅ {tna_no} created with {len(lines)} activities!")
+                    st.session_state["current_page"] = "📋 TNA List"
+                    st.rerun()
+
+    with create_tab2:
+        st.markdown('<div class="info-box">Manual TNA — SO se independent create kar sakte ho.</div>', unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        with m1:
+            m_buyer   = st.text_input("Buyer *", key="tna_m_buyer")
+            m_style   = st.text_input("Style Code", key="tna_m_style")
+            m_del     = st.date_input("Delivery Date", key="tna_m_del")
+            m_pri     = st.selectbox("Priority", TNA_PRIORITY, key="tna_m_pri")
+        with m2:
+            m_tmpl    = st.selectbox("Template", list(templates.keys()), key="tna_m_tmpl")
+            m_merch   = st.text_input("Merchandiser", key="tna_m_merch")
+            m_remarks = st.text_area("Remarks", height=70, key="tna_m_rem")
+
+        if st.button("✅ Create Manual TNA") and m_buyer:
+            tmpl_acts = templates.get(m_tmpl, [])
+            lines     = build_tna_lines(tmpl_acts, m_del)
+            tna_no    = f"TNA-{SS['tna_counter']:04d}"
+            SS["tna_list"][tna_no] = {
+                "tna_no": tna_no, "tna_date": str(date.today()),
+                "so_no": "", "buyer": m_buyer, "style": m_style,
+                "style_name": m_style, "delivery_date": str(m_del),
+                "priority": m_pri, "merchandiser": m_merch,
+                "template": m_tmpl, "lines": lines,
+                "remarks": m_remarks, "status": "Active",
+                "created_at": datetime.now().isoformat(), "history": [],
+            }
+            SS["tna_counter"] += 1
+            save_data()
+            st.success(f"✅ {tna_no} created!")
+            st.session_state["current_page"] = "📋 TNA List"
+            st.rerun()
 
 
 # ── TNA LIST ──────────────────────────────────────────────────────────────────
@@ -3533,146 +3681,403 @@ elif nav_tna == "📋 TNA List":
     if "selected_tna" not in st.session_state:
         st.session_state["selected_tna"] = None
 
-    # ── TNA Detail View ───────────────────────────────────────────────────────
-    if st.session_state["selected_tna"] and st.session_state["selected_tna"] in SS.get("tna_list", {}):
+    # ── Detail View ───────────────────────────────────────────────────────────
+    if st.session_state["selected_tna"] and st.session_state["selected_tna"] in SS.get("tna_list",{}):
         tna_no = st.session_state["selected_tna"]
-        tna    = SS["tna_list"][tna_no]
-
-        # Recalculate status
-        tna = recalculate_tna_status(tna)
+        tna    = recalc_tna(SS["tna_list"][tna_no])
         SS["tna_list"][tna_no] = tna
 
-        bc1, bc2 = st.columns([1, 6])
+        bc1, bc2, bc3 = st.columns([1,4,2])
         with bc1:
             if st.button("← Back"):
                 st.session_state["selected_tna"] = None
                 st.rerun()
         with bc2:
-            st.markdown(f'<h1 style="margin:0;">TNA — {tna_no} | {tna.get("style_name","")}</h1>', unsafe_allow_html=True)
+            st.markdown(f'<h1 style="margin:0;">{tna_no} — {tna.get("style_name","")}</h1>', unsafe_allow_html=True)
+        with bc3:
+            risk = shipment_risk(tna)
+            st.markdown(f'<div style="padding-top:14px;">{risk_badge(risk)}</div>', unsafe_allow_html=True)
 
+        # Header cards
         st.markdown("---")
-
-        # Header info
-        h1, h2, h3 = st.columns(3)
-        with h1:
-            st.markdown(f'''<div class="card card-left">
-                <div class="sec-label">Order Info</div>
-                <div style="font-size:13px;">SO: <strong>{tna.get("so_no","")}</strong></div>
-                <div style="font-size:13px;">Style: <strong>{tna.get("style","")}</strong></div>
+        hc1,hc2,hc3,hc4 = st.columns(4)
+        lines = tna.get("lines",[])
+        done  = sum(1 for ln in lines if ln["status"]=="Completed")
+        deld  = sum(1 for ln in lines if ln["status"]=="Delayed")
+        pct   = int(done/len(lines)*100) if lines else 0
+        del_dt = tna.get("delivery_date","")
+        days_left = (date.fromisoformat(del_dt)-date.today()).days if del_dt else 0
+        with hc1:
+            st.markdown(f'''<div class="card card-left"><div class="sec-label">Order Info</div>
                 <div style="font-size:13px;">Buyer: <strong>{tna.get("buyer","")}</strong></div>
+                <div style="font-size:13px;">SO: <strong>{tna.get("so_no","—")}</strong></div>
+                <div style="font-size:13px;">PO: <strong>{tna.get("po_number","—")}</strong></div>
+                <div style="font-size:13px;">Merchant: <strong>{tna.get("merchandiser","—")}</strong></div>
             </div>''', unsafe_allow_html=True)
-        with h2:
-            lines     = tna.get("lines",[])
-            done      = sum(1 for ln in lines if ln.get("status")=="Completed")
-            delayed   = sum(1 for ln in lines if ln.get("status")=="Delayed")
-            pct       = int(done/len(lines)*100) if lines else 0
-            st.markdown(f'''<div class="card card-left-blue">
-                <div class="sec-label">Progress</div>
-                <div style="font-size:13px;">Total: <strong>{len(lines)}</strong> | Done: <strong style="color:#059669">{done}</strong> | Delayed: <strong style="color:#ef4444">{delayed}</strong></div>
+        with hc2:
+            d_col = "#ef4444" if days_left < 7 else "#d97706" if days_left < 15 else "#059669"
+            st.markdown(f'''<div class="card card-left-blue"><div class="sec-label">Dates</div>
+                <div style="font-size:13px;">Delivery: <strong style="color:{d_col};">{del_dt}</strong></div>
+                <div style="font-size:13px;">Ex-Factory: <strong>{tna.get("exfactory_date","—")}</strong></div>
+                <div style="font-size:13px;">Shipment: <strong>{tna.get("shipment_date","—")}</strong></div>
+                <div style="font-size:14px;font-weight:800;color:{d_col};">{days_left} days left</div>
+            </div>''', unsafe_allow_html=True)
+        with hc3:
+            st.markdown(f'''<div class="card card-left-green"><div class="sec-label">Progress</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:13px;">
+                    <div>Total<br><strong>{len(lines)}</strong></div>
+                    <div>Done<br><strong style="color:#059669">{done}</strong></div>
+                    <div>Delayed<br><strong style="color:#ef4444">{deld}</strong></div>
+                    <div>Progress<br><strong style="color:#c8a96e">{pct}%</strong></div>
+                </div>
                 <div class="prog-wrap" style="margin-top:8px;"><div class="prog-fill prog-fill-green" style="width:{pct}%;"></div></div>
-                <div style="font-size:12px;">{pct}% complete</div>
             </div>''', unsafe_allow_html=True)
-        with h3:
-            delivery = tna.get("delivery_date","")
-            days_left = (date.fromisoformat(delivery) - date.today()).days if delivery else 0
-            color = "#ef4444" if days_left < 5 else "#d97706" if days_left < 15 else "#059669"
-            st.markdown(f'''<div class="card card-left-green">
-                <div class="sec-label">Delivery</div>
-                <div style="font-size:20px;font-weight:800;color:{color};">{delivery}</div>
-                <div style="font-size:13px;color:{color};">{days_left} days remaining</div>
+        with hc4:
+            st.markdown(f'''<div class="card card-left-red"><div class="sec-label">Details</div>
+                <div style="font-size:13px;">Style: <strong>{tna.get("style","—")}</strong></div>
+                <div style="font-size:13px;">Season: <strong>{tna.get("season","—")}</strong></div>
+                <div style="font-size:13px;">Order Qty: <strong>{tna.get("order_qty","—")}</strong></div>
+                <div style="font-size:13px;">Priority: <strong>{tna.get("priority","Normal")}</strong></div>
             </div>''', unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("#### 📋 TNA Activities — Click to Update")
 
-        # Category filter
-        cats = list(set(ln["category"] for ln in lines))
-        f_cat = st.selectbox("Filter by Category", ["All"] + cats, key="tna_cat_filter")
+        # Activity lines
+        act_tab1, act_tab2 = st.tabs(["📋 All Activities", "✏️ Update Activities"])
 
-        for i, ln in enumerate(lines):
-            if f_cat != "All" and ln["category"] != f_cat:
-                continue
+        with act_tab1:
+            f_grp = st.selectbox("Filter by Group", ["All"] + TNA_ACTIVITY_GROUPS, key="tna_det_grp")
+            f_sts = st.selectbox("Filter by Status", ["All"] + TNA_STATUS_OPTIONS, key="tna_det_sts")
 
-            status  = ln.get("status","Pending")
-            s_color = tna_status_color(status)
-            is_delayed = status == "Delayed"
+            view_rows = []
+            for ln in lines:
+                if f_grp != "All" and ln["group"] != f_grp: continue
+                if f_sts != "All" and ln["status"] != f_sts: continue
+                delay_str = f"🔴 {ln['delay_days']}d" if ln["delay_days"] > 0 else "—"
+                view_rows.append({
+                    "Sr":           ln["sr"],
+                    "Activity":     ln["activity"],
+                    "Group":        ln["group"],
+                    "Responsible":  ln.get("responsible","—"),
+                    "Planned Start":ln["planned_start"],
+                    "Planned End":  ln["planned_end"],
+                    "Actual Start": ln.get("actual_start","—"),
+                    "Actual End":   ln.get("actual_end","—"),
+                    "Status":       ln["status"],
+                    "Delay":        delay_str,
+                    "Depends On":   ln.get("depends_on","—"),
+                })
+            if view_rows:
+                st.dataframe(pd.DataFrame(view_rows), use_container_width=True, hide_index=True)
 
-            with st.expander(
-                f"{'🔴' if is_delayed else '✅' if status=='Completed' else '🟡' if status=='In Progress' else '⚪'} "
-                f"{ln['activity']}  |  Planned: {ln['planned_date']}  |  {status}",
-                expanded=is_delayed
-            ):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f'<div style="font-size:12px;color:#94a3b8;">Category</div><div style="font-weight:600;">{ln["category"]}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;">Planned Date</div><div style="font-weight:600;">{ln["planned_date"]}</div>', unsafe_allow_html=True)
-                with col2:
-                    actual = st.date_input(
-                        "Actual Completion Date",
-                        value=date.fromisoformat(ln["actual_date"]) if ln.get("actual_date") else None,
-                        key=f"tna_actual_{tna_no}_{i}"
-                    )
-                    responsible = st.text_input("Responsible", value=ln.get("responsible",""), key=f"tna_resp_{tna_no}_{i}")
-                with col3:
-                    remarks = st.text_input("Remarks", value=ln.get("remarks",""), key=f"tna_rem_{tna_no}_{i}")
+        with act_tab2:
+            f_grp2 = st.selectbox("Filter by Group", ["All"] + TNA_ACTIVITY_GROUPS, key="tna_upd_grp")
+            show_delayed_only = st.checkbox("Show only Delayed/Pending", key="tna_show_del")
 
-                    if st.button("💾 Save", key=f"tna_save_{tna_no}_{i}"):
-                        old_planned = ln["planned_date"]
-                        new_actual  = str(actual) if actual else ""
+            for i, ln in enumerate(lines):
+                if f_grp2 != "All" and ln["group"] != f_grp2: continue
+                if show_delayed_only and ln["status"] in ["Completed","Cancelled"]: continue
 
-                        # Check if delay happened
-                        if new_actual and new_actual > old_planned:
-                            # Cascade delay to dependent activities
-                            SS["tna_list"][tna_no] = cascade_delay(tna, ln["activity"], new_actual)
-                            st.warning(f"⚠️ Delay detected! Dependent activities shifted.")
+                status = ln["status"]
+                is_del = status == "Delayed"
+                is_done = status == "Completed"
+                icon = "✅" if is_done else "🔴" if is_del else "🟡" if status=="In Progress" else "⚪"
 
-                        SS["tna_list"][tna_no]["lines"][i]["actual_date"]  = new_actual
-                        SS["tna_list"][tna_no]["lines"][i]["responsible"]  = responsible
-                        SS["tna_list"][tna_no]["lines"][i]["remarks"]      = remarks
-                        SS["tna_list"][tna_no]["lines"][i]["status"]       = "Completed" if new_actual else ln["status"]
+                with st.expander(
+                    f"{icon} [{ln['sr']}] {ln['activity']} ({ln['group']}) | Due: {ln['planned_end']} | {status}" +
+                    (f" | 🔴 {ln['delay_days']}d late" if ln['delay_days'] > 0 else ""),
+                    expanded=is_del
+                ):
+                    uc1,uc2,uc3 = st.columns(3)
+                    with uc1:
+                        st.markdown(f'<div style="font-size:12px;color:#94a3b8;">Planned</div><div style="font-size:13px;">{ln["planned_start"]} → {ln["planned_end"]}</div>', unsafe_allow_html=True)
+                        new_status = st.selectbox("Status", TNA_STATUS_OPTIONS,
+                                                   index=TNA_STATUS_OPTIONS.index(status) if status in TNA_STATUS_OPTIONS else 0,
+                                                   key=f"tna_sts_{tna_no}_{i}")
+                        new_resp   = st.text_input("Responsible", value=ln.get("responsible",""), key=f"tna_resp_{tna_no}_{i}")
+                        new_backup = st.text_input("Backup Person", value=ln.get("backup",""), key=f"tna_bkp_{tna_no}_{i}")
+                    with uc2:
+                        new_act_start = st.date_input("Actual Start Date",
+                            value=date.fromisoformat(ln["actual_start"]) if ln.get("actual_start") else None,
+                            key=f"tna_as_{tna_no}_{i}")
+                        new_act_end = st.date_input("Actual End Date",
+                            value=date.fromisoformat(ln["actual_end"]) if ln.get("actual_end") else None,
+                            key=f"tna_ae_{tna_no}_{i}")
+                    with uc3:
+                        new_delay_reason = st.text_input("Delay Reason", value=ln.get("delay_reason",""), key=f"tna_dr_{tna_no}_{i}")
+                        new_remarks = st.text_area("Remarks", value=ln.get("remarks",""), height=60, key=f"tna_rk_{tna_no}_{i}")
 
-                        save_data()
-                        st.success("✅ Saved!")
-                        st.rerun()
+                        if st.button("💾 Save", key=f"tna_sv_{tna_no}_{i}"):
+                            old_ln = dict(ln)
+                            new_actual_end_str = str(new_act_end) if new_act_end else ""
 
-    # ── TNA List View ─────────────────────────────────────────────────────────
+                            # Cascade delay check
+                            if new_actual_end_str and new_actual_end_str > ln["planned_end"]:
+                                SS["tna_list"][tna_no] = cascade_delays(tna, ln["activity"], new_actual_end_str)
+                                tna = SS["tna_list"][tna_no]
+                                st.warning(f"⚠️ Delay cascade applied — dependent activities shifted!")
+
+                            # Update line
+                            SS["tna_list"][tna_no]["lines"][i].update({
+                                "status":       new_status,
+                                "responsible":  new_resp,
+                                "backup":       new_backup,
+                                "actual_start": str(new_act_start) if new_act_start else "",
+                                "actual_end":   new_actual_end_str,
+                                "delay_reason": new_delay_reason,
+                                "remarks":      new_remarks,
+                            })
+                            # Audit trail
+                            SS["tna_list"][tna_no]["lines"][i]["history"].append({
+                                "time": datetime.now().strftime("%d-%m-%Y %H:%M"),
+                                "old_status": old_ln["status"],
+                                "new_status": new_status,
+                                "old_end": old_ln.get("actual_end",""),
+                                "new_end": new_actual_end_str,
+                            })
+                            save_data()
+                            st.success("✅ Saved!")
+                            st.rerun()
+
+    # ── List View ─────────────────────────────────────────────────────────────
     else:
         st.markdown('<h1>TNA List</h1>', unsafe_allow_html=True)
 
         tna_list = SS.get("tna_list", {})
+
+        # Filters
+        lf1,lf2,lf3,lf4,lf5 = st.columns(5)
+        with lf1: fl_buyer  = st.text_input("🔍 Buyer", key="tl_buyer")
+        with lf2: fl_status = st.selectbox("Status", ["All","Active","Completed","On Hold"], key="tl_sts")
+        with lf3: fl_pri    = st.selectbox("Priority", ["All"]+TNA_PRIORITY, key="tl_pri")
+        with lf4: fl_risk   = st.selectbox("Risk", ["All","High Risk","Moderate Risk","Safe"], key="tl_risk")
+        with lf5: fl_search = st.text_input("🔍 TNA # / Style", key="tl_search")
+
         if not tna_list:
             st.markdown('<div class="warn-box">Koi TNA nahi hai. "➕ Create TNA" se banao.</div>', unsafe_allow_html=True)
         else:
-            # Recalculate all statuses
-            for tna_no in tna_list:
-                SS["tna_list"][tna_no] = recalculate_tna_status(SS["tna_list"][tna_no])
-
             for tna_no, tna in SS["tna_list"].items():
-                lines    = tna.get("lines", [])
-                done     = sum(1 for ln in lines if ln.get("status")=="Completed")
-                delayed  = sum(1 for ln in lines if ln.get("status")=="Delayed")
-                due_tod  = sum(1 for ln in lines if ln.get("planned_date")==str(date.today()) and not ln.get("actual_date"))
-                pct      = int(done/len(lines)*100) if lines else 0
-                delivery = tna.get("delivery_date","")
-                days_left = (date.fromisoformat(delivery) - date.today()).days if delivery else 0
+                tna = recalc_tna(tna)
+                SS["tna_list"][tna_no] = tna
 
-                r1,r2,r3,r4,r5,r6,r7 = st.columns([1.2, 2, 1.5, 1, 1, 1, 0.8])
-                with r1:
-                    st.markdown(f'<div style="padding-top:8px;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:#c8a96e;">{tna_no}</div>', unsafe_allow_html=True)
-                with r2:
-                    st.markdown(f'<div style="padding-top:6px;"><div style="font-size:13px;font-weight:600;">{tna.get("style_name","")}</div><div style="font-size:11px;color:#94a3b8;">{tna.get("buyer","")} | {tna.get("so_no","")}</div></div>', unsafe_allow_html=True)
-                with r3:
-                    d_color = "#ef4444" if days_left < 5 else "#d97706" if days_left < 15 else "#64748b"
-                    st.markdown(f'<div style="padding-top:8px;font-size:12px;">📅 {delivery}<br><span style="color:{d_color};">{days_left}d left</span></div>', unsafe_allow_html=True)
-                with r4:
-                    st.markdown(f'<div style="padding-top:4px;"><div style="font-size:11px;color:#94a3b8;">Progress</div><div class="prog-wrap"><div class="prog-fill" style="width:{pct}%;"></div></div><div style="font-size:11px;">{pct}%</div></div>', unsafe_allow_html=True)
-                with r5:
-                    st.markdown(f'<div style="padding-top:8px;text-align:center;font-size:12px;">{"🔴 " + str(delayed) + " delayed" if delayed > 0 else "🟢 On track"}</div>', unsafe_allow_html=True)
-                with r6:
-                    st.markdown(f'<div style="padding-top:8px;text-align:center;font-size:12px;">{"🟡 " + str(due_tod) + " due today" if due_tod > 0 else ""}</div>', unsafe_allow_html=True)
-                with r7:
+                risk = shipment_risk(tna)
+                if fl_buyer  and fl_buyer.lower() not in tna.get("buyer","").lower(): continue
+                if fl_status != "All" and tna.get("status","") != fl_status: continue
+                if fl_pri    != "All" and tna.get("priority","") != fl_pri: continue
+                if fl_risk   != "All" and risk != fl_risk: continue
+                if fl_search and fl_search.lower() not in tna_no.lower() and fl_search.lower() not in tna.get("style_name","").lower(): continue
+
+                lines    = tna.get("lines",[])
+                done     = sum(1 for ln in lines if ln["status"]=="Completed")
+                delayed  = sum(1 for ln in lines if ln["status"]=="Delayed")
+                due_tod  = sum(1 for ln in lines if ln.get("planned_end")==str(date.today()) and ln["status"] not in ["Completed","Cancelled"])
+                pct      = int(done/len(lines)*100) if lines else 0
+                del_dt   = tna.get("delivery_date","")
+                days_l   = (date.fromisoformat(del_dt)-date.today()).days if del_dt else 0
+                d_col    = "#ef4444" if days_l<7 else "#d97706" if days_l<15 else "#64748b"
+
+                r1,r2,r3,r4,r5,r6,r7,r8 = st.columns([1.2,2,1.2,1.2,1,1,1,0.8])
+                with r1: st.markdown(f'<div style="padding-top:8px;font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700;color:#c8a96e;">{tna_no}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:6px;"><div style="font-size:13px;font-weight:600;">{tna.get("style_name","")}</div><div style="font-size:11px;color:#94a3b8;">{tna.get("buyer","")} | {tna.get("so_no","")}</div></div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">📅 {del_dt}<br><span style="color:{d_col};font-weight:600;">{days_l}d left</span></div>', unsafe_allow_html=True)
+                with r4: st.markdown(f'<div style="padding-top:4px;"><div style="font-size:11px;color:#94a3b8;">Progress</div><div class="prog-wrap"><div class="prog-fill" style="width:{pct}%;"></div></div><div style="font-size:11px;">{pct}% ({done}/{len(lines)})</div></div>', unsafe_allow_html=True)
+                with r5: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{"🔴 "+str(delayed)+" delayed" if delayed else "🟢 OK"}</div>', unsafe_allow_html=True)
+                with r6: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{"🟡 "+str(due_tod)+" due" if due_tod else ""}</div>', unsafe_allow_html=True)
+                with r7: st.markdown(f'<div style="padding-top:8px;">{risk_badge(risk)}</div>', unsafe_allow_html=True)
+                with r8:
                     if st.button("Open →", key=f"open_tna_{tna_no}", use_container_width=True):
                         st.session_state["selected_tna"] = tna_no
                         st.rerun()
-
                 st.markdown('<hr style="margin:4px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+
+
+# ── TNA TEMPLATES ─────────────────────────────────────────────────────────────
+elif nav_tna == "📁 TNA Templates":
+    st.markdown('<h1>TNA Templates</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Custom templates banao — buyer-wise ya order-type wise. Standard templates already available hain.</div>', unsafe_allow_html=True)
+
+    tt1, tt2 = st.tabs(["📋 View Templates", "➕ Create Template"])
+
+    with tt1:
+        all_tmpls = get_all_templates()
+        for tmpl_name, acts in all_tmpls.items():
+            is_custom = tmpl_name in SS.get("tna_templates",{})
+            with st.expander(f"{'⭐ Custom: ' if is_custom else '📋 Standard: '}{tmpl_name} — {len(acts)} activities"):
+                df_t = pd.DataFrame([{"Sr":a["sr"],"Activity":a["activity"],"Group":a["group"],
+                                       "Lead Days":a["lead_days"],"Depends On":a.get("depends_on","")} for a in acts])
+                st.dataframe(df_t, use_container_width=True, hide_index=True)
+                if is_custom:
+                    if st.button(f"🗑 Delete '{tmpl_name}'", key=f"del_tmpl_{tmpl_name}"):
+                        del SS["tna_templates"][tmpl_name]
+                        save_data()
+                        st.rerun()
+
+    with tt2:
+        st.markdown("#### Create Custom Template")
+        new_tmpl_name = st.text_input("Template Name *", key="new_tmpl_name", placeholder="e.g. Myntra Export TNA")
+
+        if "new_tmpl_lines" not in st.session_state:
+            st.session_state["new_tmpl_lines"] = []
+
+        # Copy from existing
+        base_tmpl = st.selectbox("Start from existing template (optional)",
+                                  ["— Start Fresh —"] + list(TNA_DEFAULT_TEMPLATES.keys()),
+                                  key="base_tmpl")
+        if st.button("📋 Load Base Template") and base_tmpl != "— Start Fresh —":
+            st.session_state["new_tmpl_lines"] = [dict(a) for a in TNA_DEFAULT_TEMPLATES[base_tmpl]]
+            st.rerun()
+
+        # Add activity
+        with st.expander("➕ Add Activity"):
+            na1,na2,na3,na4 = st.columns(4)
+            with na1: new_act = st.text_input("Activity Name *", key="tmpl_act")
+            with na2: new_grp = st.selectbox("Group", TNA_ACTIVITY_GROUPS, key="tmpl_grp")
+            with na3: new_ld  = st.number_input("Lead Days", min_value=0, step=1, key="tmpl_ld")
+            with na4: new_dep = st.text_input("Depends On", key="tmpl_dep")
+            if st.button("➕ Add") and new_act:
+                sr = len(st.session_state["new_tmpl_lines"]) + 1
+                st.session_state["new_tmpl_lines"].append({
+                    "sr":sr,"activity":new_act,"group":new_grp,
+                    "lead_days":new_ld,"depends_on":new_dep
+                })
+                st.rerun()
+
+        if st.session_state["new_tmpl_lines"]:
+            df_nl = pd.DataFrame([{"Sr":a["sr"],"Activity":a["activity"],"Group":a["group"],
+                                    "Lead Days":a["lead_days"],"Depends On":a["depends_on"]}
+                                   for a in st.session_state["new_tmpl_lines"]])
+            st.dataframe(df_nl, use_container_width=True, hide_index=True)
+
+            if st.button("💾 Save Template") and new_tmpl_name:
+                SS["tna_templates"][new_tmpl_name] = st.session_state["new_tmpl_lines"].copy()
+                st.session_state["new_tmpl_lines"] = []
+                save_data()
+                st.success(f"✅ Template '{new_tmpl_name}' saved!")
+                st.rerun()
+
+
+# ── TNA REPORTS ───────────────────────────────────────────────────────────────
+elif nav_tna == "📊 TNA Reports":
+    st.markdown('<h1>TNA Reports</h1>', unsafe_allow_html=True)
+
+    tna_list = SS.get("tna_list", {})
+    for k in tna_list: tna_list[k] = recalc_tna(tna_list[k])
+
+    rep = st.selectbox("Report select karo", [
+        "1. Buyer Wise TNA Report",
+        "2. Order Wise Progress Report",
+        "3. Department Wise Pending Report",
+        "4. Delayed Activities Report",
+        "5. Shipment Risk Report",
+        "6. Completed vs Pending Report",
+        "7. Responsible Person Wise Report",
+    ], key="tna_rep_sel")
+
+    if not tna_list:
+        st.markdown('<div class="warn-box">Koi TNA data nahi hai.</div>', unsafe_allow_html=True)
+    elif rep.startswith("1"):
+        buyer_data = {}
+        for tna_no, tna in tna_list.items():
+            b = tna.get("buyer","Unknown")
+            if b not in buyer_data: buyer_data[b] = []
+            lines = tna.get("lines",[])
+            buyer_data[b].append({
+                "TNA #":tna_no,"Style":tna.get("style_name",""),
+                "Delivery":tna.get("delivery_date",""),
+                "Progress%":int(sum(1 for ln in lines if ln["status"]=="Completed")/len(lines)*100) if lines else 0,
+                "Delayed":sum(1 for ln in lines if ln["status"]=="Delayed"),
+                "Risk":shipment_risk(tna),
+            })
+        for buyer, rows in buyer_data.items():
+            with st.expander(f"🛍️ {buyer} — {len(rows)} orders"):
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep.startswith("2"):
+        rows = []
+        for tna_no, tna in tna_list.items():
+            lines = tna.get("lines",[])
+            rows.append({
+                "TNA #":tna_no,"Style":tna.get("style_name",""),"Buyer":tna.get("buyer",""),
+                "Total":len(lines),
+                "Completed":sum(1 for ln in lines if ln["status"]=="Completed"),
+                "In Progress":sum(1 for ln in lines if ln["status"]=="In Progress"),
+                "Delayed":sum(1 for ln in lines if ln["status"]=="Delayed"),
+                "Not Started":sum(1 for ln in lines if ln["status"]=="Not Started"),
+                "Progress%":int(sum(1 for ln in lines if ln["status"]=="Completed")/len(lines)*100) if lines else 0,
+                "Delivery":tna.get("delivery_date",""), "Risk":shipment_risk(tna),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep.startswith("3"):
+        dept_rows = {}
+        for tna_no, tna in tna_list.items():
+            for ln in tna.get("lines",[]):
+                if ln["status"] not in ["Completed","Cancelled"]:
+                    g = ln["group"]
+                    if g not in dept_rows: dept_rows[g] = []
+                    dept_rows[g].append({"TNA":tna_no,"Style":tna.get("style_name",""),
+                        "Activity":ln["activity"],"Due":ln["planned_end"],"Status":ln["status"],
+                        "Responsible":ln.get("responsible","—"),"Delay":ln["delay_days"]})
+        for dept, rows in sorted(dept_rows.items()):
+            st.markdown(f"**{dept}** — {len(rows)} pending")
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep.startswith("4"):
+        rows = []
+        for tna_no, tna in tna_list.items():
+            for ln in tna.get("lines",[]):
+                if ln["status"] == "Delayed":
+                    rows.append({"TNA":tna_no,"Buyer":tna.get("buyer",""),
+                        "Style":tna.get("style_name",""),"Activity":ln["activity"],
+                        "Group":ln["group"],"Planned End":ln["planned_end"],
+                        "Delay Days":ln["delay_days"],"Responsible":ln.get("responsible","—"),
+                        "Reason":ln.get("delay_reason","—")})
+        if rows:
+            rows.sort(key=lambda x: x["Delay Days"], reverse=True)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="ok-box">Koi delayed activity nahi hai!</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("5"):
+        rows = []
+        for tna_no, tna in tna_list.items():
+            risk = shipment_risk(tna)
+            if risk != "Safe":
+                del_dt = tna.get("delivery_date","")
+                days_l = (date.fromisoformat(del_dt)-date.today()).days if del_dt else 0
+                delayed_acts = [ln["activity"] for ln in tna.get("lines",[]) if ln["status"]=="Delayed"]
+                rows.append({"TNA":tna_no,"Style":tna.get("style_name",""),
+                    "Buyer":tna.get("buyer",""),"Delivery":del_dt,
+                    "Days Left":days_l,"Risk":risk,
+                    "Delayed Activities":", ".join(delayed_acts[:3])})
+        if rows:
+            rows.sort(key=lambda x: x["Days Left"])
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="ok-box">Koi shipment risk nahi hai!</div>', unsafe_allow_html=True)
+
+    elif rep.startswith("6"):
+        total_acts = sum(len(tna.get("lines",[])) for tna in tna_list.values())
+        comp_acts  = sum(sum(1 for ln in tna.get("lines",[]) if ln["status"]=="Completed") for tna in tna_list.values())
+        pend_acts  = total_acts - comp_acts
+        st.markdown(f'''<div class="card" style="padding:20px;">
+            <div style="display:flex;gap:32px;font-size:16px;">
+                <div>Total Activities: <strong>{total_acts}</strong></div>
+                <div>Completed: <strong style="color:#059669">{comp_acts}</strong></div>
+                <div>Pending: <strong style="color:#ef4444">{pend_acts}</strong></div>
+                <div>Completion %: <strong style="color:#c8a96e">{int(comp_acts/total_acts*100) if total_acts else 0}%</strong></div>
+            </div>
+        </div>''', unsafe_allow_html=True)
+
+    elif rep.startswith("7"):
+        resp_rows = {}
+        for tna_no, tna in tna_list.items():
+            for ln in tna.get("lines",[]):
+                resp = ln.get("responsible","Unassigned") or "Unassigned"
+                if resp not in resp_rows: resp_rows[resp] = {"pending":0,"completed":0,"delayed":0}
+                if ln["status"] == "Completed": resp_rows[resp]["completed"] += 1
+                elif ln["status"] == "Delayed":  resp_rows[resp]["delayed"]   += 1
+                else:                             resp_rows[resp]["pending"]   += 1
+        rows = [{"Person":k,"Pending":v["pending"],"Completed":v["completed"],"Delayed":v["delayed"]} for k,v in resp_rows.items()]
+        if rows:
+            st.dataframe(pd.DataFrame(rows).sort_values("Delayed",ascending=False), use_container_width=True, hide_index=True)
