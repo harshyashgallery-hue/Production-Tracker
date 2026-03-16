@@ -4609,8 +4609,8 @@ elif nav_pur == "📋 Purchase Requisitions":
                         else:  # Job Work
                             st.markdown("#### 🔧 Create Job Work Order from this PR")
                             suppliers  = SS.get("suppliers",{})
-                            jw_supps   = {k:v for k,v in suppliers.items() if "Job Work" in v.get("type","")}
-                            jw_opts    = [""] + [f"{k} – {v['name']}" for k,v in jw_supps.items()]
+                            jw_supps   = suppliers  # All suppliers/vendors can be processors
+                            jw_opts    = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
                             items_data = st.session_state.get("items",{})
                             boms_data  = st.session_state.get("boms",{})
 
@@ -4635,7 +4635,7 @@ elif nav_pur == "📋 Purchase Requisitions":
                                 with jc1:
                                     st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;">OUT: {ln["material_code"]} — {ln["material_name"]}</div>', unsafe_allow_html=True)
                                     st.markdown(f'<div style="font-size:11px;color:#64748b;">Pending: {pend} {ln.get("unit","")} | IN: {in_mat} ({round(in_qty_per*pend,2)} {in_unit})</div>', unsafe_allow_html=True)
-                                with jc2: item_proc = st.selectbox("Processor", jw_opts, key=f"jw_proc_{pr_no}_{i}")
+                                with jc2: item_proc = st.selectbox("Vendor / Processor", jw_opts, key=f"jw_proc_{pr_no}_{i}")
                                 with jc3: jw_qty    = st.number_input("Qty", min_value=0.0, max_value=float(pend), value=float(pend), step=1.0, key=f"jw_qty_{pr_no}_{i}")
                                 with jc4: jw_rate   = st.number_input("Rate(₹)", min_value=0.0, step=0.5, key=f"jw_lrate_{pr_no}_{i}")
                                 st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
@@ -4935,9 +4935,8 @@ elif nav_pur == "🔧 Job Work Orders":
         jc1, jc2 = st.columns(2)
         with jc1:
             # Job work suppliers
-            jw_supps = {k:v for k,v in suppliers.items() if "Job Work" in v.get("type","")}
-            jw_supp_opts = [""] + [f"{k} – {v['name']}" for k,v in jw_supps.items()]
-            sel_processor = st.selectbox("Processor / Job Worker *", jw_supp_opts, key="jwo_proc")
+            jw_supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
+            sel_processor = st.selectbox("Vendor / Processor *", jw_supp_opts, key="jwo_proc")
             jwo_date      = st.date_input("JWO Date", value=date.today(), key="jwo_date")
             jwo_del_dt    = st.date_input("Expected Return Date", value=date.today()+timedelta(days=10), key="jwo_del")
         with jc2:
