@@ -159,10 +159,10 @@ hr { border-color: #e2e5ef !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Persistence Layer (JSON file) ─────────────────────────────────────────────
+# ─── Persistence Layer (Google Sheets) ─────────────────────────────────────────
 import os
-
-DATA_FILE = "erp_data.json"
+import gspread
+from google.oauth2.service_account import Credentials
 
 DEFAULT_DATA = {
     "items":          {},
@@ -181,42 +181,93 @@ DEFAULT_DATA = {
     "skus":           {},
 }
 
+@st.cache_resource
+def get_gsheet():
+    """Connect to Google Sheet — cached so only connects once per session"""
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds  = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        sheet  = client.open_by_key(st.secrets["SHEET_ID"])
+        return sheet
+    except Exception as e:
+        st.warning(f"Google Sheets connection failed: {e}")
+        return None
+
+def _get_or_create_ws(sheet, name):
+    """Get worksheet by name, create if not exists"""
+    try:
+        return sheet.worksheet(name)
+    except gspread.WorksheetNotFound:
+        return sheet.add_worksheet(title=name, rows=10, cols=3)
+
 def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                saved = json.load(f)
+    """Load all data from Google Sheets into session state"""
+    sheet = get_gsheet()
+    if sheet is None:
+        # Fallback to defaults if sheet unavailable
+        for key, val in DEFAULT_DATA.items():
+            if key not in st.session_state:
+                st.session_state[key] = val
+        return
+
+    try:
+        ws = _get_or_create_ws(sheet, "erp_data")
+        records = ws.get_all_values()
+        if records and len(records) > 0:
+            # Data stored as: row[0]=key, row[1]=json_value
+            saved = {}
+            for row in records:
+                if len(row) >= 2 and row[0]:
+                    try:
+                        saved[row[0]] = json.loads(row[1])
+                    except Exception:
+                        pass
             for key, default_val in DEFAULT_DATA.items():
                 if key not in st.session_state:
                     st.session_state[key] = saved.get(key, default_val)
-        except Exception:
+            # Load pkg_lines
+            for k, v in saved.items():
+                if k.startswith("pkg_lines_") and k not in st.session_state:
+                    st.session_state[k] = v
+        else:
             for key, val in DEFAULT_DATA.items():
                 if key not in st.session_state:
                     st.session_state[key] = val
-    else:
+    except Exception as e:
         for key, val in DEFAULT_DATA.items():
             if key not in st.session_state:
                 st.session_state[key] = val
 
 def save_data():
-    to_save = {key: st.session_state.get(key, DEFAULT_DATA.get(key)) for key in DEFAULT_DATA}
-    # Also save pkg_lines_* keys for buyer packaging
-    pkg_lines = {k: v for k, v in st.session_state.items() if k.startswith("pkg_lines_")}
-    to_save["_pkg_lines"] = pkg_lines
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(to_save, f, ensure_ascii=False, indent=2, default=str)
+    """Save all data to Google Sheets"""
+    sheet = get_gsheet()
+    if sheet is None:
+        return
+
+    try:
+        ws = _get_or_create_ws(sheet, "erp_data")
+        # Build data dict
+        to_save = {key: st.session_state.get(key, DEFAULT_DATA.get(key)) for key in DEFAULT_DATA}
+        pkg_lines = {k: v for k, v in st.session_state.items() if k.startswith("pkg_lines_")}
+        to_save.update(pkg_lines)
+
+        # Write as rows: [[key, json_value], ...]
+        rows = [["key", "value"]]  # header
+        for k, v in to_save.items():
+            rows.append([k, json.dumps(v, ensure_ascii=False, default=str)])
+
+        ws.clear()
+        ws.update(rows, value_input_option="RAW")
+    except Exception as e:
+        st.warning(f"Save failed: {e}")
 
 def load_pkg_lines():
-    """Load pkg_lines_* keys back into session state after load_data()"""
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-            for k, v in saved.get("_pkg_lines", {}).items():
-                if k not in st.session_state:
-                    st.session_state[k] = v
-        except Exception:
-            pass
+    pass  # Already handled in load_data()
 
 load_data()
 load_pkg_lines()
