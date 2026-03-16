@@ -4611,86 +4611,100 @@ elif nav_pur == "📋 Purchase Requisitions":
                             suppliers  = SS.get("suppliers",{})
                             jw_supps   = {k:v for k,v in suppliers.items() if "Job Work" in v.get("type","")}
                             jw_opts    = [""] + [f"{k} – {v['name']}" for k,v in jw_supps.items()]
-                            jc1,jc2,jc3 = st.columns(3)
-                            with jc1:
-                                inline_proc = st.selectbox("Processor *", jw_opts, key=f"inline_proc_{pr_no}")
-                            with jc2:
-                                inline_jw_del = st.date_input("Expected Return", value=date.today()+timedelta(days=10), key=f"inline_jw_del_{pr_no}")
-                            with jc3:
-                                inline_jw_rate = st.number_input("Job Work Rate (₹/unit)", min_value=0.0, step=1.0, key=f"inline_jw_rate_{pr_no}")
-
                             items_data = st.session_state.get("items",{})
                             boms_data  = st.session_state.get("boms",{})
-                            jwo_inline_lines = []
+
+                            # Common dates
+                            jd1,jd2 = st.columns(2)
+                            with jd1: inline_jw_del = st.date_input("Default Return Date", value=date.today()+timedelta(days=10), key=f"inline_jw_del_{pr_no}")
+                            with jd2: st.markdown('<div class="info-box" style="margin-top:8px;font-size:12px;">💡 Har item ke liye alag processor select karo — same processor wale ek JWO mein merge honge.</div>', unsafe_allow_html=True)
+
+                            st.markdown("**Har item ke liye processor + qty + rate bharein:**")
+                            jwo_item_configs = []
                             for i, ln in enumerate(pr.get("lines",[])):
                                 req  = ln.get("required_qty",0)
                                 done = ln.get("po_created_qty",0)
                                 pend = max(0, req - done)
                                 if pend <= 0: continue
-                                # Get input material from BOM
                                 bom_inputs = [b for b in boms_data.get(ln["material_code"],{}).get("lines",[]) if b.get("line_type") != "Process"]
-                                jl1,jl2,jl3 = st.columns([3,1,1])
-                                with jl1:
-                                    st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT: {ln["material_code"]}</strong> — {ln["material_name"]} | Pending: {pend} {ln.get("unit","")}</div>', unsafe_allow_html=True)
-                                    if bom_inputs:
-                                        in_code = bom_inputs[0].get("item_code","")
-                                        in_qty  = round(float(bom_inputs[0].get("qty",0)) * pend, 3)
-                                        st.markdown(f'<div style="font-size:12px;color:#64748b;">IN: {in_code} — {in_qty} {bom_inputs[0].get("unit","")}</div>', unsafe_allow_html=True)
-                                with jl2:
-                                    jw_qty = st.number_input("Qty", min_value=0.0, max_value=float(pend), value=float(pend), step=1.0, key=f"jw_qty_{pr_no}_{i}")
-                                with jl3:
-                                    jw_line_rate = st.number_input("Rate", min_value=0.0, step=0.5, value=float(inline_jw_rate), key=f"jw_lrate_{pr_no}_{i}")
-
                                 in_mat = bom_inputs[0].get("item_code","") if bom_inputs else ""
-                                in_qty_val = round(float(bom_inputs[0].get("qty",0)) * jw_qty, 3) if bom_inputs else 0
-                                jwo_inline_lines.append({
-                                    "output_material": ln["material_code"],
-                                    "output_name":     ln["material_name"],
-                                    "output_qty":      jw_qty,
-                                    "output_unit":     ln.get("unit",""),
-                                    "input_material":  in_mat,
-                                    "input_name":      items_data.get(in_mat,{}).get("name","") if in_mat else "",
-                                    "input_qty":       in_qty_val,
-                                    "input_unit":      bom_inputs[0].get("unit","") if bom_inputs else "",
-                                    "rate":            jw_line_rate,
-                                    "received_qty":    0.0,
-                                    "pr_line_idx":     i,
+                                in_unit = bom_inputs[0].get("unit","") if bom_inputs else ""
+                                in_qty_per = float(bom_inputs[0].get("qty",0)) if bom_inputs else 0
+
+                                jc1,jc2,jc3,jc4 = st.columns([2.5,2,1,1])
+                                with jc1:
+                                    st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;">OUT: {ln["material_code"]} — {ln["material_name"]}</div>', unsafe_allow_html=True)
+                                    st.markdown(f'<div style="font-size:11px;color:#64748b;">Pending: {pend} {ln.get("unit","")} | IN: {in_mat} ({round(in_qty_per*pend,2)} {in_unit})</div>', unsafe_allow_html=True)
+                                with jc2: item_proc = st.selectbox("Processor", jw_opts, key=f"jw_proc_{pr_no}_{i}")
+                                with jc3: jw_qty    = st.number_input("Qty", min_value=0.0, max_value=float(pend), value=float(pend), step=1.0, key=f"jw_qty_{pr_no}_{i}")
+                                with jc4: jw_rate   = st.number_input("Rate(₹)", min_value=0.0, step=0.5, key=f"jw_lrate_{pr_no}_{i}")
+                                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+                                jwo_item_configs.append({
+                                    "pr_line_idx":    i,
+                                    "output_material":ln["material_code"],
+                                    "output_name":    ln["material_name"],
+                                    "output_qty":     jw_qty,
+                                    "output_unit":    ln.get("unit",""),
+                                    "input_material": in_mat,
+                                    "input_name":     items_data.get(in_mat,{}).get("name","") if in_mat else "",
+                                    "input_qty":      round(in_qty_per * jw_qty, 3),
+                                    "input_unit":     in_unit,
+                                    "rate":           jw_rate,
+                                    "received_qty":   0.0,
+                                    "processor":      item_proc,
                                 })
 
-                            if inline_proc and jwo_inline_lines:
-                                jw_total = sum(l["output_qty"]*l["rate"] for l in jwo_inline_lines)
-                                st.markdown(f'<div class="info-box" style="text-align:right;"><strong>JW Total: ₹{jw_total:,.2f}</strong></div>', unsafe_allow_html=True)
+                            # Group by processor
+                            proc_groups = {}
+                            for cfg in jwo_item_configs:
+                                if cfg["processor"] and cfg["output_qty"] > 0:
+                                    p = cfg["processor"]
+                                    if p not in proc_groups: proc_groups[p] = []
+                                    proc_groups[p].append(cfg)
 
-                                if st.button(f"✅ Create JWO from {pr_no}", key=f"create_jwo_{pr_no}", use_container_width=False):
-                                    proc_code = inline_proc.split(" – ")[0] if " – " in inline_proc else inline_proc
-                                    jwo_no = next_jwo()
+                            if proc_groups:
+                                st.markdown("---")
+                                st.markdown("**📋 JWOs jo banenge:**")
+                                for proc, plines in proc_groups.items():
+                                    jw_tot = sum(l["output_qty"]*l["rate"] for l in plines)
+                                    pname  = proc.split(" – ",1)[1] if " – " in proc else proc
+                                    items_str = ", ".join(l["output_material"] for l in plines)
+                                    st.markdown(f'<div class="card" style="padding:8px 14px;margin:3px 0;"><strong>{pname}</strong> — {items_str} — ₹{jw_tot:,.2f}</div>', unsafe_allow_html=True)
 
-                                    # Issue input materials from stock
-                                    for jl in jwo_inline_lines:
-                                        in_c = jl.get("input_material","")
-                                        in_q = float(jl.get("input_qty",0))
-                                        if in_c and in_q > 0 and in_c in st.session_state["items"]:
-                                            cur = float(st.session_state["items"][in_c].get("stock",0))
-                                            st.session_state["items"][in_c]["stock"] = max(0, cur - in_q)
+                                if st.button(f"✅ Create JWOs from {pr_no}", key=f"create_jwo_{pr_no}", use_container_width=False):
+                                    created_jwos = []
+                                    for proc, plines in proc_groups.items():
+                                        proc_code = proc.split(" – ")[0] if " – " in proc else proc
+                                        jw_total  = sum(l["output_qty"]*l["rate"] for l in plines)
+                                        jwo_no    = next_jwo()
 
-                                    SS["jwo_list"][jwo_no] = {
-                                        "jwo_no":         jwo_no,
-                                        "jwo_date":       str(date.today()),
-                                        "processor_code": proc_code,
-                                        "processor_name": suppliers.get(proc_code,{}).get("name", proc_code),
-                                        "pr_ref":         pr_no,
-                                        "so_ref":         pr.get("so_ref",""),
-                                        "expected_date":  str(inline_jw_del),
-                                        "lines":          jwo_inline_lines,
-                                        "total":          jw_total,
-                                        "status":         "Issued to Processor",
-                                        "created_at":     datetime.now().isoformat(),
-                                    }
-                                    # Update PR line po_created_qty
-                                    for jl in jwo_inline_lines:
-                                        idx = jl["pr_line_idx"]
-                                        prev = SS["pr_list"][pr_no]["lines"][idx].get("po_created_qty",0)
-                                        SS["pr_list"][pr_no]["lines"][idx]["po_created_qty"] = prev + jl["output_qty"]
+                                        # Issue input materials from stock
+                                        for jl in plines:
+                                            in_c = jl.get("input_material","")
+                                            in_q = float(jl.get("input_qty",0))
+                                            if in_c and in_q > 0 and in_c in st.session_state["items"]:
+                                                cur = float(st.session_state["items"][in_c].get("stock",0))
+                                                st.session_state["items"][in_c]["stock"] = max(0, cur - in_q)
+
+                                        SS["jwo_list"][jwo_no] = {
+                                            "jwo_no":         jwo_no,
+                                            "jwo_date":       str(date.today()),
+                                            "processor_code": proc_code,
+                                            "processor_name": jw_supps.get(proc_code,{}).get("name", proc_code),
+                                            "pr_ref":         pr_no,
+                                            "so_ref":         pr.get("so_ref",""),
+                                            "expected_date":  str(inline_jw_del),
+                                            "lines":          plines,
+                                            "total":          jw_total,
+                                            "status":         "Issued to Processor",
+                                            "created_at":     datetime.now().isoformat(),
+                                        }
+                                        created_jwos.append(jwo_no)
+                                        for jl in plines:
+                                            idx  = jl["pr_line_idx"]
+                                            prev = SS["pr_list"][pr_no]["lines"][idx].get("po_created_qty",0)
+                                            SS["pr_list"][pr_no]["lines"][idx]["po_created_qty"] = prev + jl["output_qty"]
 
                                     all_done = all(
                                         ln.get("po_created_qty",0) >= ln.get("required_qty",0)
@@ -4698,7 +4712,7 @@ elif nav_pur == "📋 Purchase Requisitions":
                                     )
                                     SS["pr_list"][pr_no]["status"] = "JWO Created" if all_done else "Approved"
                                     save_data()
-                                    st.success(f"✅ {jwo_no} created! Input materials issued from stock.")
+                                    st.success(f"✅ {len(created_jwos)} JWO(s) created: {', '.join(created_jwos)}! Input materials issued.")
                                     st.rerun()
 
                 st.markdown('<hr style="margin:4px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
