@@ -4242,22 +4242,47 @@ elif nav_pur == "📋 Purchase Requisitions":
             if sfg_items:
                 st.markdown("#### 🔧 SFG Materials — Choose Purchase or Job Work")
                 sfg_choices = {}
+                boms_data   = st.session_state.get("boms", {})
+
                 for code, mat in sfg_items.items():
-                    c1,c2,c3 = st.columns([2,2,2])
-                    with c1: st.markdown(f'<div style="padding-top:8px;"><strong>{code}</strong> — {mat["name"]}<br><span style="font-size:12px;color:#64748b;">Required: {mat["net_req"]} {mat["unit"]}</span></div>', unsafe_allow_html=True)
-                    with c2: choice = st.radio("Action", ["Job Work", "Direct Purchase"], key=f"sfg_choice_{code}", horizontal=True)
-                    with c3:
+                    # Get input materials from BOM
+                    bom_lines = [l for l in boms_data.get(code,{}).get("lines",[]) if l.get("line_type") != "Process"]
+
+                    st.markdown(f'''<div class="card card-left" style="padding:12px 16px;margin:6px 0;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+                            <div>
+                                <div style="font-size:14px;font-weight:700;">{code} — {mat["name"]}</div>
+                                <div style="font-size:12px;color:#64748b;">Required: <strong>{mat["net_req"]} {mat["unit"]}</strong></div>
+                                {"".join([f'<span class="tag" style="margin-top:4px;">Input: {l.get("item_code","")} ({l.get("qty",0)} {l.get("unit","")})</span>' for l in bom_lines]) if bom_lines else '<span class="tag tag-red">BOM mein input material define nahi</span>'}
+                            </div>
+                        </div>
+                    </div>''', unsafe_allow_html=True)
+
+                    ac1, ac2 = st.columns([2,3])
+                    with ac1:
+                        choice = st.radio("Action *", ["Job Work", "Direct Purchase"],
+                                          key=f"sfg_choice_{code}", horizontal=True)
+                    with ac2:
                         if choice == "Job Work":
                             processors = {k:v for k,v in SS.get("suppliers",{}).items() if "Job Work" in v.get("type","")}
                             if processors:
-                                proc = st.selectbox("Processor", [""] + [f"{k} – {v['name']}" for k,v in processors.items()], key=f"sfg_proc_{code}")
+                                proc = st.selectbox("Processor / Printer",
+                                                     [""] + [f"{k} – {v['name']}" for k,v in processors.items()],
+                                                     key=f"sfg_proc_{code}")
                             else:
-                                st.caption("Add Job Work suppliers in Supplier Master")
-                        sfg_choices[code] = choice
+                                st.markdown('<div class="warn-box" style="font-size:12px;">Supplier Master mein Job Work type ka supplier add karo.</div>', unsafe_allow_html=True)
+                            if bom_lines:
+                                st.markdown('<div class="info-box" style="font-size:12px;">✅ Input materials (Grey Fabric etc.) ka Purchase PR bhi automatically ban jaayega.</div>', unsafe_allow_html=True)
+                    sfg_choices[code] = choice
+                    st.markdown("---")
 
             if st.button("✅ Generate PRs", use_container_width=False):
                 pr_lines_purchase = []
                 pr_lines_jw = {}
+                # input materials for JW items (to be purchased)
+                jw_input_lines = []
+
+                boms_data = st.session_state.get("boms", {})
 
                 # RM/Accessories → Purchase PR
                 for code, mat in rm_items.items():
@@ -4279,13 +4304,41 @@ elif nav_pur == "📋 Purchase Requisitions":
                             "so_ref": so_ref, "mrp_req": mat["total_req"],
                         })
                     else:
-                        proc_key = st.session_state.get(f"sfg_proc_{code}", "")
+                        proc_key  = st.session_state.get(f"sfg_proc_{code}", "")
                         proc_code = proc_key.split(" – ")[0] if " – " in proc_key else ""
                         pr_lines_jw[code] = {
-                            "material_code": code, "material_name": mat["name"],
-                            "required_qty": mat["net_req"], "unit": mat["unit"],
-                            "processor": proc_code, "so_ref": so_ref,
+                            "material_code":  code,
+                            "material_name":  mat["name"],
+                            "required_qty":   mat["net_req"],
+                            "unit":           mat["unit"],
+                            "processor":      proc_code,
+                            "so_ref":         so_ref,
                         }
+                        # Auto-add input materials (from BOM) to Purchase PR
+                        bom_input_lines = [l for l in boms_data.get(code,{}).get("lines",[])
+                                           if l.get("line_type") != "Process"]
+                        items_data = st.session_state.get("items", {})
+                        for bl in bom_input_lines:
+                            in_code = bl.get("item_code","")
+                            in_qty  = round(float(bl.get("qty",0)) * mat["net_req"], 3)
+                            in_item = items_data.get(in_code, {})
+                            # Only add if not already in RM list (avoid duplicate)
+                            already_in_rm = any(l["material_code"] == in_code for l in pr_lines_purchase + jw_input_lines)
+                            if in_code and in_qty > 0 and not already_in_rm:
+                                jw_input_lines.append({
+                                    "material_code":  in_code,
+                                    "material_name":  in_item.get("name", in_code),
+                                    "material_type":  in_item.get("item_type","Raw Material (RM)"),
+                                    "required_qty":   in_qty,
+                                    "received_qty":   0,
+                                    "unit":           bl.get("unit",""),
+                                    "so_ref":         so_ref,
+                                    "for_jwo":        code,
+                                    "mrp_req":        in_qty,
+                                })
+
+                # Merge jw_input_lines into purchase lines
+                pr_lines_purchase.extend(jw_input_lines)
 
                 # Create Purchase PR
                 if pr_lines_purchase:
@@ -4299,7 +4352,7 @@ elif nav_pur == "📋 Purchase Requisitions":
                         "created_from": "MRP",
                         "created_at": datetime.now().isoformat(),
                     }
-                    st.success(f"✅ Purchase PR {pr_no} created — {len(pr_lines_purchase)} items")
+                    st.success(f"✅ Purchase PR **{pr_no}** created — {len(pr_lines_purchase)} items (including Job Work input materials)")
 
                 # Create JW PRs
                 for code, jw_data in pr_lines_jw.items():
@@ -4314,7 +4367,7 @@ elif nav_pur == "📋 Purchase Requisitions":
                         "processor": jw_data.get("processor",""),
                         "created_at": datetime.now().isoformat(),
                     }
-                    st.success(f"✅ Job Work PR {pr_no} created for {jw_data['material_name']}")
+                    st.success(f"✅ Job Work PR **{pr_no}** created for {jw_data['material_name']}")
 
                 save_data()
                 st.rerun()
