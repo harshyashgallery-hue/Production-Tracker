@@ -4506,82 +4506,111 @@ elif nav_pur == "📋 Purchase Requisitions":
                         if pr.get("pr_type") == "Purchase":
                             st.markdown("#### 📦 Create Purchase Order from this PR")
                             suppliers = SS.get("suppliers",{})
-                            supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items() if "Job Work" not in v.get("type","")]
-                            ic1,ic2,ic3 = st.columns(3)
-                            with ic1:
-                                inline_supp = st.selectbox("Supplier *", supp_opts, key=f"inline_supp_{pr_no}")
-                            with ic2:
-                                inline_del  = st.date_input("Delivery Date", value=date.today()+timedelta(days=14), key=f"inline_del_{pr_no}")
-                            with ic3:
-                                inline_pay  = st.selectbox("Payment Terms", SS.get("payment_terms",[""]), key=f"inline_pay_{pr_no}")
-
-                            # Show pending lines with qty & rate input
-                            st.markdown("**Lines to PO (sirf pending qty):**")
-                            inline_lines = []
+                            # Group pending lines by material type
+                            pending_lines = []
                             for i, ln in enumerate(pr.get("lines",[])):
                                 req  = ln.get("required_qty",0)
                                 done = ln.get("po_created_qty",0)
                                 pend = max(0, req - done)
-                                if pend <= 0: continue
-                                lc1,lc2,lc3,lc4 = st.columns([3,1,1,1])
-                                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}</div>', unsafe_allow_html=True)
-                                with lc2:
-                                    po_qty = st.number_input("PO Qty", min_value=0.0, max_value=float(pend),
-                                                              value=float(pend), step=1.0, key=f"po_qty_{pr_no}_{i}")
-                                with lc3:
-                                    po_rate = st.number_input("Rate (₹)", min_value=0.0, step=0.5, key=f"po_rate_{pr_no}_{i}")
-                                with lc4:
-                                    po_gst = st.selectbox("GST%", GST_RATES, index=2, key=f"po_gst_{pr_no}_{i}")
-                                inline_lines.append({
-                                    "material_code": ln["material_code"],
-                                    "material_name": ln["material_name"],
-                                    "material_type": ln.get("material_type",""),
-                                    "required_qty":  req,
-                                    "po_qty":        po_qty,
-                                    "received_qty":  0,
-                                    "unit":          ln.get("unit",""),
-                                    "rate":          po_rate,
-                                    "gst_pct":       po_gst,
-                                    "amount":        round(po_qty * po_rate, 2),
-                                    "so_ref":        ln.get("so_ref",""),
-                                    "pr_line_idx":   i,
-                                })
+                                if pend > 0:
+                                    pending_lines.append((i, ln, pend))
 
-                            if inline_supp and inline_lines:
-                                subtotal = sum(l["amount"] for l in inline_lines)
-                                gst_amt  = sum(l["amount"]*l["gst_pct"]/100 for l in inline_lines)
-                                total    = subtotal + gst_amt
-                                st.markdown(f'<div class="info-box" style="text-align:right;">Subtotal: ₹{subtotal:,.2f} | GST: ₹{gst_amt:,.2f} | <strong>Total: ₹{total:,.2f}</strong></div>', unsafe_allow_html=True)
+                            if not pending_lines:
+                                st.markdown('<div class="ok-box">Saari lines ke liye PO ban chuka hai.</div>', unsafe_allow_html=True)
+                            else:
+                                # Get unique material types
+                                mat_types = list(dict.fromkeys(ln.get("material_type","Other") for _,ln,_ in pending_lines))
+                                supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items() if "Job Work" not in v.get("type","")]
 
-                                if st.button(f"✅ Create PO from {pr_no}", key=f"create_po_{pr_no}", use_container_width=False):
-                                    supp_code = inline_supp.split(" – ")[0] if " – " in inline_supp else inline_supp
-                                    po_no = next_po()
-                                    SS["po_list"][po_no] = {
-                                        "po_no": po_no, "po_date": str(date.today()),
-                                        "supplier_code": supp_code,
-                                        "supplier_name": SS["suppliers"].get(supp_code,{}).get("name", supp_code),
-                                        "pr_ref": pr_no, "so_ref": pr.get("so_ref",""),
-                                        "delivery_date": str(inline_del),
-                                        "payment_terms": inline_pay, "currency": "INR",
-                                        "lines": inline_lines,
-                                        "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
-                                        "status": "Draft",
-                                        "created_at": datetime.now().isoformat(),
-                                    }
-                                    # Update PR line po_created_qty
-                                    for il in inline_lines:
-                                        idx = il["pr_line_idx"]
-                                        prev = SS["pr_list"][pr_no]["lines"][idx].get("po_created_qty",0)
-                                        SS["pr_list"][pr_no]["lines"][idx]["po_created_qty"] = prev + il["po_qty"]
+                                st.markdown(f'<div class="info-box">💡 Alag suppliers ke liye alag PO banao — neeche material type wise grouped hain.</div>', unsafe_allow_html=True)
 
-                                    # Check if all lines fully covered
+                                # Common delivery & payment
+                                cd1,cd2 = st.columns(2)
+                                with cd1: inline_del = st.date_input("Delivery Date", value=date.today()+timedelta(days=14), key=f"inline_del_{pr_no}")
+                                with cd2: inline_pay = st.selectbox("Payment Terms", SS.get("payment_terms",[""]), key=f"inline_pay_{pr_no}")
+
+                                # Per material type: supplier + lines
+                                po_groups = {}  # mat_type -> {supplier, lines[]}
+
+                                for mat_type in mat_types:
+                                    type_lines = [(i,ln,pend) for i,ln,pend in pending_lines if ln.get("material_type","Other") == mat_type]
+                                    if not type_lines: continue
+
+                                    st.markdown(f"##### 📦 {mat_type}")
+                                    ts1, ts2 = st.columns([3,2])
+                                    with ts1:
+                                        t_supp = st.selectbox(f"Supplier for {mat_type} *",
+                                                               supp_opts, key=f"tsupp_{pr_no}_{mat_type}")
+                                    with ts2:
+                                        st.markdown(f'<div style="padding-top:28px;font-size:12px;color:#64748b;">{len(type_lines)} item(s)</div>', unsafe_allow_html=True)
+
+                                    t_lines = []
+                                    for i, ln, pend in type_lines:
+                                        lc1,lc2,lc3,lc4 = st.columns([3,1,1,1])
+                                        with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}<br><span style="font-size:11px;color:#94a3b8;">Pending: {pend} {ln.get("unit","")}</span></div>', unsafe_allow_html=True)
+                                        with lc2: po_qty  = st.number_input("Qty", min_value=0.0, max_value=float(pend), value=float(pend), step=1.0, key=f"po_qty_{pr_no}_{i}")
+                                        with lc3: po_rate = st.number_input("Rate(₹)", min_value=0.0, step=0.5, key=f"po_rate_{pr_no}_{i}")
+                                        with lc4: po_gst  = st.selectbox("GST%", GST_RATES, index=2, key=f"po_gst_{pr_no}_{i}")
+
+                                        t_lines.append({
+                                            "material_code": ln["material_code"],
+                                            "material_name": ln["material_name"],
+                                            "material_type": ln.get("material_type",""),
+                                            "required_qty":  ln.get("required_qty",0),
+                                            "po_qty":        po_qty,
+                                            "received_qty":  0,
+                                            "unit":          ln.get("unit",""),
+                                            "rate":          po_rate,
+                                            "gst_pct":       po_gst,
+                                            "amount":        round(po_qty * po_rate, 2),
+                                            "so_ref":        ln.get("so_ref",""),
+                                            "pr_line_idx":   i,
+                                        })
+
+                                    po_groups[mat_type] = {"supplier": t_supp, "lines": t_lines}
+                                    sub = sum(l["amount"] for l in t_lines)
+                                    gst = sum(l["amount"]*l["gst_pct"]/100 for l in t_lines)
+                                    st.markdown(f'<div style="text-align:right;font-size:12px;color:#64748b;">Subtotal: ₹{sub:,.2f} | GST: ₹{gst:,.2f} | Total: ₹{sub+gst:,.2f}</div>', unsafe_allow_html=True)
+                                    st.markdown('<hr style="margin:6px 0;">', unsafe_allow_html=True)
+
+                                if st.button(f"✅ Create POs from {pr_no}", key=f"create_po_{pr_no}", use_container_width=False):
+                                    created_pos = []
+                                    for mat_type, grp in po_groups.items():
+                                        if not grp["supplier"] or not grp["lines"]: continue
+                                        lines_with_qty = [l for l in grp["lines"] if l["po_qty"] > 0]
+                                        if not lines_with_qty: continue
+                                        supp_code = grp["supplier"].split(" – ")[0] if " – " in grp["supplier"] else grp["supplier"]
+                                        subtotal  = sum(l["amount"] for l in lines_with_qty)
+                                        gst_amt   = sum(l["amount"]*l["gst_pct"]/100 for l in lines_with_qty)
+                                        total     = subtotal + gst_amt
+                                        po_no = next_po()
+                                        SS["po_list"][po_no] = {
+                                            "po_no": po_no, "po_date": str(date.today()),
+                                            "supplier_code": supp_code,
+                                            "supplier_name": suppliers.get(supp_code,{}).get("name", supp_code),
+                                            "pr_ref": pr_no, "so_ref": pr.get("so_ref",""),
+                                            "delivery_date": str(inline_del),
+                                            "payment_terms": inline_pay, "currency": "INR",
+                                            "lines": lines_with_qty,
+                                            "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
+                                            "status": "Draft",
+                                            "created_at": datetime.now().isoformat(),
+                                        }
+                                        created_pos.append(po_no)
+                                        # Update PR line po_created_qty
+                                        for il in lines_with_qty:
+                                            idx = il["pr_line_idx"]
+                                            prev = SS["pr_list"][pr_no]["lines"][idx].get("po_created_qty",0)
+                                            SS["pr_list"][pr_no]["lines"][idx]["po_created_qty"] = prev + il["po_qty"]
+
+                                    # Update PR status
                                     all_done = all(
                                         ln.get("po_created_qty",0) >= ln.get("required_qty",0)
                                         for ln in SS["pr_list"][pr_no]["lines"]
                                     )
                                     SS["pr_list"][pr_no]["status"] = "PO Created" if all_done else "Approved"
                                     save_data()
-                                    st.success(f"✅ {po_no} created from {pr_no}!")
+                                    st.success(f"✅ {len(created_pos)} PO(s) created: {', '.join(created_pos)}")
                                     st.rerun()
 
                         else:  # Job Work
