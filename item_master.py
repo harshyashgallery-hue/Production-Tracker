@@ -2919,7 +2919,7 @@ elif nav_mrp == "📦 Material Requirements":
             st.dataframe(df_mrp, use_container_width=True, hide_index=True)
 
             # Summary KPIs
-            shortage_count = sum(1 for r in rows if r["Net Requirement"] > 0)
+            shortage_count = sum(1 for r in rows if r["Net Req (w/ Soft)"] > 0)
             ok_count = len(rows) - shortage_count
             k1, k2, k3 = st.columns(3)
             with k1: st.markdown(f'<div class="metric-box red"><div class="metric-value">{shortage_count}</div><div class="metric-label">Shortage Materials</div></div>', unsafe_allow_html=True)
