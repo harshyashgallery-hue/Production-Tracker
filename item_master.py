@@ -2558,13 +2558,15 @@ def calculate_mrp(selected_so_nos):
 
     def explode_bom(item_code, qty, so_no, sku, buyer, depth=0):
         """Recursively explode BOM — multi-level support"""
-        if depth > 5:
+        if depth > 10:
             return  # prevent infinite loop
         lines = get_bom_lines(item_code)
         if not lines:
-            # Leaf node — this IS the raw material
             return
         for line in lines:
+            # Only process Material lines (not process cost lines)
+            if line.get("line_type") == "Process":
+                continue
             comp_code = line.get("item_code", "")
             if not comp_code:
                 continue
@@ -2574,28 +2576,31 @@ def calculate_mrp(selected_so_nos):
             line_qty   = float(line.get("qty", 0))
             shrinkage  = float(line.get("shrinkage", 0)) / 100
             wastage    = float(line.get("wastage", 0)) / 100
-            # Adjusted qty per piece
-            adj_qty = line_qty * (1 + shrinkage + wastage)
-            total_qty = round(adj_qty * qty, 3)
-            unit = line.get("uom", comp_item.get("unit", "Pcs"))
+            adj_qty    = line_qty * (1 + shrinkage + wastage)
+            total_qty  = round(adj_qty * qty, 3)
+            unit       = line.get("unit", comp_item.get("unit", "Pcs"))
 
-            # Check if component itself has a BOM (multi-level)
-            if comp_code in boms and boms[comp_code].get("lines"):
+            # Check if this component is SFG/FG with its own BOM — recurse
+            has_sub_bom = comp_code in boms and len(boms[comp_code].get("lines", [])) > 0
+            comp_is_intermediate = comp_type in ["Semi Finished Goods (SFG)", "Finished Goods (FG)"]
+
+            if has_sub_bom and comp_is_intermediate:
+                # Go deeper — explode this component's BOM
                 explode_bom(comp_code, total_qty, so_no, sku, buyer, depth+1)
             else:
-                # Add to result
+                # Leaf node — this is raw material / accessory
                 if comp_code not in result:
                     result[comp_code] = {
                         "name": comp_name, "type": comp_type,
                         "unit": unit, "total_req": 0,
-                        "stock": float(items.get(comp_code, {}).get("stock", 0)),
-                        "reserved": float(items.get(comp_code, {}).get("reserved", 0)),
+                        "stock": float(comp_item.get("stock", 0)),
+                        "reserved": float(comp_item.get("reserved", 0)),
                         "breakdown": []
                     }
-                result[comp_code]["total_req"] += total_qty
+                result[comp_code]["total_req"] = round(result[comp_code]["total_req"] + total_qty, 3)
                 result[comp_code]["breakdown"].append({
                     "so_no": so_no, "sku": sku, "qty_req": total_qty,
-                    "source": f"BOM: {item_code}"
+                    "source": f"BOM: {item_code} (Level {depth})"
                 })
 
     def add_packaging(item_code, qty, so_no, sku, buyer):
