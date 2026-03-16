@@ -2702,16 +2702,24 @@ if nav_mrp == "🏭 MRP Dashboard":
     if open_sos:
         st.markdown("#### 📋 Open Sales Orders (MRP Eligible)")
         rows = []
+        boms_data = st.session_state.get("boms", {})
+        items_data = st.session_state.get("items", {})
         for so_no, so in open_sos.items():
             total_q = sum(l["qty"] for l in so.get("lines", []))
             prod_q  = sum(l.get("produced_qty", 0) for l in so.get("lines", []))
-            has_bom = all(
-                (items.get(l.get("sku",{})[:l.get("sku","").rfind("-")] if "-" in l.get("sku","") else l.get("sku",""), {}))
-                for l in so.get("lines", [])
-            )
+            # Check BOM availability for each line
+            bom_ok = True
+            for l in so.get("lines", []):
+                sku = l.get("sku", "")
+                parent = items_data.get(sku, {}).get("parent", "")
+                bom_item = parent if parent and parent in boms_data else sku
+                if bom_item not in boms_data:
+                    bom_ok = False
+                    break
             rows.append({
                 "SO #": so_no, "Buyer": so.get("buyer",""), "Delivery": so.get("delivery_date",""),
                 "Total Qty": total_q, "Produced": prod_q, "Pending": total_q - prod_q,
+                "BOM Ready": "✅" if bom_ok else "⚠️ Missing",
                 "Status": so.get("status",""), "Lines": len(so.get("lines",[]))
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
