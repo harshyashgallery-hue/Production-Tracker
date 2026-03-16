@@ -2335,7 +2335,7 @@ elif nav_so == "📈 SO Reports":
 elif nav_so == "⚙️ SO Settings":
     st.markdown('<h1>Settings</h1>', unsafe_allow_html=True)
 
-    stab1, stab2, stab3 = st.tabs(["👤 Buyers", "🏭 Warehouses", "👥 Sales Teams"])
+    stab1, stab2, stab3, stab4 = st.tabs(["👤 Buyers", "🏭 Warehouses", "👥 Sales Teams", "💾 Data Backup"])
 
     with stab1:
         col1, col2 = st.columns(2)
@@ -2378,3 +2378,54 @@ elif nav_so == "⚙️ SO Settings":
         with col2:
             for t in SS["sales_teams"]:
                 st.markdown(f'<span class="tag">{t}</span>', unsafe_allow_html=True)
+
+    with stab4:
+        st.markdown("#### 💾 Data Backup & Restore")
+        st.markdown('<div class="warn-box">⚠️ Streamlit Cloud pe data restart hone pr reset ho jaata hai. <strong>Har session ke baad data export karke rakhein</strong> — aur next session mein import karein.</div>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### 📤 Export (Download Backup)")
+            # Build full backup
+            backup = {key: st.session_state.get(key, DEFAULT_DATA.get(key)) for key in DEFAULT_DATA}
+            pkg_lines = {k: v for k, v in st.session_state.items() if k.startswith("pkg_lines_")}
+            backup["_pkg_lines"] = pkg_lines
+            backup_json = json.dumps(backup, ensure_ascii=False, indent=2, default=str)
+
+            import base64
+            b64_backup = base64.b64encode(backup_json.encode()).decode()
+            today_str = datetime.now().strftime("%Y%m%d_%H%M")
+            st.markdown(f'''
+            <a href="data:application/json;base64,{b64_backup}" download="erp_backup_{today_str}.json">
+                <button style="background:#1c1c2e;color:white;border:none;padding:10px 24px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;width:100%;">
+                    ⬇️ Download Backup (erp_backup_{today_str}.json)
+                </button>
+            </a>
+            ''', unsafe_allow_html=True)
+
+            n_items = len(st.session_state.get("items", {}))
+            n_boms  = len(st.session_state.get("boms", {}))
+            n_so    = len(st.session_state.get("so_list", {}))
+            n_dem   = len(st.session_state.get("demands", {}))
+            st.markdown(f'<div class="ok-box" style="margin-top:12px;">Backup mein: <strong>{n_items}</strong> Items, <strong>{n_boms}</strong> BOMs, <strong>{n_so}</strong> SOs, <strong>{n_dem}</strong> Demands</div>', unsafe_allow_html=True)
+
+        with col2:
+            st.markdown("##### 📥 Import (Restore Backup)")
+            uploaded = st.file_uploader("Backup JSON file upload karo", type=["json"], key="backup_upload")
+            if uploaded:
+                try:
+                    restored = json.load(uploaded)
+                    st.markdown(f'<div class="info-box">File ready: {len(restored.get("items",{}))} items, {len(restored.get("so_list",{}))} SOs found.</div>', unsafe_allow_html=True)
+                    if st.button("✅ Restore Data", use_container_width=True):
+                        for key in DEFAULT_DATA:
+                            if key in restored:
+                                st.session_state[key] = restored[key]
+                        for k, v in restored.get("_pkg_lines", {}).items():
+                            st.session_state[k] = v
+                        save_data()
+                        st.success("✅ Data restore ho gaya!")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"File read error: {e}")
