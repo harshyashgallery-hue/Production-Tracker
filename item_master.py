@@ -198,6 +198,14 @@ DEFAULT_DATA = {
     "jwo_counter": 1,
     "grn_counter": 1,
     "stock_ledger": [],
+    "grey_po_tracker": {},
+    "grey_qc_list": {},
+    "grey_transfer_list": {},
+    "grey_return_list": {},
+    "grey_rework_list": {},
+    "grey_qc_counter": 1,
+    "grey_transfer_counter": 1,
+    "grey_return_counter": 1,
 }
 
 @st.cache_resource
@@ -359,6 +367,13 @@ ALL_PAGES = [
     ("PUR", "📊 Purchase Reports"),
     ("INV", "📦 Inventory"),
     ("INV", "📋 Stock Ledger"),
+    ("GRY", "🧵 Grey Dashboard"),
+    ("GRY", "🚚 Transit Tracker"),
+    ("GRY", "📍 Location Stock"),
+    ("GRY", "🔬 Grey QC"),
+    ("GRY", "↩️ Return / Rework"),
+    ("GRY", "📤 Grey Transfer"),
+    ("GRY", "📋 Grey Ledger"),
 ]
 IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
 SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
@@ -366,6 +381,7 @@ MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
 TNA_PAGES = [p for m, p in ALL_PAGES if m == "TNA"]
 PUR_PAGES = [p for m, p in ALL_PAGES if m == "PUR"]
 INV_PAGES = [p for m, p in ALL_PAGES if m == "INV"]
+GRY_PAGES = [p for m, p in ALL_PAGES if m == "GRY"]
 
 if "current_page" not in st.session_state:
     st.session_state["current_page"] = "📊 Item Master Dashboard"
@@ -417,6 +433,12 @@ with st.sidebar:
             st.session_state["current_page"] = pg
             st.rerun()
 
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">GREY FABRIC</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="GRY"]:
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
     st.markdown("---")
     _ni = len(st.session_state.get("items", {}))
     _nb = len(st.session_state.get("boms", {}))
@@ -431,6 +453,7 @@ nav_mrp = _cp if _cp in MRP_PAGES else None
 nav_tna = _cp if _cp in TNA_PAGES else None
 nav_pur = _cp if _cp in PUR_PAGES else None
 nav_inv = _cp if _cp in INV_PAGES else None
+nav_gry = _cp if _cp in GRY_PAGES else None
 
 SS = st.session_state
 
@@ -5101,6 +5124,26 @@ elif nav_pur == "📦 Purchase Orders":
                                 "created_at":datetime.now().isoformat(),
                             }
                             if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
+                            # Grey Fabric tracking
+                            for gl in st.session_state["po_lines"]:
+                                if gl.get("material_type","") == "Grey Fabric":
+                                    SS["grey_po_tracker"][po_no + "_" + gl["material_code"]] = {
+                                        "po_no": po_no, "material_code": gl["material_code"],
+                                        "material_name": gl["material_name"],
+                                        "ordered_qty": gl["po_qty"], "unit": gl.get("unit","Meter"),
+                                        "supplier": suppliers.get(supp_code,{}).get("name",supp_code),
+                                        "supplier_code": supp_code,
+                                        "delivery_date": str(po_del_dt),
+                                        "bilty_no": "", "transporter": "", "vehicle_no": "",
+                                        "dispatch_date": "", "expected_arrival": "",
+                                        "status": "PO Created",
+                                        "location": "",
+                                        "received_qty": 0, "factory_qty": 0,
+                                        "transport_qty": 0, "printer_qty": 0,
+                                        "rejected_qty": 0, "rework_qty": 0, "returned_qty": 0,
+                                        "so_ref": po_so_ref, "pr_ref": sel_pr,
+                                        "created_at": datetime.now().isoformat(),
+                                    }
                             st.session_state["po_lines"] = []; st.session_state["pr_to_po"] = ""
                             save_data(); st.success(f"✅ {po_no} saved!"); st.rerun()
 
@@ -5978,5 +6021,750 @@ elif nav_inv == "📋 Stock Ledger":
                              for k,v in mat_summary.items() if v["total_in"] > 0 or v["total_out"] > 0]
                 if sum_rows:
                     st.dataframe(pd.DataFrame(sum_rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">Filter ke hisaab se koi entry nahi mili.</div>', unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GREY FABRIC MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+GREY_STATUSES = [
+    "PO Created", "Vendor Dispatch Pending", "In Transit",
+    "At Transport Location", "Sent to Factory", "At Factory",
+    "Sent to Printer", "At Printer", "Printed Fabric Received",
+    "QC Pass", "QC Reject", "Return to Vendor", "Rework", "Closed"
+]
+
+GREY_LOCATIONS = ["In Transit", "Transport Location", "Factory / Inhouse",
+                   "At Printer", "Rejected Stock", "Return to Vendor", "Rework Stock"]
+
+def grey_status_color(status):
+    colors = {
+        "PO Created": "#64748b", "Vendor Dispatch Pending": "#8b5cf6",
+        "In Transit": "#0ea5e9", "At Transport Location": "#d97706",
+        "Sent to Factory": "#d97706", "At Factory": "#059669",
+        "Sent to Printer": "#d97706", "At Printer": "#8b5cf6",
+        "Printed Fabric Received": "#059669", "QC Pass": "#059669",
+        "QC Reject": "#ef4444", "Return to Vendor": "#ef4444",
+        "Rework": "#f59e0b", "Closed": "#475569",
+    }
+    bgs = {
+        "PO Created": "#f1f5f9", "Vendor Dispatch Pending": "#ede9fe",
+        "In Transit": "#e0f2fe", "At Transport Location": "#fef3c7",
+        "Sent to Factory": "#fef3c7", "At Factory": "#d1fae5",
+        "Sent to Printer": "#fef3c7", "At Printer": "#ede9fe",
+        "Printed Fabric Received": "#d1fae5", "QC Pass": "#d1fae5",
+        "QC Reject": "#fee2e2", "Return to Vendor": "#fee2e2",
+        "Rework": "#fef3c7", "Closed": "#f1f5f9",
+    }
+    c = colors.get(status, "#64748b"); b = bgs.get(status, "#f1f5f9")
+    return f'<span style="background:{b};color:{c};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;">{status}</span>'
+
+def add_grey_ledger(tracker_key, txn_type, qty, from_loc, to_loc, doc_no, remarks):
+    """Add entry to grey movement ledger"""
+    if "stock_ledger" not in SS: SS["stock_ledger"] = []
+    tracker = SS.get("grey_po_tracker", {}).get(tracker_key, {})
+    SS["stock_ledger"].append({
+        "date": str(date.today()),
+        "doc_no": doc_no,
+        "doc_type": f"GREY-{txn_type}",
+        "ref_no": tracker.get("po_no",""),
+        "party": tracker.get("supplier",""),
+        "material_code": tracker.get("material_code",""),
+        "material_name": tracker.get("material_name",""),
+        "txn_type": txn_type,
+        "qty": qty,
+        "unit": tracker.get("unit","Meter"),
+        "from_location": from_loc,
+        "to_location": to_loc,
+        "stock_after": float(st.session_state.get("items",{}).get(tracker.get("material_code",""),{}).get("stock",0)),
+        "remarks": remarks,
+    })
+
+
+# ── GREY DASHBOARD ────────────────────────────────────────────────────────────
+if nav_gry == "🧵 Grey Dashboard":
+    st.markdown('<h1>Grey Fabric Dashboard</h1>', unsafe_allow_html=True)
+
+    tracker = SS.get("grey_po_tracker", {})
+    items_data = st.session_state.get("items", {})
+
+    # KPIs
+    total_orders = len(set(v.get("po_no") for v in tracker.values()))
+    in_transit   = sum(1 for v in tracker.values() if v.get("status") == "In Transit")
+    at_transport = sum(v.get("transport_qty",0) for v in tracker.values())
+    at_factory   = sum(v.get("factory_qty",0) for v in tracker.values())
+    at_printer   = sum(v.get("printer_qty",0) for v in tracker.values())
+    rejected_qty = sum(v.get("rejected_qty",0) for v in tracker.values())
+
+    c1,c2,c3,c4,c5,c6 = st.columns(6)
+    for col,val,lbl,cls in [
+        (c1, total_orders,          "Grey POs",          ""),
+        (c2, in_transit,            "In Transit",         "amber" if in_transit else ""),
+        (c3, f"{at_transport:.0f}", "At Transport Loc",  "amber" if at_transport else ""),
+        (c4, f"{at_factory:.0f}",   "At Factory (mtr)",  ""),
+        (c5, f"{at_printer:.0f}",   "At Printer (mtr)",  ""),
+        (c6, f"{rejected_qty:.0f}", "Rejected (mtr)",    "red" if rejected_qty else ""),
+    ]:
+        with col:
+            st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    if not tracker:
+        st.markdown('<div class="warn-box">Koi Grey Fabric PO nahi hai. Grey Fabric item type ke saath PO banao.</div>', unsafe_allow_html=True)
+    else:
+        # Active orders summary
+        st.markdown("#### 📋 Grey Fabric PO Status")
+        rows = []
+        for key, t in tracker.items():
+            rows.append({
+                "PO #":         t.get("po_no",""),
+                "Grey Item":    t.get("material_code",""),
+                "Ordered (m)":  t.get("ordered_qty",0),
+                "Received (m)": t.get("received_qty",0),
+                "Factory (m)":  t.get("factory_qty",0),
+                "Transport(m)": t.get("transport_qty",0),
+                "Printer (m)":  t.get("printer_qty",0),
+                "Rejected(m)":  t.get("rejected_qty",0),
+                "Supplier":     t.get("supplier",""),
+                "Status":       t.get("status",""),
+                "Bilty No.":    t.get("bilty_no","—"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # Alert: Orders awaiting bilty
+        no_bilty = [t for t in tracker.values() if t.get("status") == "PO Created" and not t.get("bilty_no")]
+        if no_bilty:
+            st.markdown("#### ⚠️ Bilty Pending — Vendor ne dispatch nahi kiya")
+            for t in no_bilty:
+                st.markdown(f'<div class="warn-box" style="margin:2px 0;">{t.get("po_no")} | {t.get("material_name","")} | Supplier: {t.get("supplier","")}</div>', unsafe_allow_html=True)
+
+
+# ── TRANSIT TRACKER ───────────────────────────────────────────────────────────
+elif nav_gry == "🚚 Transit Tracker":
+    st.markdown('<h1>Grey Fabric — Transit Tracker</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Bilty number dale → Status automatically "In Transit" ho jaayega. Location updates track hote rahenge.</div>', unsafe_allow_html=True)
+
+    tracker = SS.get("grey_po_tracker", {})
+    if not tracker:
+        st.markdown('<div class="warn-box">Koi Grey Fabric PO nahi hai.</div>', unsafe_allow_html=True)
+    else:
+        # Filter
+        tf1,tf2 = st.columns(2)
+        with tf1: t_status = st.selectbox("Status Filter", ["All"] + GREY_STATUSES, key="tt_sts")
+        with tf2: t_search = st.text_input("🔍 PO # / Bilty", key="tt_srch")
+
+        for key, t in tracker.items():
+            if t_status != "All" and t.get("status") != t_status: continue
+            if t_search and t_search.lower() not in t.get("po_no","").lower() and t_search.lower() not in t.get("bilty_no","").lower(): continue
+
+            with st.expander(
+                f"{'🚚' if t.get('status')=='In Transit' else '📦'} {t.get('po_no','')} | {t.get('material_name','')} | {t.get('ordered_qty',0)} mtr | {t.get('supplier','')}",
+                expanded=(t.get("status") in ["PO Created","Vendor Dispatch Pending","In Transit","At Transport Location"])
+            ):
+                # Header
+                th1,th2,th3 = st.columns(3)
+                with th1:
+                    st.markdown(f'''<div class="card card-left">
+                        <div class="sec-label">PO Info</div>
+                        <div style="font-size:13px;">PO: <strong>{t.get("po_no","")}</strong></div>
+                        <div style="font-size:13px;">Item: <strong>{t.get("material_code","")}</strong></div>
+                        <div style="font-size:13px;">Ordered: <strong>{t.get("ordered_qty",0)} mtr</strong></div>
+                        <div style="font-size:13px;">Supplier: <strong>{t.get("supplier","")}</strong></div>
+                        <div style="font-size:13px;">SO Ref: <strong>{t.get("so_ref","—")}</strong></div>
+                    </div>''', unsafe_allow_html=True)
+                with th2:
+                    st.markdown(f'''<div class="card card-left-blue">
+                        <div class="sec-label">Transit Details</div>
+                        <div style="font-size:13px;">Bilty: <strong>{t.get("bilty_no","—")}</strong></div>
+                        <div style="font-size:13px;">Transporter: <strong>{t.get("transporter","—")}</strong></div>
+                        <div style="font-size:13px;">Vehicle: <strong>{t.get("vehicle_no","—")}</strong></div>
+                        <div style="font-size:13px;">Dispatch: <strong>{t.get("dispatch_date","—")}</strong></div>
+                        <div style="font-size:13px;">Expected: <strong>{t.get("expected_arrival","—")}</strong></div>
+                    </div>''', unsafe_allow_html=True)
+                with th3:
+                    st.markdown(f'''<div class="card card-left-green">
+                        <div class="sec-label">Stock Locations</div>
+                        <div style="font-size:12px;">Transport Loc: <strong>{t.get("transport_qty",0)} mtr</strong></div>
+                        <div style="font-size:12px;">Factory: <strong>{t.get("factory_qty",0)} mtr</strong></div>
+                        <div style="font-size:12px;">At Printer: <strong>{t.get("printer_qty",0)} mtr</strong></div>
+                        <div style="font-size:12px;">Rejected: <strong>{t.get("rejected_qty",0)} mtr</strong></div>
+                        <div style="margin-top:6px;">{grey_status_color(t.get("status",""))}</div>
+                    </div>''', unsafe_allow_html=True)
+
+                st.markdown("---")
+
+                # Update section
+                up1, up2 = st.columns(2)
+
+                with up1:
+                    st.markdown("**📋 Update Bilty / Transit Info**")
+                    new_bilty    = st.text_input("Bilty No.", value=t.get("bilty_no",""), key=f"bilty_{key}")
+                    new_trans    = st.text_input("Transporter", value=t.get("transporter",""), key=f"trans_{key}")
+                    new_vehicle  = st.text_input("Vehicle No.", value=t.get("vehicle_no",""), key=f"veh_{key}")
+                    new_dispatch = st.date_input("Dispatch Date",
+                                                  value=date.fromisoformat(t["dispatch_date"]) if t.get("dispatch_date") else date.today(),
+                                                  key=f"disp_{key}")
+                    new_eta      = st.date_input("Expected Arrival",
+                                                  value=date.fromisoformat(t["expected_arrival"]) if t.get("expected_arrival") else date.today()+timedelta(days=2),
+                                                  key=f"eta_{key}")
+
+                    if st.button("💾 Update Transit Info", key=f"upd_transit_{key}"):
+                        SS["grey_po_tracker"][key].update({
+                            "bilty_no":        new_bilty,
+                            "transporter":     new_trans,
+                            "vehicle_no":      new_vehicle,
+                            "dispatch_date":   str(new_dispatch),
+                            "expected_arrival":str(new_eta),
+                            "status":          "In Transit" if new_bilty else t.get("status","PO Created"),
+                        })
+                        if new_bilty and t.get("status") in ["PO Created","Vendor Dispatch Pending"]:
+                            add_grey_ledger(key, "IN-TRANSIT", t.get("ordered_qty",0), "Vendor", "In Transit",
+                                           f"BILTY-{new_bilty}", f"Bilty {new_bilty} | {new_trans}")
+                        save_data(); st.success("✅ Transit info updated!"); st.rerun()
+
+                with up2:
+                    st.markdown("**📍 Update Location / Status**")
+                    new_status = st.selectbox("Status", GREY_STATUSES,
+                                               index=GREY_STATUSES.index(t.get("status","PO Created")),
+                                               key=f"gry_sts_{key}")
+
+                    if new_status == "At Transport Location":
+                        recv_at_transport = st.number_input("Qty Received at Transport Location",
+                                                             min_value=0.0, max_value=float(t.get("ordered_qty",0)),
+                                                             value=float(t.get("ordered_qty",0)),
+                                                             step=0.5, key=f"recv_trans_{key}")
+                    elif new_status == "Sent to Factory":
+                        sent_to_factory = st.number_input("Qty Sent to Factory",
+                                                           min_value=0.0, max_value=float(t.get("transport_qty",0) or t.get("ordered_qty",0)),
+                                                           value=float(t.get("transport_qty",0) or t.get("ordered_qty",0)),
+                                                           step=0.5, key=f"sent_fac_{key}")
+
+                    new_remarks = st.text_input("Remarks", key=f"gry_rem_{key}")
+
+                    if st.button("📍 Update Status", key=f"upd_loc_{key}"):
+                        upd = {"status": new_status}
+                        if new_status == "At Transport Location":
+                            recv_q = st.session_state.get(f"recv_trans_{key}", t.get("ordered_qty",0))
+                            upd["transport_qty"] = recv_q
+                            add_grey_ledger(key, "RECEIVED", recv_q, "In Transit", "Transport Location",
+                                           f"RECV-{t.get('po_no')}", f"Received at transport location. {new_remarks}")
+                        elif new_status == "Sent to Factory":
+                            sent_q = st.session_state.get(f"sent_fac_{key}", t.get("transport_qty",0))
+                            upd["factory_qty"] = float(t.get("factory_qty",0)) + sent_q
+                            upd["transport_qty"] = max(0, float(t.get("transport_qty",0)) - sent_q)
+                            # Update actual item stock
+                            mat = t.get("material_code","")
+                            if mat in st.session_state["items"]:
+                                cur = float(st.session_state["items"][mat].get("stock",0))
+                                st.session_state["items"][mat]["stock"] = round(cur + sent_q, 3)
+                            add_grey_ledger(key, "IN", sent_q, "Transport Location", "Factory",
+                                           f"TRF-{t.get('po_no')}", f"Transferred to factory. {new_remarks}")
+                        SS["grey_po_tracker"][key].update(upd)
+                        save_data(); st.success(f"✅ Status updated to {new_status}!"); st.rerun()
+
+
+# ── LOCATION STOCK ────────────────────────────────────────────────────────────
+elif nav_gry == "📍 Location Stock":
+    st.markdown('<h1>Grey Fabric — Location-wise Stock</h1>', unsafe_allow_html=True)
+
+    tracker = SS.get("grey_po_tracker", {})
+    items_data = st.session_state.get("items", {})
+
+    # Aggregate by location
+    loc_data = {loc: [] for loc in GREY_LOCATIONS}
+
+    for key, t in tracker.items():
+        mat = t.get("material_code","")
+        mat_name = t.get("material_name","")
+        supplier = t.get("supplier","")
+
+        if t.get("transport_qty",0) > 0:
+            loc_data["Transport Location"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("transport_qty",0), "Supplier": supplier,
+                "Bilty": t.get("bilty_no","—"),
+            })
+        if t.get("factory_qty",0) > 0:
+            loc_data["Factory / Inhouse"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("factory_qty",0), "Supplier": supplier,
+            })
+        if t.get("printer_qty",0) > 0:
+            loc_data["At Printer"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("printer_qty",0), "Supplier": supplier,
+            })
+        if t.get("rejected_qty",0) > 0:
+            loc_data["Rejected Stock"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("rejected_qty",0), "Supplier": supplier,
+            })
+        if t.get("returned_qty",0) > 0:
+            loc_data["Return to Vendor"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("returned_qty",0), "Supplier": supplier,
+            })
+        if t.get("rework_qty",0) > 0:
+            loc_data["Rework Stock"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("rework_qty",0), "Supplier": supplier,
+            })
+        # In Transit
+        if t.get("status") == "In Transit":
+            loc_data["In Transit"].append({
+                "PO #": t.get("po_no",""), "Item": mat, "Name": mat_name,
+                "Qty (mtr)": t.get("ordered_qty",0) - t.get("received_qty",0),
+                "Supplier": supplier, "Bilty": t.get("bilty_no","—"),
+                "ETA": t.get("expected_arrival","—"),
+            })
+
+    loc_icons = {
+        "In Transit": "🚚", "Transport Location": "🏭", "Factory / Inhouse": "🏢",
+        "At Printer": "🖨️", "Rejected Stock": "❌", "Return to Vendor": "↩️", "Rework Stock": "🔄"
+    }
+    loc_colors = {
+        "In Transit": "#0ea5e9", "Transport Location": "#d97706", "Factory / Inhouse": "#059669",
+        "At Printer": "#8b5cf6", "Rejected Stock": "#ef4444", "Return to Vendor": "#ef4444", "Rework Stock": "#f59e0b"
+    }
+
+    col_pairs = [
+        ("In Transit","Transport Location"),
+        ("Factory / Inhouse","At Printer"),
+        ("Rejected Stock","Rework Stock"),
+    ]
+
+    for lc1_name, lc2_name in col_pairs:
+        col1, col2 = st.columns(2)
+        for col, loc_name in [(col1,lc1_name),(col2,lc2_name)]:
+            with col:
+                rows = loc_data.get(loc_name,[])
+                total_qty = sum(r.get("Qty (mtr)",0) for r in rows)
+                color = loc_colors.get(loc_name,"#64748b")
+                icon  = loc_icons.get(loc_name,"📦")
+                st.markdown(f'''<div style="background:#f8fafc;border:2px solid {color};border-radius:10px;padding:12px 16px;margin-bottom:12px;">
+                    <div style="font-size:13px;font-weight:700;color:{color};">{icon} {loc_name}</div>
+                    <div style="font-size:22px;font-weight:800;color:{color};">{total_qty:.1f} mtr</div>
+                    <div style="font-size:11px;color:#94a3b8;">{len(rows)} PO line(s)</div>
+                </div>''', unsafe_allow_html=True)
+                if rows:
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ── GREY QC ───────────────────────────────────────────────────────────────────
+elif nav_gry == "🔬 Grey QC":
+    st.markdown('<h1>Grey Fabric — QC</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Grey receive hone ke baad QC karo — Pass / Reject / Partial / Rework. Rejected material ke liye Return ya Rework option milega.</div>', unsafe_allow_html=True)
+
+    tracker  = SS.get("grey_po_tracker", {})
+    qc_list  = SS.get("grey_qc_list", {})
+
+    qc_tab1, qc_tab2 = st.tabs(["➕ New QC", "📋 QC History"])
+
+    with qc_tab1:
+        # Select grey PO to QC
+        qc_eligible = {k:v for k,v in tracker.items()
+                       if v.get("status") in ["At Transport Location","Sent to Factory","At Factory"]
+                       and v.get("received_qty",0) < v.get("ordered_qty",0)
+                       or v.get("transport_qty",0) > 0 or v.get("factory_qty",0) > 0}
+
+        if not qc_eligible:
+            st.markdown('<div class="warn-box">QC ke liye koi grey available nahi hai. Pehle "In Transit" se "At Transport Location" ya "At Factory" status update karo.</div>', unsafe_allow_html=True)
+        else:
+            sel_qc_key = st.selectbox("Grey PO Select *",
+                                       [""] + list(qc_eligible.keys()),
+                                       format_func=lambda x: f"{qc_eligible[x].get('po_no','')} | {qc_eligible[x].get('material_name','')} | {qc_eligible[x].get('supplier','')}" if x else "Select",
+                                       key="sel_qc_key")
+
+            if sel_qc_key:
+                t = tracker[sel_qc_key]
+                avail_for_qc = t.get("transport_qty",0) + t.get("factory_qty",0)
+
+                st.markdown(f'<div class="ok-box">PO: <strong>{t.get("po_no")}</strong> | Item: <strong>{t.get("material_code")}</strong> | Available for QC: <strong>{avail_for_qc} mtr</strong></div>', unsafe_allow_html=True)
+
+                qc1,qc2,qc3 = st.columns(3)
+                with qc1:
+                    qc_date     = st.date_input("QC Date", value=date.today(), key="qc_date")
+                    qc_by       = st.text_input("QC By *", key="qc_by", placeholder="Name of QC person")
+                    qc_recv_qty = st.number_input("Total Checked Qty (mtr)", min_value=0.0,
+                                                   max_value=float(avail_for_qc), value=float(avail_for_qc),
+                                                   step=0.5, key="qc_recv_qty")
+                    qc_from_loc = st.selectbox("From Location", ["Transport Location","Factory / Inhouse"], key="qc_from_loc")
+                with qc2:
+                    qc_pass_qty = st.number_input("✅ Passed Qty (mtr)", min_value=0.0,
+                                                   max_value=float(qc_recv_qty), value=float(qc_recv_qty),
+                                                   step=0.5, key="qc_pass")
+                    qc_rej_qty  = st.number_input("❌ Rejected Qty (mtr)", min_value=0.0,
+                                                   max_value=float(qc_recv_qty), value=0.0,
+                                                   step=0.5, key="qc_rej")
+                    qc_rework   = st.number_input("🔄 Rework Qty (mtr)", min_value=0.0,
+                                                   max_value=float(qc_recv_qty), value=0.0,
+                                                   step=0.5, key="qc_rework")
+                with qc3:
+                    qc_remarks  = st.text_area("QC Remarks", height=100, key="qc_remarks",
+                                                placeholder="Defect details, shade issues, width variation etc.")
+                    # Validation
+                    total_checked = qc_pass_qty + qc_rej_qty + qc_rework
+                    if abs(total_checked - qc_recv_qty) > 0.01:
+                        st.markdown(f'<div class="danger-box">⚠️ Pass ({qc_pass_qty}) + Reject ({qc_rej_qty}) + Rework ({qc_rework}) = {total_checked} ≠ {qc_recv_qty}</div>', unsafe_allow_html=True)
+
+                if qc_pass_qty > 0 or qc_rej_qty > 0 or qc_rework > 0:
+                    if qc_pass_qty == qc_recv_qty:
+                        qc_result = "Pass"
+                    elif qc_rej_qty == qc_recv_qty:
+                        qc_result = "Full Reject"
+                    elif qc_rework == qc_recv_qty:
+                        qc_result = "Full Rework"
+                    else:
+                        qc_result = "Partial Pass"
+                    st.markdown(f'<div class="info-box">QC Result: <strong>{qc_result}</strong></div>', unsafe_allow_html=True)
+
+                if st.button("✅ Save QC", key="save_qc") and sel_qc_key and qc_by:
+                    total_checked = qc_pass_qty + qc_rej_qty + qc_rework
+                    if abs(total_checked - qc_recv_qty) > 0.01:
+                        st.error("Pass + Reject + Rework qty = Total Checked qty honi chahiye!")
+                    else:
+                        qc_no = f"QC-{SS['grey_qc_counter']:04d}"
+                        SS["grey_qc_counter"] += 1
+                        SS["grey_qc_list"][qc_no] = {
+                            "qc_no": qc_no, "qc_date": str(qc_date), "qc_by": qc_by,
+                            "tracker_key": sel_qc_key,
+                            "po_no": t.get("po_no"), "material_code": t.get("material_code"),
+                            "material_name": t.get("material_name"),
+                            "checked_qty": qc_recv_qty, "passed_qty": qc_pass_qty,
+                            "rejected_qty": qc_rej_qty, "rework_qty": qc_rework,
+                            "from_location": qc_from_loc,
+                            "result": qc_result, "remarks": qc_remarks,
+                            "created_at": datetime.now().isoformat(),
+                        }
+                        # Update tracker
+                        SS["grey_po_tracker"][sel_qc_key]["rejected_qty"] = (
+                            float(t.get("rejected_qty",0)) + qc_rej_qty)
+                        SS["grey_po_tracker"][sel_qc_key]["rework_qty"] = (
+                            float(t.get("rework_qty",0)) + qc_rework)
+                        # Reduce from location qty
+                        if qc_from_loc == "Transport Location":
+                            SS["grey_po_tracker"][sel_qc_key]["transport_qty"] = max(0, float(t.get("transport_qty",0)) - qc_recv_qty)
+                        else:
+                            SS["grey_po_tracker"][sel_qc_key]["factory_qty"] = max(0, float(t.get("factory_qty",0)) - qc_recv_qty)
+                        # Add passed qty to factory stock
+                        if qc_pass_qty > 0:
+                            SS["grey_po_tracker"][sel_qc_key]["factory_qty"] = (
+                                float(SS["grey_po_tracker"][sel_qc_key].get("factory_qty",0)) + qc_pass_qty)
+                            mat = t.get("material_code","")
+                            if mat in st.session_state["items"]:
+                                cur = float(st.session_state["items"][mat].get("stock",0))
+                                st.session_state["items"][mat]["stock"] = round(cur + qc_pass_qty, 3)
+                        add_grey_ledger(sel_qc_key, "QC", qc_recv_qty, qc_from_loc, "After QC",
+                                        qc_no, f"QC by {qc_by}: Pass={qc_pass_qty}, Rej={qc_rej_qty}, Rework={qc_rework}")
+                        SS["grey_po_tracker"][sel_qc_key]["status"] = "QC Pass" if qc_result == "Pass" else "At Factory"
+                        save_data()
+                        st.success(f"✅ {qc_no} saved! Pass: {qc_pass_qty} mtr, Reject: {qc_rej_qty} mtr, Rework: {qc_rework} mtr")
+                        st.rerun()
+
+    with qc_tab2:
+        if not qc_list:
+            st.markdown('<div class="warn-box">Koi QC nahi hua abhi tak.</div>', unsafe_allow_html=True)
+        else:
+            rows = [{"QC #":k,"Date":v.get("qc_date",""),"PO":v.get("po_no",""),
+                     "Item":v.get("material_code",""),"Checked":v.get("checked_qty",0),
+                     "Passed":v.get("passed_qty",0),"Rejected":v.get("rejected_qty",0),
+                     "Rework":v.get("rework_qty",0),"Result":v.get("result",""),"By":v.get("qc_by","")}
+                    for k,v in qc_list.items()]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ── RETURN / REWORK ───────────────────────────────────────────────────────────
+elif nav_gry == "↩️ Return / Rework":
+    st.markdown('<h1>Grey Fabric — Return to Vendor / Rework</h1>', unsafe_allow_html=True)
+
+    tracker    = SS.get("grey_po_tracker", {})
+    return_list = SS.get("grey_return_list", {})
+
+    rt1, rt2 = st.tabs(["↩️ Return to Vendor", "🔄 Rework"])
+
+    with rt1:
+        st.markdown("#### Return to Vendor — Debit Note")
+        ret_eligible = {k:v for k,v in tracker.items() if v.get("rejected_qty",0) > 0}
+        if not ret_eligible:
+            st.markdown('<div class="warn-box">Koi rejected grey nahi hai. Pehle QC karo.</div>', unsafe_allow_html=True)
+        else:
+            rc1,rc2 = st.columns(2)
+            with rc1:
+                sel_ret = st.selectbox("Grey PO Select *", [""] + list(ret_eligible.keys()),
+                                        format_func=lambda x: f"{ret_eligible[x].get('po_no','')} | {ret_eligible[x].get('material_name','')} | Rejected: {ret_eligible[x].get('rejected_qty',0)} mtr" if x else "Select",
+                                        key="sel_ret")
+            if sel_ret:
+                t = tracker[sel_ret]
+                with rc1:
+                    ret_qty     = st.number_input("Return Qty (mtr)", min_value=0.0,
+                                                   max_value=float(t.get("rejected_qty",0)),
+                                                   value=float(t.get("rejected_qty",0)),
+                                                   step=0.5, key="ret_qty")
+                    ret_rate    = st.number_input("Rate (₹/mtr)", min_value=0.0, step=1.0, key="ret_rate")
+                    ret_challan = st.text_input("Return Challan No.", key="ret_challan")
+                    ret_date    = st.date_input("Return Date", value=date.today(), key="ret_date")
+                with rc2:
+                    ret_vehicle = st.text_input("Vehicle No.", key="ret_vehicle")
+                    ret_remarks = st.text_area("Remarks / Defect Reason", height=80, key="ret_remarks")
+                    debit_amt   = round(ret_qty * ret_rate, 2)
+                    st.markdown(f'<div class="card card-left-red" style="padding:10px 14px;"><div class="sec-label">Debit Note Amount</div><div style="font-size:22px;font-weight:800;color:#ef4444;">₹{debit_amt:,.2f}</div></div>', unsafe_allow_html=True)
+
+                if st.button("✅ Process Return + Create Debit Note", key="proc_ret"):
+                    ret_no = f"RET-{SS['grey_return_counter']:04d}"
+                    SS["grey_return_counter"] += 1
+                    SS["grey_return_list"][ret_no] = {
+                        "ret_no": ret_no, "ret_date": str(ret_date),
+                        "tracker_key": sel_ret, "po_no": t.get("po_no"),
+                        "material_code": t.get("material_code"), "material_name": t.get("material_name"),
+                        "supplier": t.get("supplier"), "return_qty": ret_qty,
+                        "rate": ret_rate, "debit_amount": debit_amt,
+                        "challan_no": ret_challan, "vehicle_no": ret_vehicle,
+                        "remarks": ret_remarks, "type": "Return to Vendor",
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    SS["grey_po_tracker"][sel_ret]["rejected_qty"] = max(0, float(t.get("rejected_qty",0)) - ret_qty)
+                    SS["grey_po_tracker"][sel_ret]["returned_qty"] = float(t.get("returned_qty",0)) + ret_qty
+                    add_grey_ledger(sel_ret, "RETURN", ret_qty, "Rejected Stock", "Return to Vendor",
+                                    ret_no, f"Return challan {ret_challan}. Debit Note: ₹{debit_amt:,.2f}")
+                    save_data()
+                    st.success(f"✅ {ret_no} created! Debit Note: ₹{debit_amt:,.2f}")
+                    st.rerun()
+
+    with rt2:
+        st.markdown("#### Rework Processing")
+        rw_eligible = {k:v for k,v in tracker.items() if v.get("rework_qty",0) > 0}
+        if not rw_eligible:
+            st.markdown('<div class="warn-box">Koi rework grey nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            rw1,rw2 = st.columns(2)
+            with rw1:
+                sel_rw = st.selectbox("Grey PO Select *", [""] + list(rw_eligible.keys()),
+                                       format_func=lambda x: f"{rw_eligible[x].get('po_no','')} | Rework: {rw_eligible[x].get('rework_qty',0)} mtr" if x else "Select",
+                                       key="sel_rw")
+            if sel_rw:
+                t = tracker[sel_rw]
+                with rw1:
+                    rw_vendor   = st.text_input("Rework Vendor", key="rw_vendor")
+                    rw_qty      = st.number_input("Rework Issue Qty", min_value=0.0,
+                                                   max_value=float(t.get("rework_qty",0)),
+                                                   value=float(t.get("rework_qty",0)), step=0.5, key="rw_qty")
+                    rw_date     = st.date_input("Issue Date", value=date.today(), key="rw_date")
+                    rw_remarks  = st.text_area("Remarks", height=60, key="rw_remarks")
+                with rw2:
+                    rw_recv_qty = st.number_input("Received Back Qty (after rework)", min_value=0.0, step=0.5, key="rw_recv")
+                    rw_recv_date = st.date_input("Receive Back Date", value=date.today()+timedelta(days=7), key="rw_recv_dt")
+
+                if st.button("✅ Save Rework", key="save_rw") and sel_rw:
+                    rw_no = f"RWK-{SS['grey_return_counter']:04d}"
+                    SS["grey_return_counter"] += 1
+                    SS["grey_return_list"][rw_no] = {
+                        "ret_no": rw_no, "ret_date": str(rw_date),
+                        "tracker_key": sel_rw, "po_no": t.get("po_no"),
+                        "material_code": t.get("material_code"), "vendor": rw_vendor,
+                        "rework_qty": rw_qty, "recv_qty": rw_recv_qty,
+                        "recv_date": str(rw_recv_date), "remarks": rw_remarks,
+                        "type": "Rework",
+                    }
+                    SS["grey_po_tracker"][sel_rw]["rework_qty"] = max(0, float(t.get("rework_qty",0)) - rw_qty)
+                    if rw_recv_qty > 0:
+                        SS["grey_po_tracker"][sel_rw]["factory_qty"] = float(t.get("factory_qty",0)) + rw_recv_qty
+                        mat = t.get("material_code","")
+                        if mat in st.session_state["items"]:
+                            cur = float(st.session_state["items"][mat].get("stock",0))
+                            st.session_state["items"][mat]["stock"] = round(cur + rw_recv_qty, 3)
+                    add_grey_ledger(sel_rw, "REWORK", rw_qty, "Rework Stock", rw_vendor,
+                                    rw_no, f"Rework to {rw_vendor}. Received back: {rw_recv_qty} mtr")
+                    save_data()
+                    st.success(f"✅ {rw_no} saved!")
+                    st.rerun()
+
+    # Show return list
+    st.markdown("---")
+    st.markdown("#### 📋 Return / Rework History")
+    if return_list:
+        rows = [{"#":k,"Date":v.get("ret_date",""),"Type":v.get("type",""),
+                 "PO":v.get("po_no",""),"Material":v.get("material_code",""),
+                 "Qty":v.get("return_qty",v.get("rework_qty",0)),
+                 "Debit Amt":f"₹{v.get('debit_amount',0):,.2f}" if v.get("type")=="Return to Vendor" else "—"}
+                for k,v in return_list.items()]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ── GREY TRANSFER ─────────────────────────────────────────────────────────────
+elif nav_gry == "📤 Grey Transfer":
+    st.markdown('<h1>Grey Fabric — Transfer / Issue to Printer</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Transport Location ya Factory se Printer ko grey issue karo — Direct ya via Factory.</div>', unsafe_allow_html=True)
+
+    tracker   = SS.get("grey_po_tracker", {})
+    suppliers = SS.get("suppliers", {})
+    items_data = st.session_state.get("items", {})
+
+    # Eligible for transfer: has qty at transport or factory
+    trf_eligible = {k:v for k,v in tracker.items()
+                    if v.get("transport_qty",0) > 0 or v.get("factory_qty",0) > 0}
+
+    if not trf_eligible:
+        st.markdown('<div class="warn-box">Transfer ke liye koi grey available nahi hai.</div>', unsafe_allow_html=True)
+    else:
+        tr1,tr2 = st.columns(2)
+        with tr1:
+            sel_trf = st.selectbox("Grey Stock Select *", [""] + list(trf_eligible.keys()),
+                                    format_func=lambda x: f"{trf_eligible[x].get('po_no','')} | {trf_eligible[x].get('material_name','')} | Transport: {trf_eligible[x].get('transport_qty',0)} mtr | Factory: {trf_eligible[x].get('factory_qty',0)} mtr" if x else "Select",
+                                    key="sel_trf")
+        if sel_trf:
+            t = tracker[sel_trf]
+            with tr1:
+                from_loc = st.radio("From Location",
+                                     [l for l in ["Transport Location","Factory / Inhouse"]
+                                      if t.get("transport_qty" if l=="Transport Location" else "factory_qty",0) > 0],
+                                     horizontal=True, key="trf_from")
+                avail    = t.get("transport_qty",0) if from_loc == "Transport Location" else t.get("factory_qty",0)
+                trf_qty  = st.number_input(f"Issue Qty (mtr) [Available: {avail}]",
+                                            min_value=0.0, max_value=float(avail)*1.1,
+                                            value=float(avail), step=0.5, key="trf_qty")
+                trf_date = st.date_input("Issue Date", value=date.today(), key="trf_date")
+
+            with tr2:
+                to_loc = st.radio("To Location", ["Printer / Job Work Vendor","Factory / Inhouse"], horizontal=True, key="trf_to")
+                if to_loc == "Printer / Job Work Vendor":
+                    printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
+                    sel_printer  = st.selectbox("Printer / Vendor *", printer_opts, key="trf_printer")
+                    # Link to JWO
+                    jwo_list = SS.get("jwo_list",{})
+                    jwo_opts = ["None"] + [k for k,v in jwo_list.items()
+                                           if v.get("status") in ["Issued to Processor","In Process"]
+                                           and any(l.get("input_material")==t.get("material_code") for l in v.get("lines",[]))]
+                    link_jwo = st.selectbox("Link to JWO (optional)", jwo_opts, key="trf_jwo")
+                trf_challan = st.text_input("Transfer Challan No.", key="trf_challan")
+                trf_vehicle = st.text_input("Vehicle No.", key="trf_vehicle")
+                trf_remarks = st.text_area("Remarks", height=60, key="trf_remarks")
+
+            if st.button("✅ Issue / Transfer Grey", key="do_transfer") and sel_trf and trf_qty > 0:
+                trf_no = f"TRF-{SS['grey_transfer_counter']:04d}"
+                SS["grey_transfer_counter"] += 1
+
+                # Update tracker quantities
+                if from_loc == "Transport Location":
+                    SS["grey_po_tracker"][sel_trf]["transport_qty"] = max(0, float(t.get("transport_qty",0)) - trf_qty)
+                else:
+                    SS["grey_po_tracker"][sel_trf]["factory_qty"] = max(0, float(t.get("factory_qty",0)) - trf_qty)
+                    # Deduct from item stock if from factory
+                    mat = t.get("material_code","")
+                    if mat in st.session_state["items"]:
+                        cur = float(st.session_state["items"][mat].get("stock",0))
+                        st.session_state["items"][mat]["stock"] = max(0, round(cur - trf_qty, 3))
+
+                to_location_str = "At Printer"
+                if to_loc == "Printer / Job Work Vendor":
+                    SS["grey_po_tracker"][sel_trf]["printer_qty"] = float(t.get("printer_qty",0)) + trf_qty
+                    SS["grey_po_tracker"][sel_trf]["status"] = "Sent to Printer"
+                    to_location_str = sel_printer.split(" – ",1)[1] if " – " in (sel_printer or "") else "Printer"
+                else:
+                    SS["grey_po_tracker"][sel_trf]["factory_qty"] = float(SS["grey_po_tracker"][sel_trf].get("factory_qty",0)) + trf_qty
+                    to_location_str = "Factory"
+
+                SS["grey_transfer_list"][trf_no] = {
+                    "trf_no": trf_no, "trf_date": str(trf_date),
+                    "tracker_key": sel_trf, "po_no": t.get("po_no"),
+                    "material_code": t.get("material_code"), "material_name": t.get("material_name"),
+                    "from_location": from_loc, "to_location": to_loc,
+                    "printer": sel_printer if to_loc=="Printer / Job Work Vendor" else "",
+                    "qty": trf_qty, "challan_no": trf_challan, "vehicle_no": trf_vehicle,
+                    "jwo_ref": link_jwo if to_loc=="Printer / Job Work Vendor" else "",
+                    "remarks": trf_remarks, "created_at": datetime.now().isoformat(),
+                }
+
+                add_grey_ledger(sel_trf, "OUT", trf_qty, from_loc, to_location_str,
+                                trf_no, f"Transfer challan {trf_challan}. {trf_remarks}")
+                save_data()
+                st.success(f"✅ {trf_no} created! {trf_qty} mtr issued from {from_loc} to {to_location_str}")
+                st.rerun()
+
+        # Transfer history
+        trf_list = SS.get("grey_transfer_list",{})
+        if trf_list:
+            st.markdown("---")
+            st.markdown("#### 📋 Transfer History")
+            rows = [{"#":k,"Date":v.get("trf_date",""),"From":v.get("from_location",""),
+                     "To":v.get("to_location",""),"Printer":v.get("printer","—"),
+                     "Material":v.get("material_code",""),"Qty":v.get("qty",0),
+                     "Challan":v.get("challan_no","—"),"JWO":v.get("jwo_ref","—")}
+                    for k,v in trf_list.items()]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ── GREY LEDGER ───────────────────────────────────────────────────────────────
+elif nav_gry == "📋 Grey Ledger":
+    st.markdown('<h1>Grey Fabric — Movement Ledger</h1>', unsafe_allow_html=True)
+
+    tracker    = SS.get("grey_po_tracker", {})
+    stock_ledger = SS.get("stock_ledger", [])
+    items_data = st.session_state.get("items", {})
+
+    # Filter grey fabric entries from stock_ledger
+    grey_entries = [e for e in stock_ledger
+                    if items_data.get(e.get("material_code",""),{}).get("item_type","") == "Grey Fabric"
+                    or "GREY" in e.get("doc_type","").upper()
+                    or e.get("doc_type","") in ["GRN-PO","JWO-ISSUE","Adjustment"]]
+
+    gl1,gl2,gl3 = st.columns(3)
+    with gl1:
+        grey_items = {k:v for k,v in items_data.items() if v.get("item_type","") == "Grey Fabric"}
+        gl_item = st.selectbox("Grey Item", ["All"] + list(grey_items.keys()),
+                                format_func=lambda x: f"{x} – {grey_items.get(x,{}).get('name','')}" if x != "All" else "All Grey Items",
+                                key="gl_item")
+    with gl2:
+        gl_from = st.date_input("From Date", value=date.today()-timedelta(days=60), key="gl_from")
+    with gl3:
+        gl_po = st.text_input("🔍 PO # / Doc #", key="gl_po")
+
+    if not grey_entries:
+        st.markdown('<div class="warn-box">Koi Grey Fabric movement nahi hua. PO banao, receive karo, transfer karo.</div>', unsafe_allow_html=True)
+    else:
+        filtered = []
+        for e in reversed(grey_entries):
+            if gl_item != "All" and e.get("material_code","") != gl_item: continue
+            if e.get("date","") < str(gl_from): continue
+            if gl_po and gl_po.lower() not in e.get("doc_no","").lower() and gl_po.lower() not in e.get("ref_no","").lower(): continue
+            filtered.append({
+                "Date":         e.get("date",""),
+                "Doc #":        e.get("doc_no",""),
+                "Type":         e.get("doc_type",""),
+                "Grey Item":    e.get("material_code",""),
+                "IN/OUT":       e.get("txn_type",""),
+                "Qty (mtr)":    e.get("qty",0),
+                "From":         e.get("from_location",e.get("remarks","")[:30]),
+                "To":           e.get("to_location",""),
+                "Party":        e.get("party",""),
+                "Stock After":  e.get("stock_after",""),
+                "Remarks":      e.get("remarks",""),
+            })
+
+        if filtered:
+            st.dataframe(pd.DataFrame(filtered), use_container_width=True, hide_index=True)
+
+            # Per PO timeline
+            st.markdown("---")
+            st.markdown("#### 📋 PO-wise Status Summary")
+            for key, t in tracker.items():
+                if gl_item != "All" and t.get("material_code","") != gl_item: continue
+                with st.expander(f"{t.get('po_no','')} | {t.get('material_name','')} | {t.get('supplier','')}"):
+                    timeline = [
+                        ("PO Created",              t.get("ordered_qty",0),          "ordered_qty"),
+                        ("In Transit",               t.get("ordered_qty",0),          "bilty_no"),
+                        ("At Transport Location",    t.get("transport_qty",0),        "transport_qty"),
+                        ("At Factory",               t.get("factory_qty",0),          "factory_qty"),
+                        ("At Printer",               t.get("printer_qty",0),          "printer_qty"),
+                        ("Rejected",                 t.get("rejected_qty",0),         "rejected_qty"),
+                        ("Rework",                   t.get("rework_qty",0),           "rework_qty"),
+                        ("Returned to Vendor",       t.get("returned_qty",0),         "returned_qty"),
+                    ]
+                    tl_rows = [{"Stage":stage,"Qty (mtr)":qty} for stage,qty,_ in timeline if qty and qty > 0]
+                    if tl_rows:
+                        st.dataframe(pd.DataFrame(tl_rows), use_container_width=True, hide_index=True)
+                    st.markdown(f'Current Status: {grey_status_color(t.get("status",""))}', unsafe_allow_html=True)
         else:
             st.markdown('<div class="warn-box">Filter ke hisaab se koi entry nahi mili.</div>', unsafe_allow_html=True)
