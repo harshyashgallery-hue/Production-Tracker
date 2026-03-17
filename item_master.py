@@ -197,6 +197,7 @@ DEFAULT_DATA = {
     "po_counter": 1,
     "jwo_counter": 1,
     "grn_counter": 1,
+    "stock_ledger": [],
 }
 
 @st.cache_resource
@@ -356,12 +357,15 @@ ALL_PAGES = [
     ("PUR", "📥 GRN"),
     ("PUR", "👥 Supplier Master"),
     ("PUR", "📊 Purchase Reports"),
+    ("INV", "📦 Inventory"),
+    ("INV", "📋 Stock Ledger"),
 ]
 IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
 SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
 MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
 TNA_PAGES = [p for m, p in ALL_PAGES if m == "TNA"]
 PUR_PAGES = [p for m, p in ALL_PAGES if m == "PUR"]
+INV_PAGES = [p for m, p in ALL_PAGES if m == "INV"]
 
 if "current_page" not in st.session_state:
     st.session_state["current_page"] = "📊 Item Master Dashboard"
@@ -407,6 +411,12 @@ with st.sidebar:
             st.session_state["current_page"] = pg
             st.rerun()
 
+    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">INVENTORY</p>', unsafe_allow_html=True)
+    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="INV"]:
+        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            st.session_state["current_page"] = pg
+            st.rerun()
+
     st.markdown("---")
     _ni = len(st.session_state.get("items", {}))
     _nb = len(st.session_state.get("boms", {}))
@@ -420,6 +430,7 @@ nav_so  = _cp if _cp in SO_PAGES  else None
 nav_mrp = _cp if _cp in MRP_PAGES else None
 nav_tna = _cp if _cp in TNA_PAGES else None
 nav_pur = _cp if _cp in PUR_PAGES else None
+nav_inv = _cp if _cp in INV_PAGES else None
 
 SS = st.session_state
 
@@ -2470,7 +2481,7 @@ elif nav_so == "📈 SO Reports":
         else:
             st.markdown('<div class="warn-box">No pending delivery data.</div>', unsafe_allow_html=True)
 
-    elif rep.startswith("5"):
+    elif rep_num == "5":
         st.markdown("### Buyer Order Report")
         buyer_summary = {}
         for so in SS["so_list"].values():
@@ -2490,7 +2501,7 @@ elif nav_so == "📈 SO Reports":
         else:
             st.markdown('<div class="warn-box">No buyer data.</div>', unsafe_allow_html=True)
 
-    elif rep.startswith("6"):
+    elif rep_num == "6":
         st.markdown("### Source-wise Order Report")
         source_summary = {}
         for so in SS["so_list"].values():
@@ -3204,7 +3215,7 @@ elif nav_mrp == "📊 MRP Reports":
             if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             else: st.markdown('<div class="warn-box">Koi packaging item nahi mila.</div>', unsafe_allow_html=True)
 
-        elif rep.startswith("5"):
+        elif rep_num == "5":
             # Buyer-wise breakdown
             so_list_used = SS.get("mrp_so_list", [])
             buyer_data = {}
@@ -4063,7 +4074,7 @@ elif nav_tna == "📊 TNA Reports":
         else:
             st.markdown('<div class="ok-box">Koi delayed activity nahi hai!</div>', unsafe_allow_html=True)
 
-    elif rep.startswith("5"):
+    elif rep_num == "5":
         rows = []
         for tna_no, tna in tna_list.items():
             risk = shipment_risk(tna)
@@ -4081,7 +4092,7 @@ elif nav_tna == "📊 TNA Reports":
         else:
             st.markdown('<div class="ok-box">Koi shipment risk nahi hai!</div>', unsafe_allow_html=True)
 
-    elif rep.startswith("6"):
+    elif rep_num == "6":
         total_acts = sum(len(tna.get("lines",[])) for tna in tna_list.values())
         comp_acts  = sum(sum(1 for ln in tna.get("lines",[]) if ln["status"]=="Completed") for tna in tna_list.values())
         pend_acts  = total_acts - comp_acts
@@ -4094,7 +4105,7 @@ elif nav_tna == "📊 TNA Reports":
             </div>
         </div>''', unsafe_allow_html=True)
 
-    elif rep.startswith("7"):
+    elif rep_num == "7":
         resp_rows = {}
         for tna_no, tna in tna_list.items():
             for ln in tna.get("lines",[]):
@@ -5266,11 +5277,24 @@ elif nav_pur == "🔧 Job Work Orders":
             if st.button("✅ Create JWO & Issue Material", use_container_width=False):
                 proc_code = sel_processor.split(" – ")[0] if " – " in sel_processor else sel_processor
                 jwo_no    = next_jwo()
+                if "stock_ledger" not in SS: SS["stock_ledger"] = []
                 for ln in st.session_state["jwo_lines"]:
                     in_c = ln.get("input_material",""); in_q = float(ln.get("input_qty",0))
                     if in_c and in_q > 0 and in_c in st.session_state["items"]:
                         cur = float(st.session_state["items"][in_c].get("stock",0))
-                        st.session_state["items"][in_c]["stock"] = max(0, cur - in_q)
+                        new_stock = max(0, cur - in_q)
+                        st.session_state["items"][in_c]["stock"] = new_stock
+                        SS["stock_ledger"].append({
+                            "date": str(date.today()), "doc_no": jwo_no, "doc_type": "JWO-ISSUE",
+                            "ref_no": sel_jw_pr or jwo_no,
+                            "party": suppliers.get(proc_code,{}).get("name", proc_code),
+                            "material_code": in_c,
+                            "material_name": st.session_state["items"].get(in_c,{}).get("name", in_c),
+                            "txn_type": "OUT", "qty": in_q,
+                            "unit": ln.get("input_unit",""),
+                            "stock_after": new_stock,
+                            "remarks": f"Grey issued to {suppliers.get(proc_code,{}).get('name','processor')} for {ln.get('output_material','')}",
+                        })
                 SS["jwo_list"][jwo_no] = {
                     "jwo_no":jwo_no,"jwo_date":str(jwo_date),"processor_code":proc_code,
                     "processor_name":suppliers.get(proc_code,{}).get("name",proc_code),
@@ -5477,21 +5501,44 @@ elif nav_pur == "📥 GRN":
         st.markdown("---")
         if st.button("✅ Post GRN & Update Stock", use_container_width=False) and grn_lines and sel_grn_ref:
             grn_no = next_grn()
+            if "stock_ledger" not in SS: SS["stock_ledger"] = []
+
             if grn_type == "PO Receipt":
                 for ln in grn_lines:
-                    if float(ln["accepted_qty"]) > 0 and ln["material_code"] in st.session_state["items"]:
-                        cur = float(st.session_state["items"][ln["material_code"]].get("stock",0))
-                        st.session_state["items"][ln["material_code"]]["stock"] = round(cur + ln["accepted_qty"], 3)
+                    mat_code = ln["material_code"]
+                    accepted = float(ln["accepted_qty"])
+                    if accepted > 0 and mat_code in st.session_state["items"]:
+                        cur = float(st.session_state["items"][mat_code].get("stock",0))
+                        st.session_state["items"][mat_code]["stock"] = round(cur + accepted, 3)
+                        SS["stock_ledger"].append({
+                            "date": str(grn_date), "doc_no": grn_no, "doc_type": "GRN-PO",
+                            "ref_no": sel_grn_ref, "party": party_name,
+                            "material_code": mat_code, "material_name": ln["material_name"],
+                            "txn_type": "IN", "qty": accepted, "unit": ln.get("unit",""),
+                            "stock_after": round(cur + accepted, 3),
+                            "remarks": f"GRN against {sel_grn_ref}",
+                        })
                     idx = ln["po_line_idx"]
                     prev = float(SS["po_list"][sel_grn_ref]["lines"][idx].get("received_qty",0))
                     SS["po_list"][sel_grn_ref]["lines"][idx]["received_qty"] = round(prev + ln["received_qty"], 3)
                 all_recv = all(float(l.get("po_qty",0)) <= float(l.get("received_qty",0)) for l in SS["po_list"][sel_grn_ref]["lines"])
                 SS["po_list"][sel_grn_ref]["status"] = "Received" if all_recv else "Partial Received"
             else:
+                jwo_data = jwo_list.get(sel_grn_ref, {})
                 for ln in grn_lines:
-                    if float(ln["accepted_qty"]) > 0 and ln["output_material"] in st.session_state["items"]:
-                        cur = float(st.session_state["items"][ln["output_material"]].get("stock",0))
-                        st.session_state["items"][ln["output_material"]]["stock"] = round(cur + ln["accepted_qty"], 3)
+                    mat_code = ln["output_material"]
+                    accepted = float(ln["accepted_qty"])
+                    if accepted > 0 and mat_code in st.session_state["items"]:
+                        cur = float(st.session_state["items"][mat_code].get("stock",0))
+                        st.session_state["items"][mat_code]["stock"] = round(cur + accepted, 3)
+                        SS["stock_ledger"].append({
+                            "date": str(grn_date), "doc_no": grn_no, "doc_type": "GRN-JWO",
+                            "ref_no": sel_grn_ref, "party": party_name,
+                            "material_code": mat_code, "material_name": ln["output_name"],
+                            "txn_type": "IN", "qty": accepted, "unit": ln.get("unit",""),
+                            "stock_after": round(cur + accepted, 3),
+                            "remarks": f"Processed material received from {party_name}",
+                        })
                     idx = ln["jwo_line_idx"]
                     prev = float(SS["jwo_list"][sel_grn_ref]["lines"][idx].get("received_qty",0))
                     SS["jwo_list"][sel_grn_ref]["lines"][idx]["received_qty"] = round(prev + ln["received_qty"], 3)
@@ -5681,7 +5728,9 @@ elif nav_pur == "📊 Purchase Reports":
     jwo_list = SS.get("jwo_list", {})
     grn_list = SS.get("grn_list", {})
 
-    if rep.startswith("1"):
+    rep_num = rep.split(".")[0].strip()
+
+    if rep_num == "1":
         rows = [{"PR #":k,"Type":v.get("pr_type",""),"SO":v.get("so_ref",""),
                  "Items":len(v.get("lines",[])),"Req Date":v.get("required_date",""),
                  "Status":v.get("status",""),"Source":v.get("created_from","")}
@@ -5689,7 +5738,7 @@ elif nav_pur == "📊 Purchase Reports":
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.info("Koi PR nahi.")
 
-    elif rep.startswith("2"):
+    elif rep_num == "2":
         rows = [{"PO #":k,"Supplier":v.get("supplier_name",""),"SO":v.get("so_ref",""),
                  "Total":f"₹{v.get('total',0):,.0f}","Delivery":v.get("delivery_date",""),
                  "Status":v.get("status","")}
@@ -5697,7 +5746,7 @@ elif nav_pur == "📊 Purchase Reports":
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.info("Koi PO nahi.")
 
-    elif rep.startswith("3"):
+    elif rep_num == "3":
         rows = [{"JWO #":k,"Processor":v.get("processor_name",""),"SO":v.get("so_ref",""),
                  "Total":f"₹{v.get('total',0):,.0f}","Expected":v.get("expected_date",""),
                  "Status":v.get("status","")}
@@ -5705,7 +5754,7 @@ elif nav_pur == "📊 Purchase Reports":
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.info("Koi JWO nahi.")
 
-    elif rep.startswith("4"):
+    elif rep_num == "4":
         sup_summary = {}
         for po_no, po in po_list.items():
             s = po.get("supplier_name","Unknown")
@@ -5717,7 +5766,7 @@ elif nav_pur == "📊 Purchase Reports":
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.info("Koi data nahi.")
 
-    elif rep.startswith("5"):
+    elif rep_num == "5":
         mat_summary = {}
         for po in po_list.values():
             for ln in po.get("lines",[]):
@@ -5730,7 +5779,7 @@ elif nav_pur == "📊 Purchase Reports":
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.info("Koi data nahi.")
 
-    elif rep.startswith("6"):
+    elif rep_num == "6":
         rows = []
         for po_no, po in po_list.items():
             if po.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]:
@@ -5753,9 +5802,181 @@ elif nav_pur == "📊 Purchase Reports":
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.markdown('<div class="ok-box">Koi pending receipt nahi!</div>', unsafe_allow_html=True)
 
-    elif rep.startswith("7"):
+    elif rep_num == "7":
         rows = [{"GRN #":k,"Date":v.get("grn_date",""),"Type":v.get("grn_type",""),
                  "Ref":v.get("ref_no",""),"Items":len(v.get("lines",[])),"Status":v.get("status","")}
                 for k,v in grn_list.items()]
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else: st.info("Koi GRN nahi.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INVENTORY MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if nav_inv == "📦 Inventory":
+    st.markdown('<h1>Inventory — Current Stock</h1>', unsafe_allow_html=True)
+
+    items_data = st.session_state.get("items", {})
+
+    # KPIs
+    total_items = len(items_data)
+    zero_stock  = sum(1 for v in items_data.values() if float(v.get("stock",0)) == 0)
+    low_stock   = sum(1 for v in items_data.values() if 0 < float(v.get("stock",0)) < 10)
+    total_value = sum(float(v.get("stock",0)) * float(v.get("price",0)) for v in items_data.values())
+
+    c1,c2,c3,c4 = st.columns(4)
+    for col,val,lbl,cls in [
+        (c1, total_items, "Total Items",   ""),
+        (c2, zero_stock,  "Zero Stock",    "red" if zero_stock else ""),
+        (c3, low_stock,   "Low Stock",     "amber" if low_stock else ""),
+        (c4, f"₹{total_value:,.0f}", "Inventory Value", ""),
+    ]:
+        with col:
+            st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Filters
+    if1,if2,if3 = st.columns(3)
+    with if1: if_type   = st.selectbox("Item Type", ["All","Finished Goods (FG)","Semi Finished Goods (SFG)","Raw Material (RM)","Accessories","Packing Materials"], key="inv_type")
+    with if2: if_stock  = st.selectbox("Stock Filter", ["All","Zero Stock","Low Stock (<10)","In Stock"], key="inv_stk")
+    with if3: if_search = st.text_input("🔍 Search", key="inv_srch")
+
+    rows = []
+    for code, item in items_data.items():
+        if if_type  != "All" and item.get("item_type","") != if_type: continue
+        if if_search and if_search.lower() not in code.lower() and if_search.lower() not in item.get("name","").lower(): continue
+        stock    = float(item.get("stock",0))
+        reserved = float(item.get("reserved",0))
+        soft_res = sum(
+            qty for so_data in SS.get("soft_reservations",{}).get(code,{}).values()
+            for qty in so_data.values()
+        )
+        available = max(0, stock - reserved)
+        if if_stock == "Zero Stock"     and stock != 0: continue
+        if if_stock == "Low Stock (<10)" and not (0 < stock < 10): continue
+        if if_stock == "In Stock"       and stock <= 0: continue
+        rows.append({
+            "Item Code":     code,
+            "Item Name":     item.get("name",""),
+            "Type":          item.get("item_type",""),
+            "Unit":          item.get("unit",""),
+            "Stock":         stock,
+            "Hard Reserved": reserved,
+            "Soft Reserved": soft_res,
+            "Available":     available,
+            "Value (₹)":     round(stock * float(item.get("price",0)), 2),
+        })
+
+    if rows:
+        df_inv = pd.DataFrame(rows).sort_values("Type")
+        st.dataframe(df_inv, use_container_width=True, hide_index=True)
+
+        # Manual stock adjustment
+        st.markdown("---")
+        st.markdown("#### ✏️ Manual Stock Adjustment")
+        st.markdown('<div class="warn-box">⚠️ Direct stock adjustment — use only for opening stock, physical count correction etc.</div>', unsafe_allow_html=True)
+        adj1,adj2,adj3,adj4 = st.columns([2,1,1,1])
+        with adj1:
+            adj_item = st.selectbox("Item *", [""] + list(items_data.keys()),
+                                     format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
+                                     key="adj_item")
+        with adj2:
+            adj_type = st.radio("Type", ["Add","Reduce"], horizontal=True, key="adj_type")
+        with adj3:
+            adj_qty  = st.number_input("Qty *", min_value=0.0, step=1.0, key="adj_qty")
+        with adj4:
+            adj_rem  = st.text_input("Reason *", key="adj_rem", placeholder="e.g. Opening stock, Physical count")
+
+        if st.button("💾 Adjust Stock", key="adj_btn") and adj_item and adj_qty > 0 and adj_rem:
+            cur = float(st.session_state["items"][adj_item].get("stock",0))
+            new_stk = round(cur + adj_qty, 3) if adj_type == "Add" else round(max(0, cur - adj_qty), 3)
+            st.session_state["items"][adj_item]["stock"] = new_stk
+            if "stock_ledger" not in SS: SS["stock_ledger"] = []
+            SS["stock_ledger"].append({
+                "date": str(date.today()),
+                "doc_no": f"ADJ-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "doc_type": "Adjustment",
+                "ref_no": "", "party": "",
+                "material_code": adj_item,
+                "material_name": items_data.get(adj_item,{}).get("name",""),
+                "txn_type": "IN" if adj_type == "Add" else "OUT",
+                "qty": adj_qty, "unit": items_data.get(adj_item,{}).get("unit",""),
+                "stock_after": new_stk,
+                "remarks": adj_rem,
+            })
+            save_data()
+            st.success(f"✅ Stock adjusted: {adj_item} → {new_stk}")
+            st.rerun()
+    else:
+        st.markdown('<div class="warn-box">Koi items nahi mili filter ke hisaab se.</div>', unsafe_allow_html=True)
+
+
+elif nav_inv == "📋 Stock Ledger":
+    st.markdown('<h1>Stock Ledger</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Har material ka IN/OUT movement — GRN, JWO Issue, Manual Adjustment sab yahan dikhega.</div>', unsafe_allow_html=True)
+
+    ledger = SS.get("stock_ledger", [])
+    items_data = st.session_state.get("items", {})
+
+    sf1,sf2,sf3,sf4 = st.columns(4)
+    with sf1:
+        sl_item = st.selectbox("Material", ["All"] + list(items_data.keys()),
+                                format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x != "All" else "All Materials",
+                                key="sl_item")
+    with sf2:
+        sl_type = st.selectbox("Transaction", ["All","IN","OUT"], key="sl_type")
+    with sf3:
+        sl_doc  = st.selectbox("Doc Type", ["All","GRN-PO","GRN-JWO","JWO-ISSUE","Adjustment"], key="sl_doc")
+    with sf4:
+        sl_date_from = st.date_input("From", value=date.today()-timedelta(days=30), key="sl_from")
+
+    if not ledger:
+        st.markdown('<div class="warn-box">Koi stock movement nahi hua abhi tak. GRN post karo ya JWO issue karo.</div>', unsafe_allow_html=True)
+    else:
+        filtered = []
+        for entry in reversed(ledger):
+            if sl_item != "All" and entry.get("material_code","") != sl_item: continue
+            if sl_type != "All" and entry.get("txn_type","") != sl_type: continue
+            if sl_doc  != "All" and entry.get("doc_type","") != sl_doc: continue
+            if entry.get("date","") < str(sl_date_from): continue
+            filtered.append({
+                "Date":          entry.get("date",""),
+                "Doc #":         entry.get("doc_no",""),
+                "Type":          entry.get("doc_type",""),
+                "Ref":           entry.get("ref_no",""),
+                "Party":         entry.get("party",""),
+                "Material":      f"{entry.get('material_code','')} – {entry.get('material_name','')}",
+                "IN/OUT":        entry.get("txn_type",""),
+                "Qty":           entry.get("qty",0),
+                "Unit":          entry.get("unit",""),
+                "Stock After":   entry.get("stock_after",0),
+                "Remarks":       entry.get("remarks",""),
+            })
+
+        if filtered:
+            df_led = pd.DataFrame(filtered)
+            st.dataframe(df_led, use_container_width=True, hide_index=True)
+
+            # Summary per material
+            if sl_item == "All":
+                st.markdown("---")
+                st.markdown("#### 📊 Movement Summary")
+                mat_summary = {}
+                for entry in ledger:
+                    c = entry.get("material_code","")
+                    if c not in mat_summary:
+                        mat_summary[c] = {"name": entry.get("material_name",""), "total_in":0, "total_out":0}
+                    if entry.get("txn_type") == "IN":  mat_summary[c]["total_in"]  += entry.get("qty",0)
+                    if entry.get("txn_type") == "OUT": mat_summary[c]["total_out"] += entry.get("qty",0)
+
+                sum_rows = [{"Material":k,"Name":v["name"],
+                              "Total IN":v["total_in"],"Total OUT":v["total_out"],
+                              "Net":round(v["total_in"]-v["total_out"],3),
+                              "Current Stock":float(items_data.get(k,{}).get("stock",0))}
+                             for k,v in mat_summary.items() if v["total_in"] > 0 or v["total_out"] > 0]
+                if sum_rows:
+                    st.dataframe(pd.DataFrame(sum_rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="warn-box">Filter ke hisaab se koi entry nahi mili.</div>', unsafe_allow_html=True)
