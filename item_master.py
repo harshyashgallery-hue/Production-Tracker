@@ -4148,6 +4148,267 @@ def pur_badge(status):
 
 
 # ── PURCHASE DASHBOARD ────────────────────────────────────────────────────────
+
+# ── PRINT HELPER ──────────────────────────────────────────────────────────────
+def make_print_html(doc_type, doc_no, data):
+    """Generate professional print HTML for PO / JWO / GRN"""
+    company = "Garment ERP"
+    today   = str(date.today())
+    css = """
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family: Arial, sans-serif; font-size: 12px; }
+        body { padding: 20px; color: #1a1a1a; }
+        .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #1a1a1a; padding-bottom:12px; margin-bottom:16px; }
+        .company-name { font-size:22px; font-weight:800; color:#1a1a1a; }
+        .doc-title { font-size:18px; font-weight:700; color:#333; text-align:right; }
+        .doc-no { font-size:14px; color:#666; }
+        .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+        .info-box { border:1px solid #ddd; border-radius:6px; padding:10px 14px; }
+        .info-box .label { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:1px; margin-bottom:2px; }
+        .info-box .value { font-size:13px; font-weight:600; }
+        .info-row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #f0f0f0; }
+        .info-row .k { color:#555; }
+        .info-row .v { font-weight:600; }
+        table { width:100%; border-collapse:collapse; margin:16px 0; }
+        th { background:#1a1a1a; color:#fff; padding:8px 10px; text-align:left; font-size:11px; }
+        td { padding:7px 10px; border-bottom:1px solid #e5e5e5; vertical-align:top; }
+        tr:nth-child(even) td { background:#f9f9f9; }
+        .totals { text-align:right; margin-top:8px; }
+        .totals table { width:300px; margin-left:auto; }
+        .totals td { border:none; padding:4px 8px; }
+        .grand-total td { font-size:14px; font-weight:800; border-top:2px solid #1a1a1a !important; }
+        .footer { margin-top:32px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; }
+        .sign-box { text-align:center; }
+        .sign-line { border-top:1px solid #1a1a1a; padding-top:6px; margin-top:40px; font-size:11px; color:#555; }
+        .badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:10px; font-weight:700; }
+        .badge-grey { background:#f1f5f9; color:#475569; }
+        .badge-green { background:#d1fae5; color:#059669; }
+        .highlight-row td { background:#fef9e7 !important; font-weight:600; }
+        @media print { body { padding:10px; } }
+    </style>
+    """
+
+    if doc_type == "PO":
+        supplier = data.get("supplier_name","—")
+        supplier_code = data.get("supplier_code","—")
+        lines = data.get("lines",[])
+        rows = ""
+        for i,ln in enumerate(lines,1):
+            rows += f"""<tr>
+                <td>{i}</td>
+                <td><strong>{ln.get('material_code','')}</strong><br>{ln.get('material_name','')}</td>
+                <td>{ln.get('material_type','')}</td>
+                <td style="text-align:right;">{ln.get('po_qty',0)}</td>
+                <td>{ln.get('unit','')}</td>
+                <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                <td style="text-align:right;">{ln.get('gst_pct',0)}%</td>
+                <td style="text-align:right;">₹{ln.get('amount',0):,.2f}</td>
+            </tr>"""
+        subtotal = data.get('subtotal',0)
+        gst_amt  = data.get('gst_amount',0)
+        total    = data.get('total',0)
+        html = f"""<!DOCTYPE html><html><head><title>{doc_no}</title>{css}</head><body>
+        <div class="header">
+            <div><div class="company-name">{company}</div><div style="font-size:12px;color:#666;">Purchase Department</div></div>
+            <div style="text-align:right;"><div class="doc-title">PURCHASE ORDER</div><div class="doc-no">{doc_no}</div><div class="doc-no">Date: {data.get('po_date','')}</div></div>
+        </div>
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="label">Supplier / Vendor</div>
+                <div class="value" style="font-size:15px;">{supplier}</div>
+                <div class="info-row"><span class="k">Code</span><span class="v">{supplier_code}</span></div>
+                <div class="info-row"><span class="k">Payment Terms</span><span class="v">{data.get('payment_terms','—')}</span></div>
+                <div class="info-row"><span class="k">Currency</span><span class="v">{data.get('currency','INR')}</span></div>
+            </div>
+            <div class="info-box">
+                <div class="label">Order Details</div>
+                <div class="info-row"><span class="k">PO Number</span><span class="v">{doc_no}</span></div>
+                <div class="info-row"><span class="k">PO Date</span><span class="v">{data.get('po_date','')}</span></div>
+                <div class="info-row"><span class="k">Delivery Date</span><span class="v">{data.get('delivery_date','')}</span></div>
+                <div class="info-row"><span class="k">PR Reference</span><span class="v">{data.get('pr_ref','—')}</span></div>
+                <div class="info-row"><span class="k">SO Reference</span><span class="v">{data.get('so_ref','—')}</span></div>
+            </div>
+        </div>
+        <table>
+            <thead><tr><th>#</th><th>Material</th><th>Type</th><th>Qty</th><th>Unit</th><th>Rate</th><th>GST%</th><th>Amount</th></tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+        <div class="totals"><table>
+            <tr><td>Subtotal</td><td>₹{subtotal:,.2f}</td></tr>
+            <tr><td>GST Amount</td><td>₹{gst_amt:,.2f}</td></tr>
+            <tr class="grand-total"><td><strong>TOTAL</strong></td><td><strong>₹{total:,.2f}</strong></td></tr>
+        </table></div>
+        {"<div class='info-box' style='margin-top:12px;'><strong>Remarks:</strong> " + data.get('remarks','') + "</div>" if data.get('remarks') else ""}
+        <div class="footer">
+            <div class="sign-box"><div class="sign-line">Prepared By</div></div>
+            <div class="sign-box"><div class="sign-line">Approved By</div></div>
+            <div class="sign-box"><div class="sign-line">Supplier Acknowledgement</div></div>
+        </div>
+        </body></html>"""
+
+    elif doc_type == "JWO":
+        processor = data.get("processor_name","—")
+        lines = data.get("lines",[])
+        out_rows = ""
+        in_rows  = ""
+        for i,ln in enumerate(lines,1):
+            out_rows += f"""<tr>
+                <td>{i}</td>
+                <td><strong>{ln.get('output_material','')}</strong><br>{ln.get('output_name','')}</td>
+                <td style="text-align:right;">{ln.get('output_qty',0)}</td>
+                <td>{ln.get('output_unit','')}</td>
+                <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                <td style="text-align:right;">₹{ln.get('output_qty',0)*ln.get('rate',0):,.2f}</td>
+            </tr>"""
+            if ln.get("input_material"):
+                in_rows += f"""<tr class="highlight-row">
+                    <td>{i}</td>
+                    <td><strong>{ln.get('input_material','')}</strong><br>{ln.get('input_name','')}</td>
+                    <td style="text-align:right;">{ln.get('input_qty',0)}</td>
+                    <td>{ln.get('input_unit','')}</td>
+                    <td>For: {ln.get('output_material','')}</td>
+                    <td>Issue against JWO</td>
+                </tr>"""
+        total = data.get("total",0)
+        html = f"""<!DOCTYPE html><html><head><title>{doc_no}</title>{css}</head><body>
+        <div class="header">
+            <div><div class="company-name">{company}</div><div style="font-size:12px;color:#666;">Job Work Department</div></div>
+            <div style="text-align:right;"><div class="doc-title">JOB WORK ORDER</div><div class="doc-no">{doc_no}</div><div class="doc-no">Date: {data.get('jwo_date','')}</div></div>
+        </div>
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="label">Processor / Vendor</div>
+                <div class="value" style="font-size:15px;">{processor}</div>
+                <div class="info-row"><span class="k">Processor Code</span><span class="v">{data.get('processor_code','—')}</span></div>
+                <div class="info-row"><span class="k">Expected Return</span><span class="v">{data.get('expected_date','—')}</span></div>
+            </div>
+            <div class="info-box">
+                <div class="label">Order Details</div>
+                <div class="info-row"><span class="k">JWO Number</span><span class="v">{doc_no}</span></div>
+                <div class="info-row"><span class="k">JWO Date</span><span class="v">{data.get('jwo_date','')}</span></div>
+                <div class="info-row"><span class="k">PR Reference</span><span class="v">{data.get('pr_ref','—')}</span></div>
+                <div class="info-row"><span class="k">SO Reference</span><span class="v">{data.get('so_ref','—')}</span></div>
+                <div class="info-row"><span class="k">Status</span><span class="v">{data.get('status','')}</span></div>
+            </div>
+        </div>
+        <h3 style="margin:12px 0 6px;">📤 Material to be Issued (Grey / Input)</h3>
+        <table>
+            <thead><tr><th>#</th><th>Material (Input)</th><th>Issue Qty</th><th>Unit</th><th>For Output</th><th>Remarks</th></tr></thead>
+            <tbody>{in_rows if in_rows else '<tr><td colspan="6" style="text-align:center;color:#888;">No input material defined</td></tr>'}</tbody>
+        </table>
+        <h3 style="margin:12px 0 6px;">📥 Expected Output (Processed Material)</h3>
+        <table>
+            <thead><tr><th>#</th><th>Output Material</th><th>Expected Qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th></tr></thead>
+            <tbody>{out_rows}</tbody>
+        </table>
+        <div class="totals"><table>
+            <tr class="grand-total"><td><strong>JOB WORK TOTAL</strong></td><td><strong>₹{total:,.2f}</strong></td></tr>
+        </table></div>
+        {"<div class='info-box' style='margin-top:12px;'><strong>Remarks:</strong> " + data.get('remarks','') + "</div>" if data.get('remarks') else ""}
+        <div class="footer">
+            <div class="sign-box"><div class="sign-line">Issued By</div></div>
+            <div class="sign-box"><div class="sign-line">Store Manager</div></div>
+            <div class="sign-box"><div class="sign-line">Processor Acknowledgement</div></div>
+        </div>
+        </body></html>"""
+
+    elif doc_type == "GRN":
+        lines = data.get("lines",[])
+        grn_type = data.get("grn_type","")
+        rows = ""
+        for i,ln in enumerate(lines,1):
+            if grn_type == "PO Receipt":
+                rows += f"""<tr>
+                    <td>{i}</td>
+                    <td><strong>{ln.get('material_code','')}</strong><br>{ln.get('material_name','')}</td>
+                    <td>{ln.get('material_type','')}</td>
+                    <td style="text-align:right;">{ln.get('po_qty',0)}</td>
+                    <td style="text-align:right;"><strong>{ln.get('received_qty',0)}</strong></td>
+                    <td style="text-align:right;">{ln.get('accepted_qty',0)}</td>
+                    <td style="text-align:right;color:#ef4444;">{ln.get('rejected_qty',0)}</td>
+                    <td>{ln.get('unit','')}</td>
+                    <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                    <td style="text-align:right;">₹{ln.get('amount',0):,.2f}</td>
+                    <td><span class="badge {'badge-green' if ln.get('qc_status')=='Pass' else 'badge-grey'}">{ln.get('qc_status','')}</span></td>
+                </tr>"""
+                thead = "<tr><th>#</th><th>Material</th><th>Type</th><th>PO Qty</th><th>Recv Qty</th><th>Accepted</th><th>Rejected</th><th>Unit</th><th>Rate</th><th>Amount</th><th>QC</th></tr>"
+            else:
+                rows += f"""<tr>
+                    <td>{i}</td>
+                    <td><strong>{ln.get('output_material','')}</strong><br>{ln.get('output_name','')}</td>
+                    <td style="color:#64748b;">{ln.get('input_material','')} — {ln.get('input_qty','')} {ln.get('input_unit','')}</td>
+                    <td style="text-align:right;">{ln.get('jwo_qty',0)}</td>
+                    <td style="text-align:right;"><strong>{ln.get('received_qty',0)}</strong></td>
+                    <td style="text-align:right;">{ln.get('accepted_qty',0)}</td>
+                    <td style="text-align:right;color:#ef4444;">{ln.get('rejected_qty',0)}</td>
+                    <td>{ln.get('unit','')}</td>
+                    <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                    <td style="text-align:right;">₹{ln.get('amount',0):,.2f}</td>
+                    <td><span class="badge {'badge-green' if ln.get('qc_status')=='Pass' else 'badge-grey'}">{ln.get('qc_status','')}</span></td>
+                </tr>"""
+                thead = "<tr><th>#</th><th>Output Material</th><th>Grey Issued</th><th>JWO Qty</th><th>Recv Qty</th><th>Accepted</th><th>Rejected</th><th>Unit</th><th>Rate</th><th>Amount</th><th>QC</th></tr>"
+
+        total_recv = sum(l.get("received_qty",0) for l in lines)
+        total_acc  = sum(l.get("accepted_qty",0) for l in lines)
+        total_rej  = sum(l.get("rejected_qty",0) for l in lines)
+        total_val  = data.get("total_value",0)
+
+        html = f"""<!DOCTYPE html><html><head><title>{doc_no}</title>{css}</head><body>
+        <div class="header">
+            <div><div class="company-name">{company}</div><div style="font-size:12px;color:#666;">Stores / Warehouse</div></div>
+            <div style="text-align:right;"><div class="doc-title">GOODS RECEIPT NOTE</div><div class="doc-no">{doc_no}</div><div class="doc-no">Date: {data.get('grn_date','')}</div></div>
+        </div>
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="label">Party / Supplier</div>
+                <div class="value" style="font-size:15px;">{data.get('party_name','—')}</div>
+                <div class="info-row"><span class="k">Challan No.</span><span class="v">{data.get('challan_no','—')}</span></div>
+                <div class="info-row"><span class="k">Invoice No.</span><span class="v">{data.get('invoice_no','—')}</span></div>
+                <div class="info-row"><span class="k">Invoice Date</span><span class="v">{data.get('invoice_date','—')}</span></div>
+                <div class="info-row"><span class="k">Vehicle / LR No.</span><span class="v">{data.get('vehicle_no','—')}</span></div>
+                <div class="info-row"><span class="k">Transporter</span><span class="v">{data.get('transporter','—')}</span></div>
+            </div>
+            <div class="info-box">
+                <div class="label">Receipt Details</div>
+                <div class="info-row"><span class="k">GRN Number</span><span class="v">{doc_no}</span></div>
+                <div class="info-row"><span class="k">GRN Date</span><span class="v">{data.get('grn_date','')}</span></div>
+                <div class="info-row"><span class="k">Type</span><span class="v">{grn_type}</span></div>
+                <div class="info-row"><span class="k">Against Ref.</span><span class="v">{data.get('ref_no','—')}</span></div>
+                <div class="info-row"><span class="k">SO Reference</span><span class="v">{data.get('so_ref','—')}</span></div>
+                <div class="info-row"><span class="k">Warehouse</span><span class="v">{data.get('warehouse','—')}</span></div>
+            </div>
+        </div>
+        <table><thead>{thead}</thead><tbody>{rows}</tbody></table>
+        <div class="totals"><table>
+            <tr><td>Total Received</td><td><strong>{total_recv}</strong></td></tr>
+            <tr><td>Total Accepted</td><td style="color:#059669;"><strong>{total_acc}</strong></td></tr>
+            <tr><td>Total Rejected</td><td style="color:#ef4444;">{total_rej}</td></tr>
+            <tr class="grand-total"><td><strong>TOTAL VALUE</strong></td><td><strong>₹{total_val:,.2f}</strong></td></tr>
+        </table></div>
+        {"<div class='info-box' style='margin-top:12px;'><strong>Remarks:</strong> " + data.get('remarks','') + "</div>" if data.get('remarks') else ""}
+        <div class="footer">
+            <div class="sign-box"><div class="sign-line">Received By</div></div>
+            <div class="sign-box"><div class="sign-line">Store Manager</div></div>
+            <div class="sign-box"><div class="sign-line">QC Checked By</div></div>
+        </div>
+        </body></html>"""
+
+    return html
+
+def show_print_button(doc_type, doc_no, data, btn_key):
+    """Show print button and handle download"""
+    if st.button(f"🖨️ Print {doc_type}", key=btn_key, use_container_width=False):
+        html = make_print_html(doc_type, doc_no, data)
+        import base64
+        b64 = base64.b64encode(html.encode()).decode()
+        st.markdown(f'''
+            <a href="data:text/html;base64,{b64}" download="{doc_no}.html"
+               style="display:inline-block;padding:8px 20px;background:#1a1a1a;color:#fff;
+                      border-radius:6px;text-decoration:none;font-weight:600;margin:4px 0;">
+               ⬇️ Download {doc_no} (Open & Print with Ctrl+P)
+            </a>''', unsafe_allow_html=True)
+
+
 if nav_pur == "🛒 Purchase Dashboard":
     st.markdown('<h1>Purchase Dashboard</h1>', unsafe_allow_html=True)
 
@@ -4719,22 +4980,27 @@ elif nav_pur == "📋 Purchase Requisitions":
 
 
 # ── PURCHASE ORDERS ───────────────────────────────────────────────────────────
+
+
+# ── PURCHASE ORDERS ───────────────────────────────────────────────────────────
 elif nav_pur == "📦 Purchase Orders":
     st.markdown('<h1>Purchase Orders</h1>', unsafe_allow_html=True)
 
+    if "selected_po" not in st.session_state:
+        st.session_state["selected_po"] = None
+
     suppliers = SS.get("suppliers", {})
     pr_list   = SS.get("pr_list", {})
+    po_list   = SS.get("po_list", {})
 
     po_tab1, po_tab2 = st.tabs(["📋 PO List", "➕ Create PO"])
 
     with po_tab2:
-        # Pre-fill from PR if coming from PR page
         pr_ref = st.session_state.get("pr_to_po", "")
-
         st.markdown("#### PO Header")
         pc1, pc2, pc3 = st.columns(3)
         with pc1:
-            supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items() if v.get("type","") != "Job Work"]
+            supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
             sel_supp  = st.selectbox("Supplier *", supp_opts, key="po_supp")
             po_date   = st.date_input("PO Date", value=date.today(), key="po_date")
             po_del_dt = st.date_input("Expected Delivery", value=date.today()+timedelta(days=14), key="po_del")
@@ -4744,37 +5010,27 @@ elif nav_pur == "📦 Purchase Orders":
             po_so_ref = st.text_input("SO Reference", value=pr_list.get(sel_pr,{}).get("so_ref","") if sel_pr else "", key="po_so")
             po_currency = st.selectbox("Currency", ["INR","USD","EUR"], key="po_curr")
         with pc3:
-            po_payment = st.selectbox("Payment Terms", SS.get("payment_terms",[]), key="po_pay")
+            po_payment = st.selectbox("Payment Terms", SS.get("payment_terms",[""]), key="po_pay")
             po_remarks = st.text_area("Remarks", height=70, key="po_rem")
 
-        # Load lines from PR or manual
         if "po_lines" not in st.session_state:
             st.session_state["po_lines"] = []
 
         if sel_pr and sel_pr in pr_list and not st.session_state["po_lines"]:
             for ln in pr_list[sel_pr].get("lines",[]):
                 st.session_state["po_lines"].append({
-                    "material_code": ln["material_code"],
-                    "material_name": ln["material_name"],
-                    "material_type": ln.get("material_type",""),
-                    "required_qty":  ln["required_qty"],
-                    "po_qty":        ln["required_qty"],
-                    "received_qty":  0,
-                    "unit":          ln["unit"],
-                    "rate":          0.0,
-                    "gst_pct":       12,
-                    "amount":        0.0,
-                    "so_ref":        ln.get("so_ref",""),
+                    "material_code": ln["material_code"], "material_name": ln["material_name"],
+                    "material_type": ln.get("material_type",""), "required_qty": ln["required_qty"],
+                    "po_qty": ln["required_qty"], "received_qty": 0, "unit": ln["unit"],
+                    "rate": 0.0, "gst_pct": 12, "amount": 0.0, "so_ref": ln.get("so_ref",""),
                 })
 
-        # Add manual line
         with st.expander("➕ Add Line"):
             items_data = st.session_state.get("items",{})
             al1,al2,al3 = st.columns(3)
             with al1:
                 po_mat = st.selectbox("Material", [""] + list(items_data.keys()),
-                                       format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
-                                       key="po_mat_add")
+                                       format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select", key="po_mat_add")
                 po_add_qty = st.number_input("Qty", min_value=0.0, step=1.0, key="po_add_qty")
             with al2:
                 po_add_rate = st.number_input("Rate (₹)", min_value=0.0, step=1.0, key="po_add_rate")
@@ -4783,235 +5039,222 @@ elif nav_pur == "📦 Purchase Orders":
                 po_add_unit = st.selectbox("Unit", UNITS, key="po_add_unit")
                 if st.button("➕ Add", key="po_add_btn") and po_mat and po_add_qty > 0:
                     st.session_state["po_lines"].append({
-                        "material_code": po_mat,
-                        "material_name": items_data.get(po_mat,{}).get("name",po_mat),
+                        "material_code": po_mat, "material_name": items_data.get(po_mat,{}).get("name",po_mat),
                         "material_type": items_data.get(po_mat,{}).get("item_type",""),
-                        "required_qty": po_add_qty, "po_qty": po_add_qty,
-                        "received_qty": 0, "unit": po_add_unit,
-                        "rate": po_add_rate, "gst_pct": po_add_gst,
+                        "required_qty": po_add_qty, "po_qty": po_add_qty, "received_qty": 0,
+                        "unit": po_add_unit, "rate": po_add_rate, "gst_pct": po_add_gst,
                         "amount": round(po_add_qty * po_add_rate, 2),
                     })
                     st.rerun()
 
-        # Show PO lines (editable)
         if st.session_state["po_lines"]:
             st.markdown("#### PO Lines")
             edit_po = pd.DataFrame([{
-                "Material":    ln["material_code"],
-                "Name":        ln["material_name"],
-                "PO Qty":      ln["po_qty"],
-                "Unit":        ln["unit"],
-                "Rate (₹)":   ln["rate"],
-                "GST %":       ln["gst_pct"],
-                "Amount (₹)": ln["amount"],
+                "Material": ln["material_code"], "Name": ln["material_name"],
+                "PO Qty": ln["po_qty"], "Unit": ln["unit"],
+                "Rate (₹)": ln["rate"], "GST %": ln["gst_pct"], "Amount (₹)": ln["amount"],
             } for ln in st.session_state["po_lines"]])
-
             edited_po = st.data_editor(edit_po, use_container_width=True, hide_index=False,
                 column_config={
                     "Material": st.column_config.TextColumn(disabled=True),
                     "Name":     st.column_config.TextColumn(disabled=True),
                     "PO Qty":   st.column_config.NumberColumn(min_value=0, step=1),
-                    "Rate (₹)":st.column_config.NumberColumn(min_value=0.0, step=0.5),
-                    "GST %":   st.column_config.SelectboxColumn(options=GST_RATES),
+                    "Rate (₹)": st.column_config.NumberColumn(min_value=0.0, step=0.5),
+                    "GST %":    st.column_config.SelectboxColumn(options=GST_RATES),
                 }, key="po_editor")
-
-            # Apply edits
             for i, row in edited_po.iterrows():
                 if i < len(st.session_state["po_lines"]):
-                    qty  = float(row["PO Qty"])
-                    rate = float(row["Rate (₹)"])
-                    gst  = int(row["GST %"]) if row["GST %"] else 12
-                    st.session_state["po_lines"][i]["po_qty"]  = qty
-                    st.session_state["po_lines"][i]["rate"]    = rate
-                    st.session_state["po_lines"][i]["gst_pct"] = gst
-                    st.session_state["po_lines"][i]["amount"]  = round(qty * rate, 2)
-
+                    qty = float(row["PO Qty"]); rate = float(row["Rate (₹)"]); gst = int(row["GST %"]) if row["GST %"] else 12
+                    st.session_state["po_lines"][i].update({"po_qty":qty,"rate":rate,"gst_pct":gst,"amount":round(qty*rate,2)})
             subtotal = sum(ln["amount"] for ln in st.session_state["po_lines"])
-            gst_amt  = sum(ln["amount"] * ln["gst_pct"] / 100 for ln in st.session_state["po_lines"])
+            gst_amt  = sum(ln["amount"]*ln["gst_pct"]/100 for ln in st.session_state["po_lines"])
             total    = subtotal + gst_amt
-            st.markdown(f'<div class="card card-left" style="text-align:right;padding:12px 20px;">Subtotal: ₹{subtotal:,.2f} | GST: ₹{gst_amt:,.2f} | <strong style="font-size:16px;color:#c8a96e;">Total: ₹{total:,.2f}</strong></div>', unsafe_allow_html=True)
-
-            sc1, sc2, sc3 = st.columns(3)
-            with sc1:
-                if st.button("💾 Save as Draft", use_container_width=True):
-                    po_no = next_po()
-                    supp_code = sel_supp.split(" – ")[0] if " – " in sel_supp else sel_supp
-                    SS["po_list"][po_no] = {
-                        "po_no": po_no, "po_date": str(po_date),
-                        "supplier_code": supp_code,
-                        "supplier_name": suppliers.get(supp_code,{}).get("name", supp_code),
-                        "pr_ref": sel_pr, "so_ref": po_so_ref,
-                        "delivery_date": str(po_del_dt),
-                        "payment_terms": po_payment, "currency": po_currency,
-                        "lines": st.session_state["po_lines"].copy(),
-                        "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
-                        "status": "Draft", "remarks": po_remarks,
-                        "created_at": datetime.now().isoformat(),
-                    }
-                    if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
-                    st.session_state["po_lines"] = []
-                    st.session_state["pr_to_po"] = ""
-                    save_data()
-                    st.success(f"✅ {po_no} saved!")
-                    st.rerun()
-            with sc2:
-                if st.button("📤 Save & Send to Supplier", use_container_width=True):
-                    po_no = next_po()
-                    supp_code = sel_supp.split(" – ")[0] if " – " in sel_supp else sel_supp
-                    SS["po_list"][po_no] = {
-                        "po_no": po_no, "po_date": str(po_date),
-                        "supplier_code": supp_code,
-                        "supplier_name": suppliers.get(supp_code,{}).get("name", supp_code),
-                        "pr_ref": sel_pr, "so_ref": po_so_ref,
-                        "delivery_date": str(po_del_dt),
-                        "payment_terms": po_payment, "currency": po_currency,
-                        "lines": st.session_state["po_lines"].copy(),
-                        "subtotal": subtotal, "gst_amount": gst_amt, "total": total,
-                        "status": "Sent to Supplier", "remarks": po_remarks,
-                        "created_at": datetime.now().isoformat(),
-                    }
-                    if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
-                    st.session_state["po_lines"] = []
-                    st.session_state["pr_to_po"] = ""
-                    save_data()
-                    st.success(f"✅ {po_no} sent to supplier!")
-                    st.rerun()
-            with sc3:
-                if st.button("🗑 Clear Lines", use_container_width=True):
-                    st.session_state["po_lines"] = []; st.rerun()
+            st.markdown(f'<div class="card card-left" style="text-align:right;padding:12px 20px;">Subtotal: ₹{subtotal:,.2f} | GST: ₹{gst_amt:,.2f} | <strong style="color:#c8a96e;font-size:16px;">Total: ₹{total:,.2f}</strong></div>', unsafe_allow_html=True)
+            sc1,sc2,sc3 = st.columns(3)
+            for btn_label, btn_status, col in [("💾 Save as Draft","Draft",sc1),("📤 Send to Supplier","Sent to Supplier",sc2),("🗑 Clear Lines",None,sc3)]:
+                with col:
+                    if st.button(btn_label, use_container_width=True):
+                        if btn_status is None:
+                            st.session_state["po_lines"] = []; st.rerun()
+                        else:
+                            supp_code = sel_supp.split(" – ")[0] if " – " in sel_supp else sel_supp
+                            po_no = next_po()
+                            SS["po_list"][po_no] = {
+                                "po_no":po_no,"po_date":str(po_date),"supplier_code":supp_code,
+                                "supplier_name":suppliers.get(supp_code,{}).get("name",supp_code),
+                                "pr_ref":sel_pr,"so_ref":po_so_ref,"delivery_date":str(po_del_dt),
+                                "payment_terms":po_payment,"currency":po_currency,
+                                "lines":st.session_state["po_lines"].copy(),
+                                "subtotal":subtotal,"gst_amount":gst_amt,"total":total,
+                                "status":btn_status,"remarks":po_remarks,
+                                "created_at":datetime.now().isoformat(),
+                            }
+                            if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
+                            st.session_state["po_lines"] = []; st.session_state["pr_to_po"] = ""
+                            save_data(); st.success(f"✅ {po_no} saved!"); st.rerun()
 
     with po_tab1:
-        po_list = SS.get("po_list", {})
         pof1, pof2 = st.columns(2)
-        with pof1: pof_sts = st.selectbox("Status", ["All"]+PO_STATUS, key="pol_sts")
+        with pof1: pof_sts  = st.selectbox("Status", ["All"]+PO_STATUS, key="pol_sts")
         with pof2: pof_srch = st.text_input("🔍 PO # / Supplier", key="pol_srch")
 
-        if not po_list:
-            st.markdown('<div class="warn-box">Koi PO nahi hai.</div>', unsafe_allow_html=True)
+        # Detail view
+        if st.session_state.get("selected_po") and st.session_state["selected_po"] in po_list:
+            po_no = st.session_state["selected_po"]
+            po    = po_list[po_no]
+            bc1,bc2 = st.columns([1,5])
+            with bc1:
+                if st.button("← Back", key="po_back"): st.session_state["selected_po"] = None; st.rerun()
+            with bc2: st.markdown(f'<h2 style="margin:0;">{po_no}</h2>', unsafe_allow_html=True)
+
+            hc1,hc2,hc3 = st.columns(3)
+            with hc1:
+                st.markdown(f'''<div class="card card-left"><div class="sec-label">Supplier</div>
+                    <div style="font-size:15px;font-weight:700;">{po.get("supplier_name","—")}</div>
+                    <div style="font-size:12px;">Code: {po.get("supplier_code","—")}</div>
+                    <div style="font-size:12px;">Payment: {po.get("payment_terms","—")}</div></div>''', unsafe_allow_html=True)
+            with hc2:
+                st.markdown(f'''<div class="card card-left-blue"><div class="sec-label">Order Details</div>
+                    <div class="info-row"><span>PO Date</span><strong>{po.get("po_date","")}</strong></div>
+                    <div class="info-row"><span>Delivery</span><strong>{po.get("delivery_date","")}</strong></div>
+                    <div class="info-row"><span>PR Ref</span><strong>{po.get("pr_ref","—")}</strong></div>
+                    <div class="info-row"><span>SO Ref</span><strong>{po.get("so_ref","—")}</strong></div></div>''', unsafe_allow_html=True)
+            with hc3:
+                st.markdown(f'''<div class="card card-left-green"><div class="sec-label">Financials</div>
+                    <div style="font-size:13px;">Subtotal: ₹{po.get("subtotal",0):,.2f}</div>
+                    <div style="font-size:13px;">GST: ₹{po.get("gst_amount",0):,.2f}</div>
+                    <div style="font-size:20px;font-weight:800;color:#c8a96e;">₹{po.get("total",0):,.2f}</div>
+                    <div>{pur_badge(po.get("status",""))}</div></div>''', unsafe_allow_html=True)
+
+            # Lines
+            st.markdown("---")
+            line_rows = [{"#":i+1,"Material":f"{l['material_code']} – {l['material_name']}","Type":l.get("material_type",""),
+                           "PO Qty":l.get("po_qty",0),"Recv":l.get("received_qty",0),"Unit":l.get("unit",""),
+                           "Rate":f"₹{l.get('rate',0):,.2f}","GST%":l.get("gst_pct",0),"Amount":f"₹{l.get('amount',0):,.2f}"}
+                          for i,l in enumerate(po.get("lines",[]))]
+            st.dataframe(pd.DataFrame(line_rows), use_container_width=True, hide_index=True)
+
+            # Status update + Print + GRN
+            st.markdown("---")
+            ac1,ac2,ac3,ac4 = st.columns(4)
+            with ac1:
+                new_sts = st.selectbox("Update Status", PO_STATUS, index=PO_STATUS.index(po.get("status","Draft")), key=f"po_sts_upd_{po_no}")
+                if new_sts != po.get("status"):
+                    if st.button("💾 Update", key=f"po_sts_save_{po_no}"):
+                        SS["po_list"][po_no]["status"] = new_sts; save_data(); st.rerun()
+            with ac2:
+                show_print_button("PO", po_no, po, f"print_po_{po_no}")
+            with ac3:
+                if po.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]:
+                    if st.button("📥 Create GRN", key=f"grn_po_det_{po_no}", use_container_width=True):
+                        st.session_state["grn_from_po"] = po_no
+                        st.session_state["current_page"] = "📥 GRN"; st.rerun()
         else:
+            if not po_list:
+                st.markdown('<div class="warn-box">Koi PO nahi hai.</div>', unsafe_allow_html=True)
             for po_no, po in reversed(list(po_list.items())):
                 if pof_sts != "All" and po.get("status","") != pof_sts: continue
                 if pof_srch and pof_srch.lower() not in po_no.lower() and pof_srch.lower() not in po.get("supplier_name","").lower(): continue
-
-                r1,r2,r3,r4,r5,r6 = st.columns([1.2,2,1.5,1.2,1.5,1.5])
+                r1,r2,r3,r4,r5,r6 = st.columns([1.2,2,1.5,1.2,1.5,0.8])
                 with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{po_no}</div>', unsafe_allow_html=True)
-                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{po.get("supplier_name","—")}</div>', unsafe_allow_html=True)
-                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">Del: {po.get("delivery_date","—")}<br>SO: {po.get("so_ref","—")}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{po.get("supplier_name","—")}<br><span style="font-size:11px;color:#94a3b8;">Del: {po.get("delivery_date","—")}</span></div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">SO: {po.get("so_ref","—")}<br>{len(po.get("lines",[]))} items</div>', unsafe_allow_html=True)
                 with r4: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{po.get("total",0):,.0f}</div>', unsafe_allow_html=True)
                 with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(po.get("status",""))}</div>', unsafe_allow_html=True)
                 with r6:
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if po.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]:
-                            if st.button("📥 GRN", key=f"grn_po_{po_no}", use_container_width=True):
-                                st.session_state["grn_from_po"] = po_no
-                                st.session_state["current_page"] = "📥 GRN"
-                                st.rerun()
-                    with col_b:
-                        new_po_sts = st.selectbox("", PO_STATUS,
-                                                    index=PO_STATUS.index(po.get("status","Draft")),
-                                                    key=f"po_sts_{po_no}", label_visibility="collapsed")
-                        if new_po_sts != po.get("status"):
-                            SS["po_list"][po_no]["status"] = new_po_sts
-                            save_data(); st.rerun()
-
-                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+                    if st.button("Open", key=f"open_po_{po_no}", use_container_width=True):
+                        st.session_state["selected_po"] = po_no; st.rerun()
+                st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
 
 
 # ── JOB WORK ORDERS ───────────────────────────────────────────────────────────
 elif nav_pur == "🔧 Job Work Orders":
     st.markdown('<h1>Job Work Orders</h1>', unsafe_allow_html=True)
 
+    if "selected_jwo" not in st.session_state:
+        st.session_state["selected_jwo"] = None
+
     suppliers  = SS.get("suppliers", {})
     pr_list    = SS.get("pr_list", {})
     items_data = st.session_state.get("items", {})
+    jwo_list   = SS.get("jwo_list", {})
 
     jw_tab1, jw_tab2 = st.tabs(["📋 JWO List", "➕ Create JWO"])
 
     with jw_tab2:
         pr_ref_jw = st.session_state.get("pr_to_jwo", "")
-        st.markdown("#### JWO Header")
-
-        jc1, jc2 = st.columns(2)
+        jc1, jc2  = st.columns(2)
         with jc1:
-            # Job work suppliers
-            jw_supp_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
+            jw_supp_opts  = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
             sel_processor = st.selectbox("Vendor / Processor *", jw_supp_opts, key="jwo_proc")
             jwo_date      = st.date_input("JWO Date", value=date.today(), key="jwo_date")
             jwo_del_dt    = st.date_input("Expected Return Date", value=date.today()+timedelta(days=10), key="jwo_del")
         with jc2:
             jw_pr_opts = [""] + [k for k,v in pr_list.items() if v.get("status")=="Approved" and v.get("pr_type")=="Job Work"]
-            sel_jw_pr  = st.selectbox("PR Reference", jw_pr_opts,
-                                       index=jw_pr_opts.index(pr_ref_jw) if pr_ref_jw in jw_pr_opts else 0,
-                                       key="jwo_pr")
-            jwo_so_ref = st.text_input("SO Reference", value=pr_list.get(sel_jw_pr,{}).get("so_ref","") if sel_jw_pr else "", key="jwo_so")
+            sel_jw_pr  = st.selectbox("PR Reference", jw_pr_opts, index=jw_pr_opts.index(pr_ref_jw) if pr_ref_jw in jw_pr_opts else 0, key="jwo_pr")
+            jwo_so_ref  = st.text_input("SO Reference", value=pr_list.get(sel_jw_pr,{}).get("so_ref","") if sel_jw_pr else "", key="jwo_so")
             jwo_remarks = st.text_area("Remarks", height=60, key="jwo_rem")
 
         st.markdown("---")
         st.markdown("#### Material to be Processed")
-
         if "jwo_lines" not in st.session_state:
             st.session_state["jwo_lines"] = []
 
-        # Load from PR
         if sel_jw_pr and sel_jw_pr in pr_list and not st.session_state["jwo_lines"]:
             for ln in pr_list[sel_jw_pr].get("lines",[]):
                 st.session_state["jwo_lines"].append({
-                    "output_material": ln["material_code"],
-                    "output_name":     ln["material_name"],
-                    "output_qty":      ln["required_qty"],
-                    "output_unit":     ln["unit"],
-                    "input_material":  "",
-                    "input_name":      "",
-                    "input_qty":       0.0,
-                    "input_unit":      "",
-                    "rate":            0.0,
-                    "received_qty":    0.0,
-                    "so_ref":          ln.get("so_ref",""),
+                    "output_material":ln["material_code"],"output_name":ln["material_name"],
+                    "output_qty":ln["required_qty"],"output_unit":ln["unit"],
+                    "input_material":"","input_name":"","input_qty":0.0,"input_unit":"",
+                    "rate":0.0,"received_qty":0.0,"so_ref":ln.get("so_ref",""),
                 })
 
         with st.expander("➕ Add Job Work Line"):
-            jl1, jl2 = st.columns(2)
+            boms_data = st.session_state.get("boms",{})
+            jl1,jl2   = st.columns(2)
             with jl1:
-                st.markdown("**Output Material (jo receive hoga)**")
-                jw_out = st.selectbox("Output Material *", [""] + list(items_data.keys()),
-                                       format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
-                                       key="jwo_out_mat")
+                st.markdown("**Output (jo receive hoga)**")
+                jw_out      = st.selectbox("Output Material *", [""] + list(items_data.keys()),
+                                            format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select", key="jwo_out_mat")
                 jw_out_qty  = st.number_input("Output Qty", min_value=0.0, step=1.0, key="jwo_out_qty")
                 jw_out_unit = st.selectbox("Output Unit", UNITS, key="jwo_out_unit")
+                jw_rate     = st.number_input("Job Work Rate (₹/unit)", min_value=0.0, step=1.0, key="jwo_rate")
             with jl2:
-                st.markdown("**Input Material (jo issue karna hai)**")
-                jw_in = st.selectbox("Input Material (Grey Fabric etc.)", [""] + list(items_data.keys()),
-                                      format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
-                                      key="jwo_in_mat")
-                jw_in_qty  = st.number_input("Input Qty to Issue", min_value=0.0, step=1.0, key="jwo_in_qty")
+                st.markdown("**Input (jo issue karna hai)**")
+                # Auto-suggest from BOM
+                bom_inputs = [b for b in boms_data.get(jw_out.split(" – ")[0] if " – " in jw_out else jw_out,{}).get("lines",[]) if b.get("line_type")!="Process"] if jw_out else []
+                auto_in    = bom_inputs[0].get("item_code","") if bom_inputs else ""
+                jw_in      = st.selectbox("Input Material", [""] + list(items_data.keys()),
+                                           format_func=lambda x: f"{x} – {items_data.get(x,{}).get('name','')}" if x else "Select",
+                                           index=([""] + list(items_data.keys())).index(auto_in) if auto_in in items_data else 0,
+                                           key="jwo_in_mat")
+                auto_qty   = round(float(bom_inputs[0].get("qty",0)) * jw_out_qty, 3) if bom_inputs and jw_out_qty else 0
+                jw_in_qty  = st.number_input("Input Qty to Issue", min_value=0.0, value=float(auto_qty), step=1.0, key="jwo_in_qty")
                 jw_in_unit = st.selectbox("Input Unit", UNITS, key="jwo_in_unit")
-                jw_rate    = st.number_input("Job Work Rate (₹/unit)", min_value=0.0, step=1.0, key="jwo_rate")
 
             if st.button("➕ Add JW Line") and jw_out and jw_out_qty > 0:
-                in_code = jw_in.split(" – ")[0] if " – " in jw_in else jw_in
                 out_code = jw_out.split(" – ")[0] if " – " in jw_out else jw_out
+                in_code  = jw_in.split(" – ")[0] if " – " in jw_in else jw_in
                 st.session_state["jwo_lines"].append({
-                    "output_material": out_code,
-                    "output_name":     items_data.get(out_code,{}).get("name", out_code),
-                    "output_qty":      jw_out_qty,
-                    "output_unit":     jw_out_unit,
-                    "input_material":  in_code,
-                    "input_name":      items_data.get(in_code,{}).get("name", in_code) if in_code else "",
-                    "input_qty":       jw_in_qty,
-                    "input_unit":      jw_in_unit,
-                    "rate":            jw_rate,
-                    "received_qty":    0.0,
+                    "output_material":out_code,"output_name":items_data.get(out_code,{}).get("name",out_code),
+                    "output_qty":jw_out_qty,"output_unit":jw_out_unit,
+                    "input_material":in_code,"input_name":items_data.get(in_code,{}).get("name",in_code) if in_code else "",
+                    "input_qty":jw_in_qty,"input_unit":jw_in_unit,
+                    "rate":jw_rate,"received_qty":0.0,
                 })
                 st.rerun()
 
         if st.session_state["jwo_lines"]:
             st.markdown("#### JWO Lines")
-            for idx, ln in enumerate(st.session_state["jwo_lines"]):
-                lc1,lc2,lc3,lc4 = st.columns([2,2,2,0.5])
-                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT:</strong> {ln["output_material"]} — {ln["output_name"]}<br>{ln["output_qty"]} {ln["output_unit"]}</div>', unsafe_allow_html=True)
-                with lc2: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>IN:</strong> {ln.get("input_material","—")} — {ln.get("input_name","—")}<br>{ln.get("input_qty",0)} {ln.get("input_unit","")}</div>', unsafe_allow_html=True)
-                with lc3: st.markdown(f'<div style="padding-top:8px;font-size:13px;">Rate: ₹{ln["rate"]}/unit<br>Amount: ₹{ln["output_qty"]*ln["rate"]:,.2f}</div>', unsafe_allow_html=True)
+            for idx,ln in enumerate(st.session_state["jwo_lines"]):
+                lc1,lc2,lc3,lc4 = st.columns([2.5,2.5,1.5,0.5])
+                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT: {ln["output_material"]}</strong> — {ln["output_name"]}<br>{ln["output_qty"]} {ln["output_unit"]} @ ₹{ln["rate"]}/unit</div>', unsafe_allow_html=True)
+                with lc2:
+                    if ln.get("input_material"):
+                        in_stock = float(st.session_state["items"].get(ln["input_material"],{}).get("stock",0))
+                        color = "#059669" if in_stock >= ln["input_qty"] else "#ef4444"
+                        st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>IN: {ln["input_material"]}</strong> — {ln["input_name"]}<br>{ln["input_qty"]} {ln["input_unit"]} | Stock: <strong style="color:{color};">{in_stock}</strong></div>', unsafe_allow_html=True)
+                with lc3: st.markdown(f'<div style="padding-top:8px;font-size:13px;">JW Amt: ₹{ln["output_qty"]*ln["rate"]:,.2f}</div>', unsafe_allow_html=True)
                 with lc4:
                     if st.button("🗑", key=f"del_jw_{idx}"):
                         st.session_state["jwo_lines"].pop(idx); st.rerun()
@@ -5023,223 +5266,339 @@ elif nav_pur == "🔧 Job Work Orders":
             if st.button("✅ Create JWO & Issue Material", use_container_width=False):
                 proc_code = sel_processor.split(" – ")[0] if " – " in sel_processor else sel_processor
                 jwo_no    = next_jwo()
-
-                # Issue input materials from stock
                 for ln in st.session_state["jwo_lines"]:
-                    in_code = ln.get("input_material","")
-                    in_qty  = float(ln.get("input_qty", 0))
-                    if in_code and in_qty > 0 and in_code in st.session_state["items"]:
-                        cur_stock = float(st.session_state["items"][in_code].get("stock", 0))
-                        st.session_state["items"][in_code]["stock"] = max(0, cur_stock - in_qty)
-
+                    in_c = ln.get("input_material",""); in_q = float(ln.get("input_qty",0))
+                    if in_c and in_q > 0 and in_c in st.session_state["items"]:
+                        cur = float(st.session_state["items"][in_c].get("stock",0))
+                        st.session_state["items"][in_c]["stock"] = max(0, cur - in_q)
                 SS["jwo_list"][jwo_no] = {
-                    "jwo_no":         jwo_no,
-                    "jwo_date":       str(jwo_date),
-                    "processor_code": proc_code,
-                    "processor_name": suppliers.get(proc_code,{}).get("name", proc_code),
-                    "pr_ref":         sel_jw_pr,
-                    "so_ref":         jwo_so_ref,
-                    "expected_date":  str(jwo_del_dt),
-                    "lines":          st.session_state["jwo_lines"].copy(),
-                    "total":          jw_total,
-                    "status":         "Issued to Processor",
-                    "remarks":        jwo_remarks,
-                    "created_at":     datetime.now().isoformat(),
+                    "jwo_no":jwo_no,"jwo_date":str(jwo_date),"processor_code":proc_code,
+                    "processor_name":suppliers.get(proc_code,{}).get("name",proc_code),
+                    "pr_ref":sel_jw_pr,"so_ref":jwo_so_ref,"expected_date":str(jwo_del_dt),
+                    "lines":st.session_state["jwo_lines"].copy(),"total":jw_total,
+                    "status":"Issued to Processor","remarks":jwo_remarks,
+                    "created_at":datetime.now().isoformat(),
                 }
                 if sel_jw_pr: SS["pr_list"][sel_jw_pr]["status"] = "JWO Created"
-                st.session_state["jwo_lines"] = []
-                st.session_state["pr_to_jwo"] = ""
-                save_data()
-                st.success(f"✅ {jwo_no} created! Input materials issued from stock.")
-                st.rerun()
+                st.session_state["jwo_lines"] = []; st.session_state["pr_to_jwo"] = ""
+                save_data(); st.success(f"✅ {jwo_no} created! Input materials issued."); st.rerun()
 
     with jw_tab1:
-        jwo_list = SS.get("jwo_list", {})
-        if not jwo_list:
-            st.markdown('<div class="warn-box">Koi JWO nahi hai.</div>', unsafe_allow_html=True)
+        jf1,jf2 = st.columns(2)
+        with jf1: jf_sts  = st.selectbox("Status",["All"]+JWO_STATUS, key="jwl_sts")
+        with jf2: jf_srch = st.text_input("🔍 JWO # / Processor", key="jwl_srch")
+
+        # Detail view
+        if st.session_state.get("selected_jwo") and st.session_state["selected_jwo"] in jwo_list:
+            jwo_no = st.session_state["selected_jwo"]
+            jwo    = jwo_list[jwo_no]
+            bc1,bc2 = st.columns([1,5])
+            with bc1:
+                if st.button("← Back", key="jwo_back"): st.session_state["selected_jwo"] = None; st.rerun()
+            with bc2: st.markdown(f'<h2 style="margin:0;">{jwo_no}</h2>', unsafe_allow_html=True)
+
+            hc1,hc2,hc3 = st.columns(3)
+            with hc1:
+                st.markdown(f'''<div class="card card-left"><div class="sec-label">Processor / Vendor</div>
+                    <div style="font-size:15px;font-weight:700;">{jwo.get("processor_name","—")}</div>
+                    <div style="font-size:12px;">Code: {jwo.get("processor_code","—")}</div>
+                    <div style="font-size:12px;">Expected: {jwo.get("expected_date","—")}</div></div>''', unsafe_allow_html=True)
+            with hc2:
+                st.markdown(f'''<div class="card card-left-blue"><div class="sec-label">Order Details</div>
+                    <div class="info-row"><span>JWO Date</span><strong>{jwo.get("jwo_date","")}</strong></div>
+                    <div class="info-row"><span>PR Ref</span><strong>{jwo.get("pr_ref","—")}</strong></div>
+                    <div class="info-row"><span>SO Ref</span><strong>{jwo.get("so_ref","—")}</strong></div></div>''', unsafe_allow_html=True)
+            with hc3:
+                st.markdown(f'''<div class="card card-left-green"><div class="sec-label">Summary</div>
+                    <div style="font-size:20px;font-weight:800;color:#c8a96e;">₹{jwo.get("total",0):,.2f}</div>
+                    <div>{pur_badge(jwo.get("status",""))}</div></div>''', unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.markdown("#### 📤 Grey Issued / Input Materials")
+            in_rows = [{"Material":l.get("input_material","—"),"Name":l.get("input_name","—"),
+                         "Issued Qty":l.get("input_qty",0),"Unit":l.get("input_unit",""),
+                         "For Output":l.get("output_material","")}
+                        for l in jwo.get("lines",[]) if l.get("input_material")]
+            if in_rows: st.dataframe(pd.DataFrame(in_rows), use_container_width=True, hide_index=True)
+
+            st.markdown("#### 📥 Expected Output (Processed Material)")
+            out_rows = [{"Material":l.get("output_material",""),"Name":l.get("output_name",""),
+                          "JWO Qty":l.get("output_qty",0),"Received":l.get("received_qty",0),
+                          "Pending":max(0,l.get("output_qty",0)-l.get("received_qty",0)),
+                          "Unit":l.get("output_unit",""),"Rate":f"₹{l.get('rate',0):,.2f}",
+                          "Amount":f"₹{l.get('output_qty',0)*l.get('rate',0):,.2f}"}
+                         for l in jwo.get("lines",[])]
+            st.dataframe(pd.DataFrame(out_rows), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            ac1,ac2,ac3 = st.columns(3)
+            with ac1:
+                new_jsts = st.selectbox("Update Status", JWO_STATUS, index=JWO_STATUS.index(jwo.get("status","Draft")), key=f"jwo_sts_upd_{jwo_no}")
+                if new_jsts != jwo.get("status"):
+                    if st.button("💾 Update", key=f"jwo_sts_save_{jwo_no}"):
+                        SS["jwo_list"][jwo_no]["status"] = new_jsts; save_data(); st.rerun()
+            with ac2:
+                show_print_button("JWO", jwo_no, jwo, f"print_jwo_{jwo_no}")
+            with ac3:
+                if jwo.get("status") in ["Issued to Processor","In Process","Partial Received"]:
+                    if st.button("📥 Create GRN", key=f"grn_jwo_det_{jwo_no}", use_container_width=True):
+                        st.session_state["grn_from_jwo"] = jwo_no
+                        st.session_state["current_page"] = "📥 GRN"; st.rerun()
         else:
+            if not jwo_list:
+                st.markdown('<div class="warn-box">Koi JWO nahi hai.</div>', unsafe_allow_html=True)
             for jwo_no, jwo in reversed(list(jwo_list.items())):
-                r1,r2,r3,r4,r5,r6 = st.columns([1.2,2,1.5,1.2,1.5,1.5])
+                if jf_sts != "All" and jwo.get("status","") != jf_sts: continue
+                if jf_srch and jf_srch.lower() not in jwo_no.lower() and jf_srch.lower() not in jwo.get("processor_name","").lower(): continue
+                r1,r2,r3,r4,r5,r6 = st.columns([1.2,2,1.5,1.2,1.5,0.8])
                 with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{jwo_no}</div>', unsafe_allow_html=True)
-                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{jwo.get("processor_name","—")}</div>', unsafe_allow_html=True)
-                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">Return: {jwo.get("expected_date","—")}<br>{len(jwo.get("lines",[]))} items</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{jwo.get("processor_name","—")}<br><span style="font-size:11px;color:#94a3b8;">Return: {jwo.get("expected_date","—")}</span></div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">SO: {jwo.get("so_ref","—")}<br>{len(jwo.get("lines",[]))} items</div>', unsafe_allow_html=True)
                 with r4: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{jwo.get("total",0):,.0f}</div>', unsafe_allow_html=True)
                 with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(jwo.get("status",""))}</div>', unsafe_allow_html=True)
                 with r6:
-                    if jwo.get("status") in ["Issued to Processor","In Process","Partial Received"]:
-                        if st.button("📥 Receive", key=f"rec_jwo_{jwo_no}", use_container_width=True):
-                            st.session_state["grn_from_jwo"] = jwo_no
-                            st.session_state["current_page"] = "📥 GRN"
-                            st.rerun()
-                st.markdown('<hr style="margin:3px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+                    if st.button("Open", key=f"open_jwo_{jwo_no}", use_container_width=True):
+                        st.session_state["selected_jwo"] = jwo_no; st.rerun()
+                st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
 
 
 # ── GRN ───────────────────────────────────────────────────────────────────────
 elif nav_pur == "📥 GRN":
     st.markdown('<h1>GRN — Goods Receipt Note</h1>', unsafe_allow_html=True)
-    st.markdown('<div class="info-box">PO ya JWO ke against material receive karo — stock automatically update hoga.</div>', unsafe_allow_html=True)
+
+    if "selected_grn" not in st.session_state:
+        st.session_state["selected_grn"] = None
+
+    po_list   = SS.get("po_list", {})
+    jwo_list  = SS.get("jwo_list", {})
+    grn_list  = SS.get("grn_list", {})
+    suppliers = SS.get("suppliers", {})
 
     grn_tab1, grn_tab2 = st.tabs(["📋 GRN List", "➕ Create GRN"])
 
     with grn_tab2:
         po_ref_grn  = st.session_state.get("grn_from_po", "")
         jwo_ref_grn = st.session_state.get("grn_from_jwo", "")
+        gc1,gc2 = st.columns(2)
+        with gc1: grn_type = st.radio("GRN Type", ["PO Receipt","JWO Receipt"], horizontal=True, key="grn_type")
+        with gc2: grn_date = st.date_input("Receipt Date", value=date.today(), key="grn_date")
 
-        gc1, gc2 = st.columns(2)
-        with gc1:
-            grn_type = st.radio("GRN Type", ["PO Receipt","JWO Receipt"], horizontal=True, key="grn_type")
-        with gc2:
-            grn_date = st.date_input("Receipt Date", value=date.today(), key="grn_date")
+        st.markdown("#### 📋 GRN Header")
+        gh1,gh2,gh3 = st.columns(3)
 
         if grn_type == "PO Receipt":
-            po_opts = [""] + [k for k,v in SS.get("po_list",{}).items() if v.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]]
-            sel_grn_po = st.selectbox("PO Select *", po_opts,
-                                       index=po_opts.index(po_ref_grn) if po_ref_grn in po_opts else 0,
-                                       key="grn_po_sel")
-            if sel_grn_po:
-                po = SS["po_list"][sel_grn_po]
-                st.markdown(f'<div class="ok-box">Supplier: <strong>{po.get("supplier_name","")}</strong> | PO Date: {po.get("po_date","")} | Total: ₹{po.get("total",0):,.0f}</div>', unsafe_allow_html=True)
+            po_opts = [""] + [k for k,v in po_list.items() if v.get("status") in ["Draft","Sent to Supplier","Confirmed","Partial Received"]]
+            with gh1:
+                sel_grn_ref = st.selectbox("PO Number *", po_opts, index=po_opts.index(po_ref_grn) if po_ref_grn in po_opts else 0, key="grn_po_sel")
+                ref_doc     = po_list.get(sel_grn_ref, {})
+                party_name  = ref_doc.get("supplier_name","")
+            with gh2:
+                grn_challan    = st.text_input("Vendor Challan No. *", key="grn_challan", placeholder="e.g. CHN/2024/001")
+                grn_invoice    = st.text_input("Invoice No.", key="grn_invoice", placeholder="e.g. INV/2024/001")
+                grn_invoice_dt = st.date_input("Invoice Date", value=date.today(), key="grn_inv_dt")
+            with gh3:
+                grn_vehicle     = st.text_input("Vehicle / LR No.", key="grn_vehicle", placeholder="e.g. RJ14-1234")
+                grn_transporter = st.text_input("Transporter", key="grn_transport", placeholder="e.g. DTDC / Self")
+                grn_warehouse   = st.selectbox("Received at Warehouse", SS.get("warehouses",[""]), key="grn_wh")
+        else:
+            jwo_opts = [""] + [k for k,v in jwo_list.items() if v.get("status") in ["Issued to Processor","In Process","Partial Received"]]
+            with gh1:
+                sel_grn_ref = st.selectbox("JWO Number *", jwo_opts, index=jwo_opts.index(jwo_ref_grn) if jwo_ref_grn in jwo_opts else 0, key="grn_jwo_sel")
+                ref_doc     = jwo_list.get(sel_grn_ref, {})
+                party_name  = ref_doc.get("processor_name","")
+            with gh2:
+                grn_challan    = st.text_input("Processor Challan No. *", key="grn_challan", placeholder="e.g. CHN/2024/001")
+                grn_invoice    = st.text_input("Invoice No.", key="grn_invoice", placeholder="e.g. INV/2024/001")
+                grn_invoice_dt = st.date_input("Invoice Date", value=date.today(), key="grn_inv_dt")
+            with gh3:
+                grn_vehicle     = st.text_input("Vehicle / LR No.", key="grn_vehicle")
+                grn_transporter = st.text_input("Transporter", key="grn_transport")
+                grn_warehouse   = st.selectbox("Received at Warehouse", SS.get("warehouses",[""]), key="grn_wh")
 
-                st.markdown("#### Receipt Lines")
-                grn_lines = []
-                for i, ln in enumerate(po.get("lines",[])):
-                    pending = ln["po_qty"] - ln.get("received_qty",0)
-                    if pending <= 0: continue
-                    gc1,gc2,gc3,gc4 = st.columns([2,1,1,1])
-                    with gc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}</div>', unsafe_allow_html=True)
-                    with gc2: st.markdown(f'<div style="padding-top:8px;font-size:12px;">PO Qty: {ln["po_qty"]}<br>Pending: {pending}</div>', unsafe_allow_html=True)
-                    with gc3:
-                        recv_qty = st.number_input(f"Recv Qty", min_value=0.0, max_value=float(pending),
-                                                    value=float(pending), step=1.0, key=f"grn_recv_{sel_grn_po}_{i}")
-                    with gc4:
-                        qc_status = st.selectbox("QC", ["Pass","Fail","Hold"], key=f"grn_qc_{sel_grn_po}_{i}")
-                    grn_lines.append({
-                        "material_code": ln["material_code"],
-                        "material_name": ln["material_name"],
-                        "unit":          ln["unit"],
-                        "po_qty":        ln["po_qty"],
-                        "received_qty":  recv_qty,
-                        "rate":          ln.get("rate",0),
-                        "qc_status":     qc_status,
-                        "amount":        round(recv_qty * ln.get("rate",0), 2),
-                    })
-                    st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+        if sel_grn_ref:
+            st.markdown(f'<div class="ok-box">Party: <strong>{party_name}</strong> | Ref: <strong>{sel_grn_ref}</strong> | SO: <strong>{ref_doc.get("so_ref","—")}</strong></div>', unsafe_allow_html=True)
+        grn_remarks = st.text_area("Remarks / Notes", key="grn_remarks", height=60)
 
-                grn_remarks = st.text_area("Remarks", key="grn_rem_po")
-                if st.button("✅ Post GRN & Update Stock", use_container_width=False) and grn_lines:
-                    grn_no = next_grn()
-                    total_recv = sum(ln["received_qty"] for ln in grn_lines)
+        st.markdown("---")
+        st.markdown("#### 📦 Material Receipt Lines")
+        grn_lines = []
 
-                    # Update stock
-                    for ln in grn_lines:
-                        mat_code = ln["material_code"]
-                        recv_q   = float(ln["received_qty"])
-                        if ln["qc_status"] == "Pass" and mat_code in st.session_state["items"]:
-                            cur = float(st.session_state["items"][mat_code].get("stock", 0))
-                            st.session_state["items"][mat_code]["stock"] = round(cur + recv_q, 3)
+        if grn_type == "PO Receipt" and sel_grn_ref in po_list:
+            for i,ln in enumerate(po_list[sel_grn_ref].get("lines",[])):
+                pending = round(float(ln.get("po_qty",0)) - float(ln.get("received_qty",0)), 3)
+                if pending <= 0: continue
+                rl1,rl2,rl3,rl4,rl5 = st.columns([3,1,1,1,1])
+                with rl1:
+                    st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["material_code"]}</strong> — {ln["material_name"]}<br><span style="font-size:11px;color:#94a3b8;">PO: {ln.get("po_qty",0)} | Recv: {ln.get("received_qty",0)} | Pending: {pending}</span></div>', unsafe_allow_html=True)
+                with rl2: recv_qty   = st.number_input("Recv Qty", min_value=0.0, max_value=float(pending)*2, value=float(pending), step=0.5, key=f"grn_recv_{sel_grn_ref}_{i}")
+                with rl3: recv_unit  = st.selectbox("Unit", UNITS, index=UNITS.index(ln.get("unit","Meter")) if ln.get("unit") in UNITS else 0, key=f"grn_unit_{sel_grn_ref}_{i}")
+                with rl4: qc_st     = st.selectbox("QC", ["Pass","Fail","Hold","Partial Pass"], key=f"grn_qc_{sel_grn_ref}_{i}")
+                with rl5: reject_qty = st.number_input("Reject Qty", min_value=0.0, step=0.5, key=f"grn_rej_{sel_grn_ref}_{i}") if qc_st in ["Fail","Partial Pass"] else 0.0
+                grn_lines.append({
+                    "material_code":ln["material_code"],"material_name":ln["material_name"],
+                    "material_type":ln.get("material_type",""),"unit":recv_unit,
+                    "po_qty":ln.get("po_qty",0),"pending_qty":pending,
+                    "received_qty":recv_qty,"accepted_qty":max(0,recv_qty-reject_qty),
+                    "rejected_qty":reject_qty,"qc_status":qc_st,
+                    "rate":ln.get("rate",0),"amount":round(recv_qty*float(ln.get("rate",0)),2),
+                    "po_line_idx":i,
+                })
+                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
 
-                    # Update PO received qty
-                    for i, ln in enumerate(SS["po_list"][sel_grn_po]["lines"]):
-                        grn_ln = next((g for g in grn_lines if g["material_code"]==ln["material_code"]), None)
-                        if grn_ln:
-                            SS["po_list"][sel_grn_po]["lines"][i]["received_qty"] = \
-                                ln.get("received_qty",0) + grn_ln["received_qty"]
+        elif grn_type == "JWO Receipt" and sel_grn_ref in jwo_list:
+            for i,ln in enumerate(jwo_list[sel_grn_ref].get("lines",[])):
+                pending = round(float(ln.get("output_qty",0)) - float(ln.get("received_qty",0)), 3)
+                if pending <= 0: continue
+                rl1,rl2,rl3,rl4,rl5 = st.columns([3,1,1,1,1])
+                with rl1:
+                    st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT: {ln["output_material"]}</strong> — {ln["output_name"]}<br><span style="font-size:11px;color:#94a3b8;">JWO: {ln.get("output_qty",0)} | Pending: {pending}</span></div>', unsafe_allow_html=True)
+                    if ln.get("input_material"):
+                        st.markdown(f'<div style="font-size:11px;color:#64748b;">Grey Issued: {ln.get("input_material","")} — {ln.get("input_qty",0)} {ln.get("input_unit","")}</div>', unsafe_allow_html=True)
+                with rl2: recv_qty   = st.number_input("Recv Qty", min_value=0.0, max_value=float(pending)*2, value=float(pending), step=0.5, key=f"grn_recv_{sel_grn_ref}_{i}")
+                with rl3: recv_unit  = st.selectbox("Unit", UNITS, key=f"grn_unit_{sel_grn_ref}_{i}")
+                with rl4: qc_st     = st.selectbox("QC", ["Pass","Fail","Hold","Partial Pass"], key=f"grn_qc_{sel_grn_ref}_{i}")
+                with rl5: reject_qty = st.number_input("Reject Qty", min_value=0.0, step=0.5, key=f"grn_rej_{sel_grn_ref}_{i}") if qc_st in ["Fail","Partial Pass"] else 0.0
+                grn_lines.append({
+                    "output_material":ln["output_material"],"output_name":ln["output_name"],
+                    "input_material":ln.get("input_material",""),"input_name":ln.get("input_name",""),
+                    "input_qty":ln.get("input_qty",0),"input_unit":ln.get("input_unit",""),
+                    "unit":recv_unit,"jwo_qty":ln.get("output_qty",0),
+                    "received_qty":recv_qty,"accepted_qty":max(0,recv_qty-reject_qty),
+                    "rejected_qty":reject_qty,"qc_status":qc_st,
+                    "rate":ln.get("rate",0),"amount":round(recv_qty*float(ln.get("rate",0)),2),
+                    "jwo_line_idx":i,
+                })
+                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
 
-                    # Update PO status
-                    all_recv = all(ln["po_qty"] <= ln.get("received_qty",0)
-                                   for ln in SS["po_list"][sel_grn_po]["lines"])
-                    SS["po_list"][sel_grn_po]["status"] = "Received" if all_recv else "Partial Received"
+        if grn_lines:
+            total_val = sum(l["amount"] for l in grn_lines)
+            st.markdown(f'<div class="card card-left" style="text-align:right;padding:10px 20px;">Total Receipt Value: <strong style="color:#c8a96e;font-size:16px;">₹{total_val:,.2f}</strong></div>', unsafe_allow_html=True)
 
-                    SS["grn_list"][grn_no] = {
-                        "grn_no": grn_no, "grn_date": str(grn_date),
-                        "grn_type": "PO Receipt", "ref_no": sel_grn_po,
-                        "lines": grn_lines, "status": "Posted",
-                        "total_received": total_recv, "remarks": grn_remarks,
-                        "created_at": datetime.now().isoformat(),
-                    }
-                    st.session_state["grn_from_po"] = ""
-                    save_data()
-                    st.success(f"✅ {grn_no} posted! Stock updated.")
-                    st.rerun()
+        st.markdown("---")
+        if st.button("✅ Post GRN & Update Stock", use_container_width=False) and grn_lines and sel_grn_ref:
+            grn_no = next_grn()
+            if grn_type == "PO Receipt":
+                for ln in grn_lines:
+                    if float(ln["accepted_qty"]) > 0 and ln["material_code"] in st.session_state["items"]:
+                        cur = float(st.session_state["items"][ln["material_code"]].get("stock",0))
+                        st.session_state["items"][ln["material_code"]]["stock"] = round(cur + ln["accepted_qty"], 3)
+                    idx = ln["po_line_idx"]
+                    prev = float(SS["po_list"][sel_grn_ref]["lines"][idx].get("received_qty",0))
+                    SS["po_list"][sel_grn_ref]["lines"][idx]["received_qty"] = round(prev + ln["received_qty"], 3)
+                all_recv = all(float(l.get("po_qty",0)) <= float(l.get("received_qty",0)) for l in SS["po_list"][sel_grn_ref]["lines"])
+                SS["po_list"][sel_grn_ref]["status"] = "Received" if all_recv else "Partial Received"
+            else:
+                for ln in grn_lines:
+                    if float(ln["accepted_qty"]) > 0 and ln["output_material"] in st.session_state["items"]:
+                        cur = float(st.session_state["items"][ln["output_material"]].get("stock",0))
+                        st.session_state["items"][ln["output_material"]]["stock"] = round(cur + ln["accepted_qty"], 3)
+                    idx = ln["jwo_line_idx"]
+                    prev = float(SS["jwo_list"][sel_grn_ref]["lines"][idx].get("received_qty",0))
+                    SS["jwo_list"][sel_grn_ref]["lines"][idx]["received_qty"] = round(prev + ln["received_qty"], 3)
+                all_recv = all(float(l.get("output_qty",0)) <= float(l.get("received_qty",0)) for l in SS["jwo_list"][sel_grn_ref]["lines"])
+                SS["jwo_list"][sel_grn_ref]["status"] = "Received" if all_recv else "Partial Received"
 
-        else:  # JWO Receipt
-            jwo_opts = [""] + [k for k,v in SS.get("jwo_list",{}).items() if v.get("status") in ["Issued to Processor","In Process","Partial Received"]]
-            sel_grn_jwo = st.selectbox("JWO Select *", jwo_opts,
-                                        index=jwo_opts.index(jwo_ref_grn) if jwo_ref_grn in jwo_opts else 0,
-                                        key="grn_jwo_sel")
-            if sel_grn_jwo:
-                jwo = SS["jwo_list"][sel_grn_jwo]
-                st.markdown(f'<div class="ok-box">Processor: <strong>{jwo.get("processor_name","")}</strong> | Expected: {jwo.get("expected_date","")}</div>', unsafe_allow_html=True)
-
-                st.markdown("#### Receipt Lines (Processed Material)")
-                jwo_grn_lines = []
-                for i, ln in enumerate(jwo.get("lines",[])):
-                    pending = ln["output_qty"] - float(ln.get("received_qty",0))
-                    if pending <= 0: continue
-                    jc1,jc2,jc3 = st.columns([3,1,1])
-                    with jc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{ln["output_material"]}</strong> — {ln["output_name"]}<br>Ordered: {ln["output_qty"]} | Pending: {pending:.0f}</div>', unsafe_allow_html=True)
-                    with jc2:
-                        jwo_recv = st.number_input("Recv Qty", min_value=0.0, max_value=float(pending),
-                                                    value=float(pending), step=1.0, key=f"jwo_recv_{sel_grn_jwo}_{i}")
-                    with jc3:
-                        jwo_qc = st.selectbox("QC", ["Pass","Fail","Hold"], key=f"jwo_qc_{sel_grn_jwo}_{i}")
-                    jwo_grn_lines.append({
-                        "material_code": ln["output_material"],
-                        "material_name": ln["output_name"],
-                        "unit":          ln["output_unit"],
-                        "ordered_qty":   ln["output_qty"],
-                        "received_qty":  jwo_recv,
-                        "qc_status":     jwo_qc,
-                    })
-                    st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
-
-                jwo_grn_rem = st.text_area("Remarks", key="jwo_grn_rem")
-                if st.button("✅ Post GRN & Update Stock", use_container_width=False, key="post_jwo_grn") and jwo_grn_lines:
-                    grn_no = next_grn()
-                    # Update stock for received processed material
-                    for ln in jwo_grn_lines:
-                        if ln["qc_status"] == "Pass" and ln["material_code"] in st.session_state["items"]:
-                            cur = float(st.session_state["items"][ln["material_code"]].get("stock", 0))
-                            st.session_state["items"][ln["material_code"]]["stock"] = round(cur + ln["received_qty"], 3)
-                        # Update JWO received qty
-                        for i, jln in enumerate(SS["jwo_list"][sel_grn_jwo]["lines"]):
-                            if jln["output_material"] == ln["material_code"]:
-                                SS["jwo_list"][sel_grn_jwo]["lines"][i]["received_qty"] = \
-                                    float(jln.get("received_qty",0)) + ln["received_qty"]
-
-                    all_recv = all(ln["output_qty"] <= float(ln.get("received_qty",0))
-                                   for ln in SS["jwo_list"][sel_grn_jwo]["lines"])
-                    SS["jwo_list"][sel_grn_jwo]["status"] = "Received" if all_recv else "Partial Received"
-
-                    SS["grn_list"][grn_no] = {
-                        "grn_no": grn_no, "grn_date": str(grn_date),
-                        "grn_type": "JWO Receipt", "ref_no": sel_grn_jwo,
-                        "lines": jwo_grn_lines, "status": "Posted",
-                        "remarks": jwo_grn_rem,
-                        "created_at": datetime.now().isoformat(),
-                    }
-                    st.session_state["grn_from_jwo"] = ""
-                    save_data()
-                    st.success(f"✅ {grn_no} posted! Processed material stock updated.")
-                    st.rerun()
+            SS["grn_list"][grn_no] = {
+                "grn_no":grn_no,"grn_date":str(grn_date),"grn_type":grn_type,
+                "ref_no":sel_grn_ref,"party_name":party_name,
+                "challan_no":grn_challan,"invoice_no":grn_invoice,"invoice_date":str(grn_invoice_dt),
+                "vehicle_no":grn_vehicle,"transporter":grn_transporter,"warehouse":grn_warehouse,
+                "so_ref":ref_doc.get("so_ref",""),"lines":grn_lines,
+                "total_value":total_val if grn_lines else 0,
+                "status":"Posted","remarks":grn_remarks,"created_at":datetime.now().isoformat(),
+            }
+            st.session_state["grn_from_po"] = ""; st.session_state["grn_from_jwo"] = ""
+            save_data()
+            st.session_state["selected_grn"] = grn_no
+            st.success(f"✅ {grn_no} posted! Stock updated.")
+            st.rerun()
 
     with grn_tab1:
-        grn_list = SS.get("grn_list", {})
-        if not grn_list:
-            st.markdown('<div class="warn-box">Koi GRN nahi hai.</div>', unsafe_allow_html=True)
+        if st.session_state.get("selected_grn") and st.session_state["selected_grn"] in grn_list:
+            grn_no = st.session_state["selected_grn"]
+            grn    = grn_list[grn_no]
+            bc1,bc2 = st.columns([1,5])
+            with bc1:
+                if st.button("← Back", key="grn_back"): st.session_state["selected_grn"] = None; st.rerun()
+            with bc2: st.markdown(f'<h2 style="margin:0;">{grn_no}</h2>', unsafe_allow_html=True)
+
+            hc1,hc2,hc3 = st.columns(3)
+            lines = grn.get("lines",[])
+            total_recv = sum(l.get("received_qty",0) for l in lines)
+            total_acc  = sum(l.get("accepted_qty",0) for l in lines)
+            total_rej  = sum(l.get("rejected_qty",0) for l in lines)
+            with hc1:
+                st.markdown(f'''<div class="card card-left">
+                    <div class="sec-label">Party / Supplier</div>
+                    <div style="font-size:15px;font-weight:700;">{grn.get("party_name","—")}</div>
+                    <div style="font-size:12px;margin-top:4px;">Challan: <strong>{grn.get("challan_no","—")}</strong></div>
+                    <div style="font-size:12px;">Invoice: <strong>{grn.get("invoice_no","—")}</strong> ({grn.get("invoice_date","")})</div>
+                    <div style="font-size:12px;">Vehicle: <strong>{grn.get("vehicle_no","—")}</strong></div>
+                    <div style="font-size:12px;">Transporter: <strong>{grn.get("transporter","—")}</strong></div>
+                </div>''', unsafe_allow_html=True)
+            with hc2:
+                st.markdown(f'''<div class="card card-left-blue">
+                    <div class="sec-label">Receipt Details</div>
+                    <div style="font-size:13px;">Date: <strong>{grn.get("grn_date","")}</strong></div>
+                    <div style="font-size:13px;">Type: <strong>{grn.get("grn_type","")}</strong></div>
+                    <div style="font-size:13px;">Against: <strong>{grn.get("ref_no","—")}</strong></div>
+                    <div style="font-size:13px;">SO: <strong>{grn.get("so_ref","—")}</strong></div>
+                    <div style="font-size:13px;">Warehouse: <strong>{grn.get("warehouse","—")}</strong></div>
+                </div>''', unsafe_allow_html=True)
+            with hc3:
+                st.markdown(f'''<div class="card card-left-green">
+                    <div class="sec-label">QC Summary</div>
+                    <div style="font-size:13px;">Received: <strong>{total_recv}</strong></div>
+                    <div style="font-size:13px;color:#059669;">Accepted: <strong>{total_acc}</strong></div>
+                    <div style="font-size:13px;color:#ef4444;">Rejected: <strong>{total_rej}</strong></div>
+                    <div style="font-size:18px;font-weight:800;color:#c8a96e;margin-top:4px;">₹{grn.get("total_value",0):,.2f}</div>
+                </div>''', unsafe_allow_html=True)
+
+            st.markdown("---")
+            if grn.get("grn_type") == "PO Receipt":
+                line_rows = [{"#":i+1,"Material":f"{l['material_code']} – {l['material_name']}",
+                               "Type":l.get("material_type",""),"PO Qty":l.get("po_qty",0),
+                               "Recv Qty":l.get("received_qty",0),"Accepted":l.get("accepted_qty",0),
+                               "Rejected":l.get("rejected_qty",0),"Unit":l.get("unit",""),
+                               "Rate":f"₹{l.get('rate',0):,.2f}","Amount":f"₹{l.get('amount',0):,.2f}",
+                               "QC":l.get("qc_status","")} for i,l in enumerate(lines)]
+            else:
+                line_rows = [{"#":i+1,"Output":f"{l['output_material']} – {l['output_name']}",
+                               "Grey Issued":f"{l.get('input_material','')} {l.get('input_qty','')} {l.get('input_unit','')}",
+                               "JWO Qty":l.get("jwo_qty",0),"Recv Qty":l.get("received_qty",0),
+                               "Accepted":l.get("accepted_qty",0),"Rejected":l.get("rejected_qty",0),
+                               "Unit":l.get("unit",""),"Rate":f"₹{l.get('rate',0):,.2f}",
+                               "Amount":f"₹{l.get('amount',0):,.2f}","QC":l.get("qc_status","")} for i,l in enumerate(lines)]
+            st.dataframe(pd.DataFrame(line_rows), use_container_width=True, hide_index=True)
+
+            if grn.get("remarks"):
+                st.markdown(f'<div class="info-box"><strong>Remarks:</strong> {grn["remarks"]}</div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+            show_print_button("GRN", grn_no, grn, f"print_grn_{grn_no}")
+
         else:
-            grn_rows = []
+            gf1,gf2 = st.columns(2)
+            with gf1: gf_type = st.selectbox("Type",["All","PO Receipt","JWO Receipt"], key="gfl_type")
+            with gf2: gf_srch = st.text_input("🔍 GRN # / Party", key="gfl_srch")
+
+            if not grn_list:
+                st.markdown('<div class="warn-box">Koi GRN nahi hai.</div>', unsafe_allow_html=True)
             for grn_no, grn in reversed(list(grn_list.items())):
-                grn_rows.append({
-                    "GRN #": grn_no, "Date": grn.get("grn_date",""),
-                    "Type": grn.get("grn_type",""), "Ref": grn.get("ref_no",""),
-                    "Items": len(grn.get("lines",[])),
-                    "Status": grn.get("status",""),
-                })
-            st.dataframe(pd.DataFrame(grn_rows), use_container_width=True, hide_index=True)
+                if gf_type != "All" and grn.get("grn_type","") != gf_type: continue
+                if gf_srch and gf_srch.lower() not in grn_no.lower() and gf_srch.lower() not in grn.get("party_name","").lower(): continue
+                r1,r2,r3,r4,r5,r6,r7 = st.columns([1.2,2,1.5,1.5,1.5,1.2,0.8])
+                with r1: st.markdown(f'<div style="padding-top:8px;font-family:monospace;font-size:12px;font-weight:700;color:#c8a96e;">{grn_no}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:6px;font-size:13px;font-weight:600;">{grn.get("party_name","—")}</div>', unsafe_allow_html=True)
+                with r3: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{grn.get("grn_date","")}</div>', unsafe_allow_html=True)
+                with r4: st.markdown(f'<div style="padding-top:8px;font-size:12px;">Challan: {grn.get("challan_no","—")}<br>Inv: {grn.get("invoice_no","—")}</div>', unsafe_allow_html=True)
+                with r5: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{grn.get("grn_type","")}<br>Ref: {grn.get("ref_no","—")}</div>', unsafe_allow_html=True)
+                with r6: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{grn.get("total_value",0):,.2f}</div>', unsafe_allow_html=True)
+                with r7:
+                    if st.button("Open", key=f"open_grn_{grn_no}", use_container_width=True):
+                        st.session_state["selected_grn"] = grn_no; st.rerun()
+                st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
 
-
-# ── SUPPLIER MASTER ───────────────────────────────────────────────────────────
 elif nav_pur == "👥 Supplier Master":
     st.markdown('<h1>Supplier Master</h1>', unsafe_allow_html=True)
 
