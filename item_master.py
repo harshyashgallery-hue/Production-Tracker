@@ -6148,23 +6148,56 @@ elif nav_pur == "📥 GRN":
                 SS["po_list"][sel_grn_ref]["status"] = "Received" if all_recv else "Partial Received"
             else:
                 jwo_data = jwo_list.get(sel_grn_ref, {})
+                items_data = st.session_state.get("items", {})
+                if "pf_unchecked" not in SS: SS["pf_unchecked"] = {}
+
                 for ln in grn_lines:
                     mat_code = ln["output_material"]
                     accepted = float(ln["accepted_qty"])
-                    if accepted > 0 and mat_code in st.session_state["items"]:
-                        cur = float(st.session_state["items"][mat_code].get("stock",0))
-                        st.session_state["items"][mat_code]["stock"] = round(cur + accepted, 3)
-                        SS["stock_ledger"].append({
-                            "date": str(grn_date), "doc_no": grn_no, "doc_type": "GRN-JWO",
-                            "ref_no": sel_grn_ref, "party": party_name,
-                            "material_code": mat_code, "material_name": ln["output_name"],
-                            "txn_type": "IN", "qty": accepted, "unit": ln.get("unit",""),
-                            "stock_after": round(cur + accepted, 3),
-                            "remarks": f"Processed material received from {party_name}",
-                        })
+                    mat_type = items_data.get(mat_code, {}).get("item_type", "")
+
+                    if accepted > 0:
+                        # SFG (Printed/Processed Fabric) → Unchecked Stock (NOT direct usable stock)
+                        if mat_type in ["Semi Finished Goods (SFG)"]:
+                            unc_key = f"{mat_code}_grn_{grn_no}"
+                            SS["pf_unchecked"][unc_key] = {
+                                "fabric_code":  mat_code,
+                                "fabric_name":  items_data.get(mat_code, {}).get("name", mat_code),
+                                "design":       ln.get("remarks",""),
+                                "qty":          accepted,
+                                "printer":      party_name,
+                                "jwo_ref":      sel_grn_ref,
+                                "receive_date": str(grn_date),
+                                "challan":      grn_challan,
+                                "grn_no":       grn_no,
+                                "remarks":      f"Auto from GRN {grn_no}",
+                            }
+                            SS["stock_ledger"].append({
+                                "date": str(grn_date), "doc_no": grn_no, "doc_type": "GRN-JWO",
+                                "ref_no": sel_grn_ref, "party": party_name,
+                                "material_code": mat_code, "material_name": ln["output_name"],
+                                "txn_type": "IN", "qty": accepted, "unit": ln.get("unit",""),
+                                "to_location": "Unchecked Stock",
+                                "stock_after": float(items_data.get(mat_code,{}).get("stock",0)),
+                                "remarks": f"Received from {party_name} → Unchecked Stock (pending check)",
+                            })
+                        else:
+                            # Non-SFG materials → directly to stock (normal flow)
+                            cur = float(st.session_state["items"][mat_code].get("stock",0))
+                            st.session_state["items"][mat_code]["stock"] = round(cur + accepted, 3)
+                            SS["stock_ledger"].append({
+                                "date": str(grn_date), "doc_no": grn_no, "doc_type": "GRN-JWO",
+                                "ref_no": sel_grn_ref, "party": party_name,
+                                "material_code": mat_code, "material_name": ln["output_name"],
+                                "txn_type": "IN", "qty": accepted, "unit": ln.get("unit",""),
+                                "stock_after": round(cur + accepted, 3),
+                                "remarks": f"Received from {party_name}",
+                            })
+
                     idx = ln["jwo_line_idx"]
                     prev = float(SS["jwo_list"][sel_grn_ref]["lines"][idx].get("received_qty",0))
                     SS["jwo_list"][sel_grn_ref]["lines"][idx]["received_qty"] = round(prev + ln["received_qty"], 3)
+
                 all_recv = all(float(l.get("output_qty",0)) <= float(l.get("received_qty",0)) for l in SS["jwo_list"][sel_grn_ref]["lines"])
                 SS["jwo_list"][sel_grn_ref]["status"] = "Received" if all_recv else "Partial Received"
 
@@ -8073,8 +8106,8 @@ if nav_pfc == "🔬 Check Dashboard":
 
 # ── RECEIVE FABRIC ────────────────────────────────────────────────────────────
 elif nav_pfc == "📥 Receive Fabric":
-    st.markdown('<h1>Printed Fabric — Receive from Printer</h1>', unsafe_allow_html=True)
-    st.markdown('<div class="info-box">Printer se fabric receive karo → automatically Unchecked Stock mein jaayega. Check hone ke baad hi usable stock mein aayega.</div>', unsafe_allow_html=True)
+    st.markdown('<h1>Printed Fabric — Manual Receive</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="ok-box">ℹ️ <strong>JWO ke against fabric:</strong> GRN post karte hi automatically Unchecked Stock mein chala jaata hai — yahan aane ki zarurat nahi.<br><strong>Yeh page sirf tab use karo</strong> jab fabric bina JWO ke aaya ho ya manual entry karni ho.</div>', unsafe_allow_html=True)
 
     items_data = st.session_state.get("items", {})
     jwo_list   = SS.get("jwo_list", {})
