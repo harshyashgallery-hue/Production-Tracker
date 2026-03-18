@@ -545,7 +545,9 @@ with st.sidebar:
         if not accessible: return
         st.markdown(f'<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">{label}</p>', unsafe_allow_html=True)
         for _, pg in accessible:
-            if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+            is_active = st.session_state.get("current_page") == pg
+            btn_label = f"▶ {pg}" if is_active else pg
+            if st.button(btn_label, key=f"sidebar_{module_id}_{pg}", use_container_width=True):
                 st.session_state["current_page"] = pg
                 st.rerun()
 
@@ -2084,7 +2086,7 @@ elif nav_so == "➕ Create Sales Order":
                         st.session_state["_last_demand_loaded"] = ref_number
                         st.rerun()
             else:
-                ref_number = st.text_input(f"{ref_label} *", placeholder=f"Enter {ref_label}", key="_so_ref")
+                ref_number = st.text_input(f"{ref_label} *", placeholder=f"Enter {ref_label}", key="_so_ref_txt")
 
             ref_date       = st.date_input("Reference Date", value=date.today(), key="_so_refdate")
             payment_terms  = st.selectbox("Payment Terms", SS["payment_terms"], key="_so_pay")
@@ -6078,13 +6080,13 @@ elif nav_pur == "📥 GRN":
                 ref_doc     = jwo_list.get(sel_grn_ref, {})
                 party_name  = ref_doc.get("processor_name","")
             with gh2:
-                grn_challan    = st.text_input("Processor Challan No. *", key="grn_challan", placeholder="e.g. CHN/2024/001")
-                grn_invoice    = st.text_input("Invoice No.", key="grn_invoice", placeholder="e.g. INV/2024/001")
-                grn_invoice_dt = st.date_input("Invoice Date", value=date.today(), key="grn_inv_dt")
+                grn_challan    = st.text_input("Processor Challan No. *", key="grn_challan_jwo", placeholder="e.g. CHN/2024/001")
+                grn_invoice    = st.text_input("Invoice No.", key="grn_invoice_jwo", placeholder="e.g. INV/2024/001")
+                grn_invoice_dt = st.date_input("Invoice Date", value=date.today(), key="grn_inv_dt_jwo")
             with gh3:
-                grn_vehicle     = st.text_input("Vehicle / LR No.", key="grn_vehicle")
-                grn_transporter = st.text_input("Transporter", key="grn_transport")
-                grn_warehouse   = st.selectbox("Received at Warehouse", SS.get("warehouses",[""]), key="grn_wh")
+                grn_vehicle     = st.text_input("Vehicle / LR No.", key="grn_vehicle_jwo")
+                grn_transporter = st.text_input("Transporter", key="grn_transport_jwo")
+                grn_warehouse   = st.selectbox("Received at Warehouse", SS.get("warehouses",[""]), key="grn_wh_jwo")
 
         if sel_grn_ref:
             st.markdown(f'<div class="ok-box">Party: <strong>{party_name}</strong> | Ref: <strong>{sel_grn_ref}</strong> | SO: <strong>{ref_doc.get("so_ref","—")}</strong></div>', unsafe_allow_html=True)
