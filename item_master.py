@@ -8773,11 +8773,16 @@ def get_sku_process_status(sku, so_no):
     jo_list = SS.get("prod_jo_list", {})
     completed = {}
     for jo_no, jo in jo_list.items():
-        if jo.get("so_no") == so_no and sku in [l.get("sku") for l in jo.get("lines", [])]:
-            proc   = jo.get("process", "")
-            status = jo.get("status", "")
-            if status in ["Completed", "Closed"]:
-                completed[proc] = jo_no
+        if jo.get("so_no") != so_no: continue
+        proc   = jo.get("process", "")
+        status = jo.get("status", "")
+        # Check if this JO has output for this specific SKU
+        sku_line = next((l for l in jo.get("lines", []) if l.get("sku") == sku), None)
+        if sku_line is None: continue
+        sku_output = float(sku_line.get("output_qty", 0))
+        # Mark as completed if: status Completed/Closed OR output_qty > 0
+        if status in ["Completed", "Closed"] or sku_output > 0:
+            completed[proc] = jo_no
     return completed
 
 def get_ready_to_process(target_process=None):
@@ -8979,7 +8984,7 @@ elif nav_prd == "✂️ Ready to Process":
                             st.session_state["current_page"] = "➕ Create Job Order"
                             st.rerun()
                     else:
-                        if st.button("📋 View JO", key=f"view_jo_{r['in_progress_jo']}", use_container_width=True):
+                        if st.button("📋 View JO", key=f"view_jo_{r['in_progress_jo']}_{r['sku']}", use_container_width=True):
                             st.session_state["selected_pjo"] = r["in_progress_jo"]
                             st.session_state["current_page"] = "📋 Job Order List"
                             st.rerun()
