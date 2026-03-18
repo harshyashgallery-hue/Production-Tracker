@@ -6420,42 +6420,54 @@ elif nav_gry == "🚚 Transit Tracker":
                 with up2:
                     st.markdown("**📍 Grey Ka Abhi Kya Update Karna Hai?**")
 
-                    current_status = t.get("status","PO Created")
+                    # Calculate actual pending qty at each location
+                    _ordered   = float(t.get("ordered_qty", 0))
+                    _received  = float(t.get("received_qty", 0))   # total received at transport/factory
+                    _trans_q   = float(t.get("transport_qty", 0))
+                    _fac_q     = float(t.get("factory_qty", 0))
+                    _print_q   = float(t.get("printer_qty", 0))
+                    _pending_recv = max(0, _ordered - _received)    # still in transit (not yet received)
+                    _has_bilty = bool(t.get("bilty_no",""))
 
-                    # Show context-aware action buttons based on current status
-                    if current_status == "In Transit":
-                        st.markdown('<div class="info-box" style="font-size:12px;">Grey In Transit hai — jab transport location pe pahunche tab "✅ Received at Transport Location" click karo.</div>', unsafe_allow_html=True)
+                    # Show current location summary
+                    st.markdown(f'''<div style="background:#f8fafc;border:1px solid #e2e5ef;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:8px;">
+                        🚚 In Transit: <strong>{_pending_recv:.0f} mtr</strong> &nbsp;|&nbsp;
+                        📦 Transport: <strong>{_trans_q:.0f} mtr</strong> &nbsp;|&nbsp;
+                        🏭 Factory: <strong>{_fac_q:.0f} mtr</strong> &nbsp;|&nbsp;
+                        🖨️ Printer: <strong>{_print_q:.0f} mtr</strong>
+                    </div>''', unsafe_allow_html=True)
+
+                    # ── STEP 1: Receive at Transport (only if pending in transit) ──
+                    if _has_bilty and _pending_recv > 0:
+                        st.markdown(f'<div class="info-box" style="font-size:12px;">📦 <strong>{_pending_recv:.0f} mtr</strong> abhi bhi In Transit hai — transport location pe pahunche tab receive karo.</div>', unsafe_allow_html=True)
 
                         rc1, rc2 = st.columns(2)
                         with rc1:
-                            st.number_input("📦 Qty Received (mtr)", min_value=0.0,
-                                max_value=float(t.get("ordered_qty",0)) * 1.1,
-                                value=float(t.get("ordered_qty",0)),
+                            st.number_input("Qty Received (mtr)", min_value=0.0,
+                                max_value=_pending_recv,
+                                value=_pending_recv,
                                 step=0.5, key=f"recv_trans_{key}")
                             st.date_input("Receipt Date", value=date.today(), key=f"recv_dt_{key}")
-                            st.text_input("Received At (Location)", value="Transport Location",
-                                          key=f"recv_at_{key}", placeholder="e.g. Shree Ram Transport, Jaipur")
-                            st.text_input("Received By", key=f"recv_by_{key}", placeholder="Name of person")
+                            st.text_input("Received At", value="Transport Location",
+                                          key=f"recv_at_{key}")
+                            st.text_input("Received By", key=f"recv_by_{key}")
                         with rc2:
-                            st.text_input("Vendor Challan No.", key=f"recv_challan_{key}",
-                                          placeholder="Supplier ka challan number")
-                            st.text_input("Remarks (optional)", key=f"recv_rem_{key}")
+                            st.text_input("Vendor Challan No.", key=f"recv_challan_{key}")
+                            st.text_input("Remarks", key=f"recv_rem_{key}")
 
                         if st.button("✅ Received at Transport Location", key=f"btn_recv_trans_{key}", use_container_width=True):
-                            _recv_q       = float(st.session_state.get(f"recv_trans_{key}", t.get("ordered_qty",0)))
+                            _recv_q       = min(float(st.session_state.get(f"recv_trans_{key}", _pending_recv)), _pending_recv)
                             _recv_rem     = st.session_state.get(f"recv_rem_{key}", "")
                             _recv_at      = st.session_state.get(f"recv_at_{key}", "Transport Location")
                             _recv_by      = st.session_state.get(f"recv_by_{key}", "")
                             _recv_challan = st.session_state.get(f"recv_challan_{key}", "")
                             _recv_dt      = str(st.session_state.get(f"recv_dt_{key}", date.today()))
-
-                            # Generate Receipt No.
-                            _recv_no = f"GRN-GREY-{t.get('po_no','')}-{datetime.now().strftime('%d%m%H%M')}"
+                            _recv_no      = f"GRN-GREY-{t.get('po_no','')}-{datetime.now().strftime('%d%m%H%M')}"
 
                             SS["grey_po_tracker"][key].update({
                                 "status":        "At Transport Location",
-                                "transport_qty": float(t.get("transport_qty",0)) + _recv_q,
-                                "received_qty":  float(t.get("received_qty",0)) + _recv_q,
+                                "transport_qty": _trans_q + _recv_q,
+                                "received_qty":  _received + _recv_q,
                                 "last_receipt_no":   _recv_no,
                                 "last_receipt_date": _recv_dt,
                                 "last_recv_at":      _recv_at,
@@ -6468,37 +6480,49 @@ elif nav_gry == "🚚 Transit Tracker":
                             st.success(f"✅ {_recv_q} mtr receive hua! Receipt No: {_recv_no}")
                             st.rerun()
 
-                        # Print Receipt if already received
+                        # Print Receipt if already received before
                         if t.get("last_receipt_no"):
                             st.markdown("---")
                             _receipt_data = {
-                                "po_no":          t.get("po_no",""),
-                                "receipt_date":   t.get("last_receipt_date",""),
-                                "supplier_name":  t.get("supplier",""),
-                                "bilty_no":       t.get("bilty_no",""),
-                                "transporter":    t.get("transporter",""),
-                                "vehicle_no":     t.get("vehicle_no",""),
-                                "dispatch_date":  t.get("dispatch_date",""),
-                                "received_at":    t.get("last_recv_at",""),
-                                "received_by":    t.get("last_recv_by",""),
-                                "challan_no":     t.get("last_challan",""),
-                                "so_ref":         t.get("so_ref",""),
-                                "lines": [{
-                                    "material_code": t.get("material_code",""),
-                                    "material_name": t.get("material_name",""),
-                                    "po_qty":        t.get("ordered_qty",0),
-                                    "received_qty":  t.get("received_qty",0),
-                                    "pending_qty":   max(0, t.get("ordered_qty",0)-t.get("received_qty",0)),
-                                    "unit":          t.get("unit","Meter"),
-                                    "rate":          0,
-                                    "qc_status":     "Pending",
-                                }],
+                                "po_no": t.get("po_no",""), "receipt_date": t.get("last_receipt_date",""),
+                                "supplier_name": t.get("supplier",""), "bilty_no": t.get("bilty_no",""),
+                                "transporter": t.get("transporter",""), "vehicle_no": t.get("vehicle_no",""),
+                                "dispatch_date": t.get("dispatch_date",""), "received_at": t.get("last_recv_at",""),
+                                "received_by": t.get("last_recv_by",""), "challan_no": t.get("last_challan",""),
+                                "so_ref": t.get("so_ref",""),
+                                "lines": [{"material_code": t.get("material_code",""),
+                                           "material_name": t.get("material_name",""),
+                                           "po_qty": _ordered, "received_qty": _received + _pending_recv,
+                                           "pending_qty": 0, "unit": t.get("unit","Meter"), "rate": 0, "qc_status": "Pending"}],
                             }
                             show_print_button("GREY_RECEIPT", t.get("last_receipt_no",""), _receipt_data, f"print_grey_recv_{key}")
 
-                    elif current_status == "At Transport Location":
-                        avail = float(t.get("transport_qty", 0))
-                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Transport Location pe: <strong>{avail} mtr</strong> available hai.</div>', unsafe_allow_html=True)
+                    elif _has_bilty and _pending_recv == 0:
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">✅ Saari qty receive ho gayi ({_received:.0f} mtr).</div>', unsafe_allow_html=True)
+                        # Print last receipt
+                        if t.get("last_receipt_no"):
+                            _receipt_data = {
+                                "po_no": t.get("po_no",""), "receipt_date": t.get("last_receipt_date",""),
+                                "supplier_name": t.get("supplier",""), "bilty_no": t.get("bilty_no",""),
+                                "transporter": t.get("transporter",""), "vehicle_no": t.get("vehicle_no",""),
+                                "dispatch_date": t.get("dispatch_date",""), "received_at": t.get("last_recv_at",""),
+                                "received_by": t.get("last_recv_by",""), "challan_no": t.get("last_challan",""),
+                                "so_ref": t.get("so_ref",""),
+                                "lines": [{"material_code": t.get("material_code",""),
+                                           "material_name": t.get("material_name",""),
+                                           "po_qty": _ordered, "received_qty": _received,
+                                           "pending_qty": 0, "unit": t.get("unit","Meter"), "rate": 0, "qc_status": "—"}],
+                            }
+                            show_print_button("GREY_RECEIPT", t.get("last_receipt_no",""), _receipt_data, f"print_grey_recv_{key}")
+
+                    elif not _has_bilty:
+                        st.markdown('<div class="warn-box" style="font-size:12px;">⚠️ Pehle Bilty No. daalo (left side mein) phir receive kar sakte ho.</div>', unsafe_allow_html=True)
+
+                    # ── STEP 2: Send from Transport to Factory or Printer ──
+                    if _trans_q > 0:
+                        st.markdown("---")
+                        avail = _trans_q
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">📦 Transport pe: <strong>{avail:.0f} mtr</strong> available. Kahan bhejna hai?</div>', unsafe_allow_html=True)
 
                         action = st.radio("Next Action", [
                             "🏭 Factory bhejo",
@@ -6507,7 +6531,7 @@ elif nav_gry == "🚚 Transit Tracker":
 
                         if "Factory" in action:
                             send_qty = st.number_input("Factory ko Qty (mtr)", min_value=0.0,
-                                                        max_value=avail * 1.1, value=avail,
+                                                        max_value=avail, value=avail,
                                                         step=0.5, key=f"send_qty_{key}")
                             send_rem = st.text_input("Challan / Remarks", key=f"send_rem_{key}")
                             if st.button("🏭 Send to Factory", key=f"btn_to_fac_{key}", use_container_width=True):
@@ -6630,10 +6654,12 @@ elif nav_gry == "🚚 Transit Tracker":
                                     show_print_button("GREY_ISSUE", _issue_no, SS["grey_issue_docs"][_issue_no], f"print_issue_{_issue_no}")
                                     st.rerun()
 
-                    elif current_status == "At Factory":
-                        avail = float(t.get("factory_qty", 0))
+                    # ── STEP 3: Send from Factory to Printer ──
+                    if _fac_q > 0:
+                        st.markdown("---")
+                        avail = _fac_q
                         mat_code = t.get("material_code","")
-                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Factory mein: <strong>{avail} mtr</strong> available.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">🏭 Factory mein: <strong>{avail:.0f} mtr</strong> available. Printer ko bhejna hai?</div>', unsafe_allow_html=True)
 
                         # JWO-linked issue from factory
                         jwo_list = SS.get("jwo_list", {})
@@ -6718,20 +6744,16 @@ elif nav_gry == "🚚 Transit Tracker":
                             show_print_button("GREY_ISSUE", _issue_no_fac, SS["grey_issue_docs"][_issue_no_fac], f"print_fac_issue_{_issue_no_fac}")
                             st.rerun()
 
-                    elif current_status in ["Sent to Printer","At Printer"]:
-                        st.markdown(f'<div class="info-box" style="font-size:12px;">Grey printer ke paas hai ({t.get("printer_qty",0)} mtr). Printed fabric receive hone pe GRN karo ya QC karo.</div>', unsafe_allow_html=True)
-                        if st.button("➡️ Go to GRN", key=f"btn_goto_grn_{key}", use_container_width=True):
+                    # ── STEP 4: At Printer ──
+                    if _print_q > 0:
+                        st.markdown("---")
+                        st.markdown(f'<div class="info-box" style="font-size:12px;">🖨️ Printer ke paas: <strong>{_print_q:.0f} mtr</strong>. Printed fabric receive hone pe GRN karo.</div>', unsafe_allow_html=True)
+                        if st.button("➡️ Go to GRN (Printed Fabric Receive)", key=f"btn_goto_grn_{key}", use_container_width=True):
                             st.session_state["current_page"] = "📥 GRN"; st.rerun()
 
-                    else:
-                        # Generic status update for other statuses
-                        new_status = st.selectbox("Status Update", GREY_STATUSES,
-                                                   index=GREY_STATUSES.index(current_status) if current_status in GREY_STATUSES else 0,
-                                                   key=f"gry_sts_{key}")
-                        new_remarks = st.text_input("Remarks", key=f"gry_rem_{key}")
-                        if st.button("💾 Update", key=f"upd_loc_{key}"):
-                            SS["grey_po_tracker"][key]["status"] = new_status
-                            save_data(); st.success(f"✅ Updated!"); st.rerun()
+                    # Nothing anywhere — just PO created
+                    if not _has_bilty and _pending_recv == _ordered and _trans_q == 0 and _fac_q == 0 and _print_q == 0:
+                        st.markdown('<div class="warn-box" style="font-size:12px;">⚠️ Abhi koi action nahi. Pehle Bilty No. daalo (left side mein).</div>', unsafe_allow_html=True)
 
 
 # ── LOCATION STOCK ────────────────────────────────────────────────────────────
