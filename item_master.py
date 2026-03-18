@@ -8967,7 +8967,43 @@ elif nav_prd == "➕ Create Job Order":
             st.markdown(f'<div class="warn-box">SO {jo_so} mein koi SKU {jo_process} ke liye ready nahi hai. Pehle fabric allocate karo aur previous processes complete karo.</div>', unsafe_allow_html=True)
         else:
             st.markdown(f"#### 📋 Lines — {jo_so} | Process: {jo_process}")
-            st.markdown(f'<div class="info-box" style="font-size:12px;">✅ {len(so_ready)} SKU(s) {jo_process} ke liye ready hain. Qty adjust karo agar partial karna ho.</div>', unsafe_allow_html=True)
+
+            # Get process rate from BOM for first SKU (all should be same style)
+            first_sku    = so_ready[0]["sku"]
+            first_parent = items_data.get(first_sku,{}).get("parent", first_sku)
+            first_bom    = boms_data.get(first_parent, boms_data.get(first_sku,{}))
+            proc_lines_bom = first_bom.get("process_lines",[])
+            # Find matching process rate
+            bom_proc_rate = 0.0
+            bom_proc_unit = "per piece"
+            bom_proc_vendor = ""
+            for pl in proc_lines_bom:
+                if pl.get("process","").lower() == jo_process.lower():
+                    bom_proc_rate   = float(pl.get("rate", 0))
+                    bom_proc_unit   = pl.get("unit","per piece")
+                    bom_proc_vendor = pl.get("vendor","")
+                    break
+
+            # Show process rate (editable)
+            st.markdown(f'<div class="ok-box" style="font-size:12px;">✅ {len(so_ready)} SKU(s) {jo_process} ke liye ready hain.</div>', unsafe_allow_html=True)
+
+            # Process Rate — prominently displayed
+            st.markdown(f'''<div style="background:#fef3c7;border:2px solid #d97706;border-radius:10px;padding:12px 16px;margin:8px 0;">
+                <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:8px;">
+                    💰 {jo_process} Process Rate (BOM se auto-filled)
+                    {"— Vendor: " + bom_proc_vendor if bom_proc_vendor else ""}
+                </div>
+            </div>''', unsafe_allow_html=True)
+            pr1, pr2 = st.columns(2)
+            with pr1:
+                jo_proc_rate = st.number_input(
+                    f"Rate (₹/{bom_proc_unit}) *",
+                    min_value=0.0, value=float(bom_proc_rate),
+                    step=1.0, key="pjo_proc_rate",
+                    help="BOM se auto-fill — edit kar sakte ho"
+                )
+            with pr2:
+                jo_proc_unit = st.text_input("Rate Unit", value=bom_proc_unit, key="pjo_proc_unit")
 
             if "pjo_lines" not in st.session_state:
                 st.session_state["pjo_lines"] = []
@@ -9006,8 +9042,9 @@ elif nav_prd == "➕ Create Job Order":
 
             # Editable qty table
             line_rows = []
+            total_proc_amount = 0
             for i, ld in enumerate(jo_lines_data):
-                lc1,lc2,lc3,lc4 = st.columns([2,1,1,2])
+                lc1,lc2,lc3,lc4 = st.columns([2.5,1,1,2])
                 with lc1:
                     st.markdown(f'<div style="padding-top:32px;font-size:13px;font-weight:600;">{ld["sku"]} — {ld["sku_name"]}</div>', unsafe_allow_html=True)
                 with lc2:
@@ -9017,19 +9054,28 @@ elif nav_prd == "➕ Create Job Order":
                         max_value=float(ld["so_qty"]), value=float(ld["so_qty"]),
                         step=1.0, key=f"pjo_qty_{i}")
                 with lc4:
-                    # Material requirement display
+                    # Process cost for this line
+                    proc_rate_now = float(st.session_state.get("pjo_proc_rate", bom_proc_rate))
+                    line_proc_amt = round(plan_qty * proc_rate_now, 2)
+                    total_proc_amount += line_proc_amt
+                    st.markdown(f'<div style="padding-top:6px;font-size:11px;color:#64748b;">', unsafe_allow_html=True)
                     for m in ld["mat_req"]:
                         total_mat = round(m["qty_per"] * plan_qty, 2)
-                        st.markdown(f'<div style="padding-top:4px;font-size:11px;color:#64748b;">📦 {m["code"]}: {m["qty_per"]} × {plan_qty:.0f} = <strong>{total_mat} mtr</strong></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="font-size:11px;color:#64748b;">📦 {m["code"]}: {m["qty_per"]} × {plan_qty:.0f} = <strong>{total_mat} mtr</strong></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:12px;color:#059669;margin-top:2px;">💰 Process: {plan_qty:.0f} × ₹{proc_rate_now:.0f} = <strong>₹{line_proc_amt:,.2f}</strong></div>', unsafe_allow_html=True)
 
                 line_rows.append({
-                    "sku":      ld["sku"],
-                    "sku_name": ld["sku_name"],
-                    "so_qty":   ld["so_qty"],
-                    "plan_qty": plan_qty,
-                    "mat_req":  ld["mat_req"],
-                    "fab_alloc":ld["fab_alloc"],
+                    "sku":        ld["sku"],
+                    "sku_name":   ld["sku_name"],
+                    "so_qty":     ld["so_qty"],
+                    "plan_qty":   plan_qty,
+                    "proc_rate":  float(st.session_state.get("pjo_proc_rate", bom_proc_rate)),
+                    "proc_amt":   line_proc_amt,
+                    "mat_req":    ld["mat_req"],
+                    "fab_alloc":  ld["fab_alloc"],
                 })
+
+            st.markdown(f'<div class="ok-box" style="font-size:13px;">💰 Total Process Amount: <strong>₹{total_proc_amount:,.2f}</strong></div>', unsafe_allow_html=True)
 
             # Material Issue section
             if jo_process == "Cutting" and any(r["mat_req"] for r in line_rows):
@@ -9038,18 +9084,42 @@ elif nav_prd == "➕ Create Job Order":
                 st.markdown('<div class="info-box" style="font-size:12px;">BOM ke basis pe fabric requirement calculate ho gayi. Rate BOM process cost se auto-fill hua hai — edit kar sakte ho.</div>', unsafe_allow_html=True)
 
                 issue_lines = []
+                # Group by material to avoid duplicates
+                seen_mat_sku = set()
                 for lr in line_rows:
                     for m in lr["mat_req"]:
-                        fab_key   = f"{m['code']}_checked"
-                        fab_avail = float(max(0, float(pf_checked.get(fab_key,{}).get("qty",0)) - float(pf_checked.get(fab_key,{}).get("hard_reserved",0))))
+                        fab_key      = f"{m['code']}_checked"
+                        chk_qty      = float(pf_checked.get(fab_key,{}).get("qty",0))
+                        # Hard reserved for OTHER SOs (not current SO)
+                        other_so_res = sum(
+                            float(r.get("qty",0))
+                            for r in SS.get("pf_hard_reservations",{}).values()
+                            if r.get("fabric_code","") == m["code"]
+                            and r.get("status","") == "Active"
+                            and r.get("so_no","") != jo_so  # exclude current SO
+                        )
+                        # Hard reserved for THIS SO (this is available to issue)
+                        this_so_res  = sum(
+                            float(r.get("qty",0))
+                            for r in SS.get("pf_hard_reservations",{}).values()
+                            if r.get("fabric_code","") == m["code"]
+                            and r.get("status","") == "Active"
+                            and r.get("so_no","") == jo_so
+                        )
+                        # Available = checked qty - other SOs reserved (this SO's reserved IS available)
+                        fab_avail = float(max(0, chk_qty - other_so_res))
                         req_qty   = float(round(m["qty_per"] * float(lr["plan_qty"]), 2))
                         issue_max = float(max(fab_avail, req_qty))  # allow at least req_qty
                         # Get rate from item master
                         mat_rate  = float(items_data.get(m["code"],{}).get("price", 0))
 
-                        mi1,mi2,mi3,mi4,mi5 = st.columns([2,1,1,1,1])
+                        mat_sku_key = f"{m['code']}_{lr['sku']}"
+                        mi1,mi2,mi3,mi4,mi5 = st.columns([2.5,1,1,1,1])
                         with mi1:
-                            st.markdown(f'<div style="padding-top:28px;font-size:12px;font-weight:600;">{m["code"]} — {m["name"]}</div>', unsafe_allow_html=True)
+                            st.markdown(f'''<div style="padding-top:8px;font-size:12px;">
+                                <strong>{m["code"]} — {m["name"]}</strong><br>
+                                <span style="color:#64748b;font-size:11px;">For SKU: {lr["sku"]} | SO: {jo_so}</span>
+                            </div>''', unsafe_allow_html=True)
                         with mi2:
                             st.markdown(f'<div style="padding-top:24px;font-size:12px;">Required:<br><strong>{req_qty} mtr</strong></div>', unsafe_allow_html=True)
                         with mi3:
@@ -9121,22 +9191,25 @@ elif nav_prd == "➕ Create Job Order":
                                 issued.append(il)
 
                     SS["prod_jo_list"][jo_no] = {
-                        "jo_no":       jo_no,
-                        "jo_date":     str(jo_date),
-                        "exp_date":    str(jo_exp_date),
-                        "process":     jo_process,
-                        "exec_type":   jo_exec,
-                        "vendor_name": vendor_name,
-                        "unit":        jo_unit if jo_exec == "Inhouse" else jo_unit,
-                        "so_no":       jo_so,
-                        "buyer":       so_data.get("buyer",""),
-                        "delivery":    so_data.get("delivery_date",""),
-                        "lines":       final_lines,
+                        "jo_no":            jo_no,
+                        "jo_date":          str(jo_date),
+                        "exp_date":         str(jo_exp_date),
+                        "process":          jo_process,
+                        "proc_rate":        float(st.session_state.get("pjo_proc_rate", 0)),
+                        "proc_unit":        st.session_state.get("pjo_proc_unit","per piece"),
+                        "total_proc_amount":sum(lr.get("proc_amt",0) for lr in line_rows),
+                        "exec_type":        jo_exec,
+                        "vendor_name":      vendor_name,
+                        "unit":             jo_unit if jo_exec == "Inhouse" else jo_unit,
+                        "so_no":            jo_so,
+                        "buyer":            so_data.get("buyer",""),
+                        "delivery":         so_data.get("delivery_date",""),
+                        "lines":            final_lines,
                         "issued_materials": issued if 'issued' in dir() else [],
-                        "total_fabric_value": sum(il.get("amount",0) for il in (issued if 'issued' in dir() else [])),
-                        "status":      "Material Issued" if (issued if 'issued' in dir() else []) else "Created",
-                        "remarks":     jo_remarks,
-                        "created_at":  datetime.now().isoformat(),
+                        "total_fabric_value":sum(il.get("amount",0) for il in (issued if 'issued' in dir() else [])),
+                        "status":           "Material Issued" if (issued if 'issued' in dir() else []) else "Created",
+                        "remarks":          jo_remarks,
+                        "created_at":       datetime.now().isoformat(),
                     }
 
                     log_activity("PJO", jo_no, "Created",
@@ -9193,6 +9266,8 @@ elif nav_prd == "📋 Job Order List":
                 <div class="info-row"><span class="k">JO Date</span><span class="v">{jo.get("jo_date","")}</span></div>
                 <div class="info-row"><span class="k">Expected</span><span class="v">{jo.get("exp_date","—")}</span></div>
                 <div class="info-row"><span class="k">SO Delivery</span><span class="v">{jo.get("delivery","—")}</span></div>
+                <div class="info-row"><span class="k">Process Rate</span><span class="v">₹{jo.get("proc_rate",0):,.2f} / {jo.get("proc_unit","pc")}</span></div>
+                <div class="info-row"><span class="k">Process Amount</span><span class="v" style="color:#059669;font-weight:700;">₹{jo.get("total_proc_amount",0):,.2f}</span></div>
                 <div class="info-row"><span class="k">Fabric Value</span><span class="v">₹{jo.get("total_fabric_value",0):,.2f}</span></div>
             </div>''', unsafe_allow_html=True)
         with hc3:
