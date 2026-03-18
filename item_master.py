@@ -6136,21 +6136,21 @@ if nav_gry == "🧵 Grey Dashboard":
     items_data = st.session_state.get("items", {})
 
     # KPIs
-    total_orders = len(set(v.get("po_no") for v in tracker.values()))
-    in_transit   = sum(1 for v in tracker.values() if v.get("status") == "In Transit")
-    at_transport = sum(v.get("transport_qty",0) for v in tracker.values())
-    at_factory   = sum(v.get("factory_qty",0) for v in tracker.values())
-    at_printer   = sum(v.get("printer_qty",0) for v in tracker.values())
-    rejected_qty = sum(v.get("rejected_qty",0) for v in tracker.values())
+    total_orders  = len(set(v.get("po_no") for v in tracker.values()))
+    in_transit_qty= sum(v.get("ordered_qty",0) for v in tracker.values() if v.get("status") == "In Transit")
+    at_transport  = sum(v.get("transport_qty",0) for v in tracker.values())
+    at_factory    = sum(v.get("factory_qty",0) for v in tracker.values())
+    at_printer    = sum(v.get("printer_qty",0) for v in tracker.values())
+    rejected_qty  = sum(v.get("rejected_qty",0) for v in tracker.values())
 
     c1,c2,c3,c4,c5,c6 = st.columns(6)
     for col,val,lbl,cls in [
-        (c1, total_orders,          "Grey POs",          ""),
-        (c2, in_transit,            "In Transit",         "amber" if in_transit else ""),
-        (c3, f"{at_transport:.0f}", "At Transport Loc",  "amber" if at_transport else ""),
-        (c4, f"{at_factory:.0f}",   "At Factory (mtr)",  ""),
-        (c5, f"{at_printer:.0f}",   "At Printer (mtr)",  ""),
-        (c6, f"{rejected_qty:.0f}", "Rejected (mtr)",    "red" if rejected_qty else ""),
+        (c1, total_orders,             "Grey POs",               ""),
+        (c2, f"{in_transit_qty:.0f} m","In Transit (mtr)",       "amber" if in_transit_qty else ""),
+        (c3, f"{at_transport:.0f} m",  "Transport Loc (mtr)",    "amber" if at_transport else ""),
+        (c4, f"{at_factory:.0f} m",    "Factory (mtr)",          ""),
+        (c5, f"{at_printer:.0f} m",    "At Printer (mtr)",       ""),
+        (c6, f"{rejected_qty:.0f} m",  "Rejected (mtr)",         "red" if rejected_qty else ""),
     ]:
         with col:
             st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
@@ -6299,19 +6299,18 @@ elif nav_gry == "🚚 Transit Tracker":
 
                     elif current_status == "At Transport Location":
                         avail = float(t.get("transport_qty", 0))
-                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Transport Location pe: <strong>{avail} mtr</strong> available hai. Kahan bhejna hai?</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Transport Location pe: <strong>{avail} mtr</strong> available hai.</div>', unsafe_allow_html=True)
 
                         action = st.radio("Next Action", [
-                            "🏭 Factory bhejo (phir printer)",
-                            "🖨️ Seedha Printer ko bhejo",
+                            "🏭 Factory bhejo",
+                            "🖨️ Seedha Printer ko bhejo (JWO ke against)",
                         ], key=f"trans_action_{key}", horizontal=False)
 
-                        send_qty = st.number_input("Qty (mtr)", min_value=0.0,
-                                                    max_value=avail * 1.1,
-                                                    value=avail, step=0.5, key=f"send_qty_{key}")
-                        send_rem = st.text_input("Challan / Remarks", key=f"send_rem_{key}")
-
                         if "Factory" in action:
+                            send_qty = st.number_input("Factory ko Qty (mtr)", min_value=0.0,
+                                                        max_value=avail * 1.1, value=avail,
+                                                        step=0.5, key=f"send_qty_{key}")
+                            send_rem = st.text_input("Challan / Remarks", key=f"send_rem_{key}")
                             if st.button("🏭 Send to Factory", key=f"btn_to_fac_{key}", use_container_width=True):
                                 mat = t.get("material_code","")
                                 SS["grey_po_tracker"][key].update({
@@ -6324,30 +6323,102 @@ elif nav_gry == "🚚 Transit Tracker":
                                     st.session_state["items"][mat]["stock"] = round(cur + send_qty, 3)
                                 add_grey_ledger(key, "IN", send_qty, "Transport Location", "Factory",
                                                f"TRF-{t.get('po_no')}", f"Sent to factory. {send_rem}")
-                                save_data(); st.success(f"✅ {send_qty} mtr factory bhej diya! Stock updated."); st.rerun()
+                                save_data(); st.success(f"✅ {send_qty} mtr factory aa gayi! Stock updated."); st.rerun()
                         else:
+                            # JWO-linked transfer to printer
+                            jwo_list = SS.get("jwo_list", {})
+                            mat_code = t.get("material_code","")
+                            # Find JWOs that use this grey as input
+                            linked_jwos = {
+                                k: v for k,v in jwo_list.items()
+                                if v.get("status") in ["Draft","Issued to Processor","In Process"]
+                                and any(l.get("input_material","") == mat_code for l in v.get("lines",[]))
+                            }
+                            jwo_opts = ["— No JWO (free issue) —"] + [
+                                f"{k} | {v.get('processor_name','')} | Grey needed: {sum(l.get('input_qty',0) for l in v.get('lines',[]) if l.get('input_material')==mat_code)} mtr"
+                                for k,v in linked_jwos.items()
+                            ]
+                            sel_jwo_direct = st.selectbox("JWO Select *", jwo_opts, key=f"direct_jwo_{key}")
+
+                            # Auto-fill qty from JWO
+                            default_qty = avail
+                            if sel_jwo_direct and sel_jwo_direct != "— No JWO (free issue) —":
+                                jwo_key = sel_jwo_direct.split(" | ")[0]
+                                jwo_data = linked_jwos.get(jwo_key, {})
+                                jwo_grey_needed = sum(
+                                    l.get("input_qty",0) for l in jwo_data.get("lines",[])
+                                    if l.get("input_material","") == mat_code
+                                )
+                                default_qty = min(avail, jwo_grey_needed)
+                                st.markdown(f'<div class="info-box" style="font-size:12px;">JWO mein Grey Needed: <strong>{jwo_grey_needed} mtr</strong> | Available: <strong>{avail} mtr</strong></div>', unsafe_allow_html=True)
+
+                            send_qty = st.number_input("Issue Qty (mtr)", min_value=0.0,
+                                                        max_value=avail * 1.1,
+                                                        value=float(default_qty),
+                                                        step=0.5, key=f"send_qty_{key}")
                             suppliers = SS.get("suppliers", {})
                             printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
-                            sel_pr_direct = st.selectbox("Printer Select *", printer_opts, key=f"direct_printer_{key}")
-                            if st.button("🖨️ Direct to Printer", key=f"btn_direct_print_{key}", use_container_width=True):
-                                SS["grey_po_tracker"][key].update({
-                                    "status": "Sent to Printer",
-                                    "printer_qty": float(t.get("printer_qty",0)) + send_qty,
-                                    "transport_qty": max(0, avail - send_qty),
-                                })
-                                add_grey_ledger(key, "OUT", send_qty, "Transport Location", "Printer",
-                                               f"TRF-{t.get('po_no')}", f"Direct to printer {sel_pr_direct}. {send_rem}")
-                                save_data(); st.success(f"✅ {send_qty} mtr seedha printer ko bhej diya!"); st.rerun()
+                            sel_pr_direct = st.selectbox("Printer / Vendor *", printer_opts, key=f"direct_printer_{key}")
+                            send_rem = st.text_input("Challan / Remarks", key=f"send_rem_{key}")
+
+                            if st.button("🖨️ Issue to Printer", key=f"btn_direct_print_{key}", use_container_width=True):
+                                if not sel_pr_direct:
+                                    st.error("Printer select karo!")
+                                else:
+                                    SS["grey_po_tracker"][key].update({
+                                        "status": "Sent to Printer",
+                                        "printer_qty": float(t.get("printer_qty",0)) + send_qty,
+                                        "transport_qty": max(0, avail - send_qty),
+                                    })
+                                    # Update JWO input issued qty if JWO selected
+                                    if sel_jwo_direct and sel_jwo_direct != "— No JWO (free issue) —":
+                                        jwo_key = sel_jwo_direct.split(" | ")[0]
+                                        for li, ln in enumerate(SS["jwo_list"][jwo_key]["lines"]):
+                                            if ln.get("input_material","") == mat_code:
+                                                SS["jwo_list"][jwo_key]["lines"][li]["grey_issued_from_transport"] = send_qty
+                                        SS["jwo_list"][jwo_key]["status"] = "Issued to Processor"
+                                    add_grey_ledger(key, "OUT", send_qty, "Transport Location",
+                                                   sel_pr_direct.split(" – ",1)[1] if " – " in sel_pr_direct else sel_pr_direct,
+                                                   f"TRF-{t.get('po_no')}", f"Direct to printer. JWO:{sel_jwo_direct.split(' | ')[0]}. {send_rem}")
+                                    save_data(); st.success(f"✅ {send_qty} mtr printer ko issue kiya!"); st.rerun()
 
                     elif current_status == "At Factory":
                         avail = float(t.get("factory_qty", 0))
-                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Factory mein: <strong>{avail} mtr</strong>. Printer ko bhejna hai?</div>', unsafe_allow_html=True)
-                        send_qty = st.number_input("Printer ko Issue Qty (mtr)", min_value=0.0,
-                                                    max_value=avail*1.1, value=avail, step=0.5, key=f"fac_send_{key}")
+                        mat_code = t.get("material_code","")
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Factory mein: <strong>{avail} mtr</strong> available.</div>', unsafe_allow_html=True)
+
+                        # JWO-linked issue from factory
+                        jwo_list = SS.get("jwo_list", {})
+                        linked_jwos = {
+                            k: v for k,v in jwo_list.items()
+                            if v.get("status") in ["Draft","Issued to Processor","In Process"]
+                            and any(l.get("input_material","") == mat_code for l in v.get("lines",[]))
+                        }
+                        jwo_opts = ["— No JWO (free issue) —"] + [
+                            f"{k} | {v.get('processor_name','')} | Grey needed: {sum(l.get('input_qty',0) for l in v.get('lines',[]) if l.get('input_material')==mat_code)} mtr"
+                            for k,v in linked_jwos.items()
+                        ]
+                        sel_jwo_fac = st.selectbox("JWO Select", jwo_opts, key=f"fac_jwo_{key}")
+
+                        default_qty = avail
+                        if sel_jwo_fac and sel_jwo_fac != "— No JWO (free issue) —":
+                            jwo_key = sel_jwo_fac.split(" | ")[0]
+                            jwo_data = linked_jwos.get(jwo_key, {})
+                            jwo_grey_needed = sum(
+                                l.get("input_qty",0) for l in jwo_data.get("lines",[])
+                                if l.get("input_material","") == mat_code
+                            )
+                            default_qty = min(avail, jwo_grey_needed)
+                            st.markdown(f'<div class="info-box" style="font-size:12px;">JWO mein Grey Needed: <strong>{jwo_grey_needed} mtr</strong></div>', unsafe_allow_html=True)
+
+                        send_qty = st.number_input("Issue Qty (mtr)", min_value=0.0,
+                                                    max_value=avail*1.1, value=float(default_qty),
+                                                    step=0.5, key=f"fac_send_{key}")
                         suppliers = SS.get("suppliers",{})
                         printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
-                        sel_printer_fac = st.selectbox("Printer", printer_opts, key=f"fac_printer_{key}")
+                        sel_printer_fac = st.selectbox("Printer / Vendor", printer_opts, key=f"fac_printer_{key}")
                         send_rem_fac = st.text_input("Challan / Remarks", key=f"fac_send_rem_{key}")
+
                         if st.button("🖨️ Issue to Printer", key=f"btn_fac_print_{key}", use_container_width=True):
                             mat = t.get("material_code","")
                             SS["grey_po_tracker"][key].update({
@@ -6358,8 +6429,16 @@ elif nav_gry == "🚚 Transit Tracker":
                             if mat in st.session_state["items"]:
                                 cur = float(st.session_state["items"][mat].get("stock",0))
                                 st.session_state["items"][mat]["stock"] = max(0, round(cur - send_qty, 3))
-                            add_grey_ledger(key, "OUT", send_qty, "Factory", "Printer",
-                                           f"TRF-{t.get('po_no')}", f"Issued to printer {sel_printer_fac}. {send_rem_fac}")
+                            # Update JWO
+                            if sel_jwo_fac and sel_jwo_fac != "— No JWO (free issue) —":
+                                jwo_key = sel_jwo_fac.split(" | ")[0]
+                                for li, ln in enumerate(SS["jwo_list"][jwo_key]["lines"]):
+                                    if ln.get("input_material","") == mat_code:
+                                        SS["jwo_list"][jwo_key]["lines"][li]["grey_issued_from_factory"] = send_qty
+                                SS["jwo_list"][jwo_key]["status"] = "Issued to Processor"
+                            add_grey_ledger(key, "OUT", send_qty, "Factory",
+                                           sel_printer_fac.split(" – ",1)[1] if " – " in sel_printer_fac else "Printer",
+                                           f"TRF-{t.get('po_no')}", f"JWO:{sel_jwo_fac.split(' | ')[0] if sel_jwo_fac else '—'}. {send_rem_fac}")
                             save_data(); st.success(f"✅ {send_qty} mtr printer ko issue kiya!"); st.rerun()
 
                     elif current_status in ["Sent to Printer","At Printer"]:
