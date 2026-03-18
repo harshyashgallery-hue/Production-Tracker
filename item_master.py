@@ -9353,54 +9353,192 @@ elif nav_prd == "📋 Job Order List":
         with jot1:
             if jo.get("lines"):
                 df_lines = pd.DataFrame([{
-                    "SKU": l["sku"], "Name": l["sku_name"],
-                    "Planned": l["plan_qty"], "Output": l.get("output_qty",0),
-                    "Wastage": l.get("wastage",0),
-                    "BOM vs Actual": f"{l.get('bom_fabric',0):.1f} vs {l.get('actual_fabric',0):.1f} mtr",
+                    "SKU":         l["sku"],
+                    "Name":        l["sku_name"],
+                    "Rate (₹)":    l.get("proc_rate",0),
+                    "Planned":     l["plan_qty"],
+                    "Output":      l.get("output_qty",0),
+                    "Wastage":     l.get("wastage",0),
+                    "BOM Fabric":  f"{l.get('bom_fabric',0):.1f} mtr",
+                    "Actual Fabric":f"{l.get('actual_fabric',0):.1f} mtr",
+                    "Diff":        f"{l.get('fabric_diff',0):+.1f} mtr",
+                    "Eff%":        f"{round(l.get('output_qty',0)/l['plan_qty']*100,1) if l['plan_qty'] else 0}%",
                 } for l in jo["lines"]])
                 st.dataframe(df_lines, use_container_width=True, hide_index=True)
 
         with jot2:
-            st.markdown("#### ✅ Enter Output")
-            if jo.get("status") in ["Completed","Closed"]:
-                st.markdown('<div class="ok-box">Job Order completed!</div>', unsafe_allow_html=True)
-            else:
-                for i, line in enumerate(jo.get("lines",[])):
-                    oc1,oc2,oc3,oc4 = st.columns([2,1,1,1])
-                    with oc1: st.markdown(f'<div style="padding-top:28px;font-size:13px;font-weight:600;">{line["sku"]} — {line["sku_name"]}</div>', unsafe_allow_html=True)
-                    with oc2: st.markdown(f'<div style="padding-top:26px;font-size:12px;">Planned: <strong>{line["plan_qty"]:.0f}</strong></div>', unsafe_allow_html=True)
-                    with oc3:
-                        out_qty = st.number_input("Output Qty", min_value=0.0,
-                            max_value=float(line["plan_qty"])*1.1,
-                            value=float(line.get("output_qty",0)),
-                            step=1.0, key=f"out_{jo_no}_{i}")
-                    with oc4:
-                        wastage = st.number_input("Wastage", min_value=0.0,
-                            step=0.5, value=float(line.get("wastage",0)),
-                            key=f"wst_{jo_no}_{i}")
+            st.markdown("#### ✅ Output & Consumption Entry")
+            boms_data  = st.session_state.get("boms", {})
+            items_data = st.session_state.get("items", {})
+            issued_mats = jo.get("issued_materials", [])
+            jo_process  = jo.get("process","")
 
+            if jo.get("status") in ["Completed","Closed"]:
+                # Summary view
+                st.markdown('<div class="ok-box">Job Order completed!</div>', unsafe_allow_html=True)
+                total_plan = sum(float(l.get("plan_qty",0)) for l in jo.get("lines",[]))
+                total_out  = sum(float(l.get("output_qty",0)) for l in jo.get("lines",[]))
+                for line in jo.get("lines",[]):
+                    bom_fab  = float(line.get("bom_fabric",0))
+                    act_fab  = float(line.get("actual_fabric",0))
+                    out_q    = float(line.get("output_qty",0))
+                    bom_avg  = float(line.get("bom_avg_per_pc",0))
+                    act_avg  = float(line.get("actual_avg_per_pc",0))
+                    diff_avg = round(act_avg - bom_avg, 3)
+                    diff_col = "#ef4444" if diff_avg > 0 else "#059669"
+                    st.markdown(f'''<div style="background:#f8fafc;border-radius:8px;padding:10px 14px;margin:4px 0;font-size:12px;">
+                        <strong>{line["sku"]} — {line["sku_name"]}</strong><br>
+                        Output: <strong>{out_q:.0f} pcs</strong> &nbsp;|&nbsp;
+                        BOM Fabric: <strong>{bom_fab:.2f} mtr</strong> &nbsp;|&nbsp;
+                        Actual Used: <strong>{act_fab:.2f} mtr</strong><br>
+                        BOM Avg: <strong>{bom_avg:.3f} mtr/pc</strong> &nbsp;|&nbsp;
+                        Actual Avg: <strong>{act_avg:.3f} mtr/pc</strong> &nbsp;|&nbsp;
+                        <span style="color:{diff_col};">Diff: {diff_avg:+.3f} mtr/pc</span>
+                    </div>''', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="info-box" style="font-size:12px;">100 pc cut kiye? 200 mtr mein se kitna use hua? Dono daalo — system BOM vs actual comparison karega.</div>', unsafe_allow_html=True)
+
+                # Header row
+                st.markdown('''<div style="display:grid;grid-template-columns:2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr;gap:6px;
+                    padding:6px 8px;background:#f1f5f9;border-radius:6px;
+                    font-size:10px;font-weight:700;color:#64748b;margin-bottom:4px;">
+                    <div>SKU / Style</div>
+                    <div>Planned</div>
+                    <div>Cut Qty (pcs)</div>
+                    <div>Issued (mtr)</div>
+                    <div>Consumed (mtr)</div>
+                    <div>Wastage (pcs)</div>
+                    <div>BOM vs Actual</div>
+                </div>''', unsafe_allow_html=True)
+
+                for i, line in enumerate(jo.get("lines",[])):
+                    sku    = line["sku"]
+                    parent = items_data.get(sku,{}).get("parent", sku)
+                    bom    = boms_data.get(parent, boms_data.get(sku, {}))
+
+                    # BOM fabric per piece
+                    fab_code = next(
+                        (l.get("item_code","") for l in bom.get("lines",[])
+                         if items_data.get(l.get("item_code",""),{}).get("item_type","") == "Semi Finished Goods (SFG)"),
+                        ""
+                    )
+                    bom_per_pc = next(
+                        (float(l.get("qty",0)) for l in bom.get("lines",[])
+                         if l.get("item_code","") == fab_code),
+                        0.0
+                    )
+
+                    # Issued qty for this SKU from issued_materials
+                    issued_qty = sum(
+                        float(m.get("issue_qty",0))
+                        for m in issued_mats
+                        if m.get("sku","") == sku
+                    )
+
+                    plan_qty = float(line["plan_qty"])
+
+                    oc1,oc2,oc3,oc4,oc5,oc6,oc7 = st.columns([2,0.8,0.8,0.8,0.8,0.8,1])
+                    with oc1:
+                        st.markdown(f'''<div style="padding-top:6px;font-size:12px;">
+                            <strong>{sku}</strong><br>
+                            <span style="color:#64748b;font-size:11px;">{line["sku_name"]}</span>
+                            {"<br><span style='color:#94a3b8;font-size:10px;'>BOM: " + str(bom_per_pc) + " mtr/pc</span>" if bom_per_pc else ""}
+                        </div>''', unsafe_allow_html=True)
+                    with oc2:
+                        st.markdown(f'<div style="padding-top:22px;font-size:13px;font-weight:600;">{plan_qty:.0f}</div>', unsafe_allow_html=True)
+                    with oc3:
+                        out_qty = st.number_input("Cut Qty",
+                            min_value=0.0, max_value=plan_qty*1.1,
+                            value=float(line.get("output_qty",0)),
+                            step=1.0, key=f"out_{jo_no}_{i}",
+                            label_visibility="collapsed")
+                    with oc4:
+                        st.markdown(f'<div style="padding-top:22px;font-size:13px;color:#0ea5e9;font-weight:600;">{issued_qty:.1f}</div>', unsafe_allow_html=True)
+                    with oc5:
+                        # Default = BOM × output qty
+                        bom_expected = round(bom_per_pc * float(out_qty if out_qty > 0 else plan_qty), 2)
+                        consumed = st.number_input("Consumed",
+                            min_value=0.0,
+                            max_value=float(issued_qty)*1.2 if issued_qty > 0 else 9999.0,
+                            value=float(line.get("actual_fabric", bom_expected)),
+                            step=0.5, key=f"consumed_{jo_no}_{i}",
+                            label_visibility="collapsed")
+                    with oc6:
+                        wastage_pcs = st.number_input("Wastage",
+                            min_value=0.0, step=1.0,
+                            value=float(line.get("wastage",0)),
+                            key=f"wst_{jo_no}_{i}",
+                            label_visibility="collapsed")
+                    with oc7:
+                        # Live BOM vs Actual comparison
+                        out_q_now  = float(st.session_state.get(f"out_{jo_no}_{i}", line.get("output_qty", plan_qty)))
+                        cons_now   = float(st.session_state.get(f"consumed_{jo_no}_{i}", bom_expected))
+                        bom_total  = round(bom_per_pc * out_q_now, 2)
+                        act_avg_pc = round(cons_now / out_q_now, 3) if out_q_now > 0 else 0
+                        diff_pc    = round(act_avg_pc - bom_per_pc, 3)
+                        diff_col   = "#ef4444" if diff_pc > 0 else "#059669"
+                        st.markdown(f'''<div style="padding-top:4px;font-size:10px;">
+                            <div>BOM: <strong>{bom_total:.1f} mtr</strong></div>
+                            <div>Used: <strong>{cons_now:.1f} mtr</strong></div>
+                            <div style="color:{diff_col};">Avg: {act_avg_pc:.3f} vs {bom_per_pc:.3f}</div>
+                            <div style="color:{diff_col};font-weight:700;">{diff_pc:+.3f}/pc</div>
+                        </div>''', unsafe_allow_html=True)
+
+                    st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+                # Status update
+                st.markdown("---")
                 jo_status_new = st.selectbox("Update Status", PRD_JO_STATUS,
                     index=PRD_JO_STATUS.index(jo.get("status","Created")),
                     key=f"pjo_sts_{jo_no}")
 
-                if st.button("💾 Save Output", key=f"save_out_{jo_no}"):
+                if st.button("💾 Save Output & Consumption", key=f"save_out_{jo_no}", use_container_width=False):
+                    total_out = 0
+                    total_bom_fab = 0
+                    total_act_fab = 0
+
                     for i, line in enumerate(jo["lines"]):
-                        out_q = float(st.session_state.get(f"out_{jo_no}_{i}", 0))
-                        wst_q = float(st.session_state.get(f"wst_{jo_no}_{i}", 0))
-                        SS["prod_jo_list"][jo_no]["lines"][i]["output_qty"] = out_q
-                        SS["prod_jo_list"][jo_no]["lines"][i]["wastage"]    = wst_q
-                        # If completed — add to item stock (stitched/finished goods)
-                        if jo_status_new == "Completed" and jo.get("process") != "Cutting":
-                            sku = line["sku"]
-                            if sku in st.session_state["items"]:
-                                cur = float(st.session_state["items"][sku].get("stock",0))
-                                st.session_state["items"][sku]["stock"] = round(cur + out_q, 3)
+                        out_q    = float(st.session_state.get(f"out_{jo_no}_{i}", 0))
+                        cons_q   = float(st.session_state.get(f"consumed_{jo_no}_{i}", 0))
+                        wst_q    = float(st.session_state.get(f"wst_{jo_no}_{i}", 0))
+
+                        sku_l    = line["sku"]
+                        parent   = items_data.get(sku_l,{}).get("parent", sku_l)
+                        bom_l    = boms_data.get(parent, boms_data.get(sku_l, {}))
+                        fab_pp   = next(
+                            (float(l.get("qty",0)) for l in bom_l.get("lines",[])
+                             if items_data.get(l.get("item_code",""),{}).get("item_type","") == "Semi Finished Goods (SFG)"),
+                            0.0
+                        )
+                        bom_fab  = round(fab_pp * out_q, 2)
+                        act_avg  = round(cons_q / out_q, 3) if out_q > 0 else 0
+                        bom_avg  = fab_pp
+
+                        SS["prod_jo_list"][jo_no]["lines"][i].update({
+                            "output_qty":          out_q,
+                            "actual_fabric":       cons_q,
+                            "bom_fabric":          bom_fab,
+                            "wastage":             wst_q,
+                            "actual_avg_per_pc":   act_avg,
+                            "bom_avg_per_pc":      bom_avg,
+                            "fabric_diff":         round(cons_q - bom_fab, 2),
+                            "avg_diff_per_pc":     round(act_avg - bom_avg, 3),
+                        })
+                        total_out     += out_q
+                        total_bom_fab += bom_fab
+                        total_act_fab += cons_q
+
+                        # Stock update on completion
+                        if jo_status_new == "Completed" and jo_process != "Cutting":
+                            if sku_l in st.session_state["items"]:
+                                cur = float(st.session_state["items"][sku_l].get("stock",0))
+                                st.session_state["items"][sku_l]["stock"] = round(cur + out_q, 3)
 
                     SS["prod_jo_list"][jo_no]["status"] = jo_status_new
                     log_activity("PJO", jo_no, "Status Changed",
-                        f"{jo.get('status','')} → {jo_status_new} | Output: {sum(float(st.session_state.get(f'out_{jo_no}_{ii}',0)) for ii in range(len(jo['lines']))):.0f} pcs")
+                        f"{jo.get('status','')} → {jo_status_new} | Output: {total_out:.0f} pcs | BOM Fabric: {total_bom_fab:.1f} mtr | Actual Used: {total_act_fab:.1f} mtr")
                     save_data()
-                    st.success(f"✅ Output saved! Status: {jo_status_new}")
+                    st.success(f"✅ Output saved! Total cut: {total_out:.0f} pcs | BOM: {total_bom_fab:.1f} mtr | Actual: {total_act_fab:.1f} mtr | Diff: {total_act_fab-total_bom_fab:+.1f} mtr")
                     st.rerun()
 
         with jot3:
