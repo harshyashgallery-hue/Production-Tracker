@@ -512,6 +512,8 @@ ALL_PAGES = [
     ("GRY", "↩️ Return / Rework"),
     ("GRY", "📤 Grey Transfer"),
     ("GRY", "📋 Grey Ledger"),
+    ("GRY", "🎯 Grey Planning"),
+
     ("ADM", "⚙️ User Management"),
     ("ADM", "🔐 Role Permissions"),
 ]
@@ -769,6 +771,7 @@ if nav_home == "🏠 Home":
                 ("↩️ Return/Rework", "↩️ Return / Rework"),
                 ("📤 Transfer",      "📤 Grey Transfer"),
                 ("📋 Ledger",        "📋 Grey Ledger"),
+                ("🎯 Planning",      "🎯 Grey Planning"),
             ]
         },
         {
@@ -9670,3 +9673,330 @@ elif nav_prd == "📊 Production Reports":
                                   "SKU":ln["sku"],"Planned":plan,"Output":out,
                                   "Wastage":wst,"Eff%":round(out/plan*100,1)})
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GREY FABRIC PLANNING MODULE
+# "Grey aaya hai — konsi style ke liye issue karein?"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+elif nav_gry == "🎯 Grey Planning":
+    st.markdown('<h1>Grey Fabric Planning</h1>', unsafe_allow_html=True)
+    st.markdown('''<div class="info-box">
+        Grey fabric available hai — system batayega konsi SKU/Style ke liye grey issue karo.<br>
+        <strong>Priority basis:</strong> Running Days · SO Delivery · Fabric Availability · Open Demand
+    </div>''', unsafe_allow_html=True)
+
+    tracker    = SS.get("grey_po_tracker", {})
+    items_data = st.session_state.get("items", {})
+    boms_data  = st.session_state.get("boms", {})
+    so_list    = SS.get("so_list", {})
+    hard_res   = SS.get("pf_hard_reservations", {})
+    pf_checked = SS.get("pf_checked", {})
+
+    # ── Step 1: Grey stock summary ─────────────────────────────────────────────
+    # Collect all grey fabric available at various locations
+    grey_stock = {}  # grey_code → {factory_qty, transport_qty, total}
+    for key, t in tracker.items():
+        gc = t.get("material_code","")
+        if not gc: continue
+        item_type = items_data.get(gc,{}).get("item_type","")
+        if item_type != "Grey Fabric": continue
+        if gc not in grey_stock:
+            grey_stock[gc] = {
+                "name":         items_data.get(gc,{}).get("name",""),
+                "factory_qty":  0, "transport_qty": 0,
+                "printer_qty":  0, "in_transit":    0,
+            }
+        grey_stock[gc]["factory_qty"]   += float(t.get("factory_qty",0))
+        grey_stock[gc]["transport_qty"] += float(t.get("transport_qty",0))
+        grey_stock[gc]["printer_qty"]   += float(t.get("printer_qty",0))
+        ordered    = float(t.get("ordered_qty",0))
+        dispatched = float(t.get("dispatched_qty", ordered))
+        received   = float(t.get("received_qty",0))
+        grey_stock[gc]["in_transit"] += max(0, dispatched - received)
+
+    if not grey_stock:
+        st.markdown('<div class="warn-box">Koi Grey Fabric nahi hai system mein. Pehle Grey Fabric item banao aur PO karo.</div>', unsafe_allow_html=True)
+        st.stop()
+
+    # ── Grey stock cards ───────────────────────────────────────────────────────
+    st.markdown("#### 📦 Grey Fabric Stock — Location Wise")
+    for gc, gs in grey_stock.items():
+        total = gs["factory_qty"] + gs["transport_qty"]
+        c1,c2,c3,c4,c5 = st.columns(5)
+        with c1: st.markdown(f'<div class="metric-box"><div class="metric-value" style="font-size:16px;">{gc}</div><div class="metric-label">{gs["name"]}</div></div>', unsafe_allow_html=True)
+        with c2: st.markdown(f'<div class="metric-box {"amber" if gs["factory_qty"] else ""}"><div class="metric-value">{gs["factory_qty"]:.0f}m</div><div class="metric-label">At Factory</div></div>', unsafe_allow_html=True)
+        with c3: st.markdown(f'<div class="metric-box"><div class="metric-value">{gs["transport_qty"]:.0f}m</div><div class="metric-label">Transport Loc</div></div>', unsafe_allow_html=True)
+        with c4: st.markdown(f'<div class="metric-box"><div class="metric-value">{gs["printer_qty"]:.0f}m</div><div class="metric-label">At Printer</div></div>', unsafe_allow_html=True)
+        with c5: st.markdown(f'<div class="metric-box"><div class="metric-value">{gs["in_transit"]:.0f}m</div><div class="metric-label">In Transit</div></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Step 2: Grey select ────────────────────────────────────────────────────
+    st.markdown("#### 🎯 Step 1 — Grey Fabric Select Karo")
+    grey_opts = {gc: gs for gc, gs in grey_stock.items()
+                 if gs["factory_qty"] + gs["transport_qty"] > 0}
+
+    if not grey_opts:
+        st.markdown('<div class="warn-box">Factory ya Transport mein koi grey nahi hai. Pehle receive karo.</div>', unsafe_allow_html=True)
+        st.stop()
+
+    sel_grey = st.selectbox("Grey Fabric *", [""] + list(grey_opts.keys()),
+        format_func=lambda x: f"{x} – {grey_opts[x]['name']} | Factory: {grey_opts[x]['factory_qty']:.0f}m | Transport: {grey_opts[x]['transport_qty']:.0f}m" if x else "Select Grey",
+        key="gp_grey")
+
+    if not sel_grey:
+        st.info("Grey fabric select karo — system batayega konsi styles ke liye issue karo.")
+        st.stop()
+
+    gs         = grey_stock[sel_grey]
+    avail_grey = gs["factory_qty"] + gs["transport_qty"]
+
+    st.markdown(f'''<div style="background:#fef9c3;border:2px solid #d97706;border-radius:10px;padding:12px 16px;margin:8px 0;">
+        <div style="font-size:14px;font-weight:700;color:#92400e;">{sel_grey} — {gs["name"]}</div>
+        <div style="display:flex;gap:20px;margin-top:6px;font-size:13px;">
+            <div>🏭 Factory: <strong>{gs["factory_qty"]:.0f} mtr</strong></div>
+            <div>📦 Transport: <strong>{gs["transport_qty"]:.0f} mtr</strong></div>
+            <div style="color:#059669;">📊 Total Available: <strong>{avail_grey:.0f} mtr</strong></div>
+        </div>
+    </div>''', unsafe_allow_html=True)
+
+    # ── Step 3: Find which SKUs need this grey (via BOM → Printed Fabric → Grey) ──
+    st.markdown("---")
+    st.markdown("#### 📋 Step 2 — SKU-wise Demand & Priority")
+
+    # Find printed fabrics that use this grey
+    printed_from_grey = []
+    for item_code, bom in boms_data.items():
+        for ln in bom.get("lines",[]):
+            if ln.get("item_code","") == sel_grey:
+                printed_from_grey.append(item_code)  # SFG item that needs this grey
+
+    # Find FG items that use those SFGs
+    sku_demands = {}
+    for so_no, so in so_list.items():
+        if so.get("status") in ["Closed","Cancelled","Fully Received"]:
+            continue
+        for line in so.get("lines",[]):
+            sku    = line.get("sku","")
+            parent = items_data.get(sku,{}).get("parent", sku)
+
+            # Check BOM of FG/parent for printed fabric
+            fg_bom = boms_data.get(parent, boms_data.get(sku, {}))
+            for fg_ln in fg_bom.get("lines",[]):
+                pf_code = fg_ln.get("item_code","")
+                if pf_code not in printed_from_grey:
+                    continue
+
+                # This SKU needs pf_code which needs sel_grey
+                # Grey needed = printed fabric needed × grey per printed fabric
+                pf_qty_per_fg = float(fg_ln.get("qty",0))
+
+                # Grey per printed fabric (from SFG BOM)
+                sfg_bom      = boms_data.get(pf_code, {})
+                grey_per_pf  = next(
+                    (float(bl.get("qty",0)) for bl in sfg_bom.get("lines",[])
+                     if bl.get("item_code","") == sel_grey),
+                    0.0
+                )
+
+                so_qty       = float(line.get("qty",0))
+                grey_needed  = round(pf_qty_per_fg * grey_per_pf * so_qty, 2)
+
+                # Already issued/in print for this SO+SKU
+                already_at_printer = sum(
+                    float(t.get("printer_qty",0))
+                    for t in tracker.values()
+                    if t.get("material_code","") == sel_grey
+                    and t.get("so_ref","") == so_no
+                )
+
+                # Already hard reserved printed fabric
+                pf_checked_qty = float(pf_checked.get(f"{pf_code}_checked",{}).get("qty",0))
+                pf_hard_res    = sum(
+                    float(r.get("qty",0)) for r in hard_res.values()
+                    if r.get("fabric_code","") == pf_code
+                    and r.get("so_no","") == so_no
+                    and r.get("status","") == "Active"
+                )
+
+                pending_grey = max(0, grey_needed - already_at_printer)
+
+                if grey_needed <= 0:
+                    continue
+
+                key = f"{so_no}_{sku}_{pf_code}"
+                sku_demands[key] = {
+                    "so_no":          so_no,
+                    "sku":            sku,
+                    "sku_name":       line.get("sku_name", items_data.get(sku,{}).get("name","")),
+                    "parent":         parent,
+                    "pf_code":        pf_code,
+                    "pf_name":        items_data.get(pf_code,{}).get("name",""),
+                    "buyer":          so.get("buyer",""),
+                    "delivery":       so.get("delivery_date",""),
+                    "so_qty":         so_qty,
+                    "grey_needed":    grey_needed,
+                    "grey_per_pf":    grey_per_pf,
+                    "pf_qty_per_fg":  pf_qty_per_fg,
+                    "already_printer":already_at_printer,
+                    "pending_grey":   pending_grey,
+                    "pf_checked_qty": pf_checked_qty,
+                    "pf_hard_res":    pf_hard_res,
+                    "running_days":   running_days(sku),
+                    "avg_sale":       avg_daily_sale(sku),
+                }
+
+    if not sku_demands:
+        st.markdown(f'<div class="warn-box">Is grey fabric ({sel_grey}) se linked koi open SO nahi mila. BOM mein grey → printed fabric → FG chain check karo.</div>', unsafe_allow_html=True)
+        st.stop()
+
+    # Sort by priority: running days asc, then delivery
+    sorted_demands = sorted(sku_demands.values(),
+        key=lambda x: (x["running_days"] if x["running_days"] < 999 else 999, x["delivery"]))
+
+    # Summary bar
+    total_pending = sum(d["pending_grey"] for d in sorted_demands)
+    gap           = total_pending - avail_grey
+    st.markdown(f'''<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;">
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 14px;">
+            📊 Total Demand: <strong>{total_pending:.0f} mtr</strong>
+        </div>
+        <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:8px 14px;">
+            📦 Available: <strong>{avail_grey:.0f} mtr</strong>
+        </div>
+        <div style="background:{"#fee2e2" if gap > 0 else "#d1fae5"};border:1px solid {"#fca5a5" if gap > 0 else "#6ee7b7"};border-radius:8px;padding:8px 14px;">
+            {"⚠️ Short by" if gap > 0 else "✅ Surplus"}: <strong>{abs(gap):.0f} mtr</strong>
+        </div>
+    </div>''', unsafe_allow_html=True)
+
+    # ── Allocation table ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🎯 Step 3 — Allocation Plan Banao")
+    st.markdown('<div class="info-box" style="font-size:12px;">System ne running days ke basis pe sort kiya hai. Har SKU ke liye kitna grey issue karna hai decide karo.</div>', unsafe_allow_html=True)
+
+    remaining  = avail_grey
+    alloc_plan = []
+
+    for d in sorted_demands:
+        rd = d["running_days"]
+        if rd < 7:    badge, bc, pc = "🔴 Critical", "#fee2e2", "#ef4444"
+        elif rd < 15: badge, bc, pc = "🟡 Urgent",   "#fef3c7", "#d97706"
+        elif rd < 30: badge, bc, pc = "🟠 Soon",     "#fff7ed", "#f97316"
+        else:         badge, bc, pc = "🟢 Normal",   "#f0fdf4", "#059669"
+
+        can_give  = float(min(d["pending_grey"], remaining))
+
+        with st.container():
+            st.markdown(f'''<div style="background:{bc};border:1px solid {pc}30;border-radius:10px;padding:12px 16px;margin:6px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+                    <div>
+                        <span style="font-weight:700;font-size:14px;">{d["sku"]}</span>
+                        <span style="color:#64748b;"> — {d["sku_name"]}</span>
+                        <span style="background:#1e293b;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;margin-left:6px;">{d["buyer"]}</span>
+                    </div>
+                    <span style="color:{pc};font-weight:700;font-size:12px;">{badge}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:8px;font-size:12px;">
+                    <div><span style="color:#94a3b8;">SO#</span><br><strong>{d["so_no"]}</strong></div>
+                    <div><span style="color:#94a3b8;">SO Qty</span><br><strong>{d["so_qty"]:.0f} pcs</strong></div>
+                    <div><span style="color:#94a3b8;">Delivery</span><br><strong>{d["delivery"]}</strong></div>
+                    <div><span style="color:#94a3b8;">Running Days</span><br><strong style="color:{pc};">{rd if rd < 999 else "—"}</strong></div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:6px;font-size:12px;">
+                    <div><span style="color:#94a3b8;">Printed Fabric</span><br><strong>{d["pf_code"]}</strong><br><span style="font-size:10px;">{d["pf_name"]}</span></div>
+                    <div><span style="color:#94a3b8;">Grey Needed</span><br><strong>{d["grey_needed"]:.1f} mtr</strong></div>
+                    <div><span style="color:#94a3b8;">At Printer</span><br><strong style="color:#8b5cf6;">{d["already_printer"]:.1f} mtr</strong></div>
+                    <div><span style="color:#94a3b8;">Still Pending</span><br><strong style="color:#ef4444;">{d["pending_grey"]:.1f} mtr</strong></div>
+                </div>
+            </div>''', unsafe_allow_html=True)
+
+            ac1, ac2 = st.columns([3,1])
+            with ac1:
+                alloc_qty = st.number_input(
+                    f"Issue to {d['sku']} for {d['pf_code']} (max {can_give:.1f} mtr)",
+                    min_value=0.0, max_value=float(can_give),
+                    value=float(can_give) if remaining > 0 else 0.0,
+                    step=0.5, key=f"gp_alloc_{d['so_no']}_{d['sku']}"
+                )
+            with ac2:
+                remaining = max(0, remaining - alloc_qty)
+                from_loc  = "Factory" if gs["factory_qty"] >= alloc_qty else "Transport Location"
+                st.markdown(f'''<div style="padding-top:8px;font-size:12px;color:#64748b;">
+                    Remaining: <strong>{remaining:.0f} mtr</strong><br>
+                    From: <strong>{from_loc}</strong>
+                </div>''', unsafe_allow_html=True)
+
+            alloc_plan.append({**d, "alloc_qty": alloc_qty,
+                                "from_loc": "Factory" if gs["factory_qty"] >= alloc_qty else "Transport Location"})
+
+    # ── Summary & Confirm ──────────────────────────────────────────────────────
+    to_issue = [a for a in alloc_plan if a["alloc_qty"] > 0]
+
+    if to_issue:
+        st.markdown("---")
+        st.markdown("#### ✅ Issue Summary")
+        total_issuing = sum(a["alloc_qty"] for a in to_issue)
+
+        st.markdown(f'<div class="ok-box">Total Issuing: <strong>{total_issuing:.0f} mtr</strong> | Remaining after: <strong>{avail_grey - total_issuing:.0f} mtr</strong></div>', unsafe_allow_html=True)
+
+        for a in to_issue:
+            st.markdown(f'''<div style="padding:4px 8px;font-size:13px;border-left:3px solid #0ea5e9;margin:3px 0;">
+                → <strong>{a["sku"]}</strong> ({a["so_no"]}) | For: <strong>{a["pf_code"]}</strong> |
+                Issue: <strong style="color:#059669;">{a["alloc_qty"]:.1f} mtr</strong> |
+                From: {a["from_loc"]}
+            </div>''', unsafe_allow_html=True)
+
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("📋 Create JWOs from this Plan", key="gp_create_jwo", use_container_width=True):
+                # Navigate to Grey Transfer with pre-filled data
+                # Group by printer (from existing JWOs linked to these SOs)
+                jwo_list = SS.get("jwo_list",{})
+                created = 0
+                for a in to_issue:
+                    # Find existing JWO for this SO
+                    linked_jwo = next(
+                        (jwo_no for jwo_no, jwo in jwo_list.items()
+                         if jwo.get("so_ref","") == a["so_no"]
+                         and any(l.get("input_material","") == sel_grey for l in jwo.get("lines",[])) ),
+                        None
+                    )
+                    # Store in session for Grey Transfer
+                    if "gp_issue_queue" not in SS: SS["gp_issue_queue"] = []
+                    SS["gp_issue_queue"].append({
+                        "grey_code":   sel_grey,
+                        "so_no":       a["so_no"],
+                        "sku":         a["sku"],
+                        "pf_code":     a["pf_code"],
+                        "alloc_qty":   a["alloc_qty"],
+                        "from_loc":    a["from_loc"],
+                        "linked_jwo":  linked_jwo or "",
+                    })
+                    created += 1
+                save_data()
+                st.success(f"✅ {created} entries queued! Grey Transfer page pe jaao → JWO link karke issue karo.")
+                st.session_state["current_page"] = "📤 Grey Transfer"
+                st.rerun()
+
+        with col_btn2:
+            if st.button("📊 Save as Planning Note", key="gp_save_plan", use_container_width=True):
+                if "grey_plans" not in SS: SS["grey_plans"] = []
+                SS["grey_plans"].append({
+                    "date":       str(date.today()),
+                    "grey_code":  sel_grey,
+                    "total_alloc":total_issuing,
+                    "items":      [{k:v for k,v in a.items() if k != "avg_sale"} for a in to_issue],
+                })
+                save_data()
+                st.success("✅ Planning note saved!")
+
+    # ── Planning history ───────────────────────────────────────────────────────
+    grey_plans = SS.get("grey_plans",[])
+    recent_plans = [p for p in grey_plans if p.get("grey_code","") == sel_grey]
+    if recent_plans:
+        st.markdown("---")
+        with st.expander(f"📋 Previous Plans for {sel_grey} ({len(recent_plans)})"):
+            for plan in reversed(recent_plans[-5:]):
+                st.markdown(f'<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #f1f5f9;"><strong>{plan["date"]}</strong> | Total: {plan["total_alloc"]:.0f} mtr | SKUs: {len(plan["items"])}</div>', unsafe_allow_html=True)
