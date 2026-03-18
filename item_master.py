@@ -205,6 +205,11 @@ DEFAULT_DATA = {
     "grey_rework_list": {},
     "grey_issue_docs": {},
     "activity_log": {},
+    "pf_unchecked": {},
+    "pf_checked": {},
+    "pf_check_entries": {},
+    "pf_hard_reservations": {},
+    "pf_check_counter": 1,
     "grey_qc_counter": 1,
     "grey_transfer_counter": 1,
     "grey_return_counter": 1,
@@ -486,6 +491,12 @@ ALL_PAGES = [
     ("PUR", "📊 Purchase Reports"),
     ("INV", "📦 Inventory"),
     ("INV", "📋 Stock Ledger"),
+    ("PFC", "🔬 Check Dashboard"),
+    ("PFC", "📥 Receive Fabric"),
+    ("PFC", "✅ Fabric Check"),
+    ("PFC", "📊 Check Reports"),
+    ("PFC", "🔒 Hard Reserve"),
+
     ("GRY", "🧵 Grey Dashboard"),
     ("GRY", "🚚 Transit Tracker"),
     ("GRY", "📍 Location Stock"),
@@ -503,6 +514,7 @@ MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
 TNA_PAGES = [p for m, p in ALL_PAGES if m == "TNA"]
 PUR_PAGES = [p for m, p in ALL_PAGES if m == "PUR"]
 INV_PAGES = [p for m, p in ALL_PAGES if m == "INV"]
+PFC_PAGES = [p for m, p in ALL_PAGES if m == "PFC"]
 GRY_PAGES = [p for m, p in ALL_PAGES if m == "GRY"]
 ADM_PAGES = [p for m, p in ALL_PAGES if m == "ADM"]
 
@@ -534,6 +546,7 @@ with st.sidebar:
     _sidebar_section("TNA", "TNA")
     _sidebar_section("PUR", "PURCHASE")
     _sidebar_section("INV", "INVENTORY")
+    _sidebar_section("PFC", "FABRIC CHECK")
     _sidebar_section("GRY", "GREY FABRIC")
     if get_current_role() == "Admin":
         _sidebar_section("ADM", "ADMIN")
@@ -553,6 +566,7 @@ nav_mrp = _cp if _cp in MRP_PAGES else None
 nav_tna = _cp if _cp in TNA_PAGES else None
 nav_pur = _cp if _cp in PUR_PAGES else None
 nav_inv = _cp if _cp in INV_PAGES else None
+nav_pfc = _cp if _cp in PFC_PAGES else None
 nav_gry = _cp if _cp in GRY_PAGES else None
 nav_adm = _cp if _cp in ADM_PAGES else None
 
@@ -742,6 +756,17 @@ if nav_home == "🏠 Home":
                 ("↩️ Return/Rework", "↩️ Return / Rework"),
                 ("📤 Transfer",      "📤 Grey Transfer"),
                 ("📋 Ledger",        "📋 Grey Ledger"),
+            ]
+        },
+        {
+            "name": "FABRIC CHECK", "icon": "🔬", "color": "#06b6d4", "bg": "#cffafe",
+            "desc": "Unchecked, QC, Reserve",
+            "pages": [
+                ("🔬 Dashboard",    "🔬 Check Dashboard"),
+                ("📥 Receive",      "📥 Receive Fabric"),
+                ("✅ Check Entry",  "✅ Fabric Check"),
+                ("🔒 Hard Reserve", "🔒 Hard Reserve"),
+                ("📊 Reports",      "📊 Check Reports"),
             ]
         },
         {
@@ -7858,3 +7883,619 @@ elif nav_adm == "🔐 Role Permissions":
                 save_data()
                 st.success(f"✅ {role_name} permissions saved!")
                 st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRINTED FABRIC CHECK MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_pf_priority(fabric_code, unchecked_qty):
+    """Calculate priority for unchecked fabric based on SO linkage, running days"""
+    items_data = st.session_state.get("items", {})
+    so_list    = SS.get("so_list", {})
+    boms_data  = st.session_state.get("boms", {})
+
+    # Find which FG items use this fabric (via BOM)
+    linked_styles = []
+    for fg_code, bom in boms_data.items():
+        for ln in bom.get("lines", []):
+            if ln.get("item_code") == fabric_code:
+                linked_styles.append(fg_code)
+
+    if not linked_styles:
+        return "Low", "No linked styles found", []
+
+    # Check SO demand for linked styles
+    urgent_sos = []
+    total_needed = 0
+    min_running_days = 999
+    reasons = []
+
+    for so_no, so in so_list.items():
+        if so.get("status") in ["Closed", "Cancelled", "Fully Received"]:
+            continue
+        for line in so.get("lines", []):
+            sku   = line.get("sku", "")
+            parent = items_data.get(sku, {}).get("parent", sku)
+            if parent in linked_styles or sku in linked_styles:
+                qty_needed = line.get("qty", 0)
+                total_needed += qty_needed
+                # Check running days
+                rd = running_days(sku) if sku in items_data else 999
+                min_running_days = min(min_running_days, rd)
+                urgent_sos.append({
+                    "so_no": so_no, "sku": sku, "qty": qty_needed,
+                    "buyer": so.get("buyer",""), "delivery": so.get("delivery_date",""),
+                    "running_days": rd,
+                })
+
+    if not urgent_sos:
+        return "Low", "No open SO demand", []
+
+    # Determine priority
+    if min_running_days < 7:
+        priority = "High"
+        reasons.append(f"Running days critical: {min_running_days} days")
+    elif min_running_days < 15:
+        priority = "High"
+        reasons.append(f"Running days low: {min_running_days} days")
+    elif total_needed > unchecked_qty * 0.8:
+        priority = "Medium"
+        reasons.append(f"High demand: {total_needed:.0f} mtr needed")
+    else:
+        priority = "Medium"
+        reasons.append(f"Open SO demand: {total_needed:.0f} mtr")
+
+    # Check for urgent delivery
+    for s in urgent_sos:
+        if s.get("delivery","") <= str(date.today() + timedelta(days=7)):
+            priority = "High"
+            reasons.append(f"Urgent delivery: {s['delivery']}")
+            break
+
+    return priority, " | ".join(reasons[:2]), urgent_sos
+
+
+def pf_priority_badge(priority):
+    colors = {"High": ("#ef4444","#fee2e2"), "Medium": ("#d97706","#fef3c7"), "Low": ("#64748b","#f1f5f9")}
+    c, bg = colors.get(priority, ("#64748b","#f1f5f9"))
+    return f'<span style="background:{bg};color:{c};padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;">{priority}</span>'
+
+
+# ── CHECK DASHBOARD ───────────────────────────────────────────────────────────
+if nav_pfc == "🔬 Check Dashboard":
+    st.markdown('<h1>Printed Fabric — Check Warehouse</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Printer se aaya fabric pehle Check Warehouse mein jaata hai — check hone ke baad hi usable stock mein aayega.</div>', unsafe_allow_html=True)
+
+    pf_unchecked  = SS.get("pf_unchecked", {})
+    pf_checked    = SS.get("pf_checked", {})
+    items_data    = st.session_state.get("items", {})
+    today_str     = str(date.today())
+
+    # KPIs
+    total_unc   = sum(v.get("qty",0) for v in pf_unchecked.values())
+    total_chk   = sum(v.get("qty",0) for v in pf_checked.values())
+    total_rej   = sum(v.get("rejected_qty",0) for v in pf_checked.values())
+    today_chk   = sum(
+        e.get("passed_qty",0) + e.get("rejected_qty",0) + e.get("rework_qty",0)
+        for e in SS.get("pf_check_entries",{}).values()
+        if e.get("check_date","") == today_str
+    )
+
+    c1,c2,c3,c4 = st.columns(4)
+    for col,val,lbl,cls in [
+        (c1, f"{total_unc:.0f} mtr",  "Unchecked Fabric",  "amber" if total_unc else ""),
+        (c2, f"{total_chk:.0f} mtr",  "Checked / Available","green" if total_chk else ""),
+        (c3, f"{today_chk:.0f} mtr",  "Today Checked",     ""),
+        (c4, f"{total_rej:.0f} mtr",  "Total Rejected",    "red" if total_rej else ""),
+    ]:
+        with col:
+            st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    tab_unc, tab_chk, tab_today = st.tabs(["📦 Unchecked (Priority View)", "✅ Checked Stock", "📅 Today's Activity"])
+
+    with tab_unc:
+        st.markdown("#### 📦 Unchecked Fabric — Priority Order")
+        if not pf_unchecked:
+            st.markdown('<div class="warn-box">Koi unchecked fabric nahi hai. "📥 Receive Fabric" se receive karo.</div>', unsafe_allow_html=True)
+        else:
+            rows = []
+            for key, uc in pf_unchecked.items():
+                fab_code = uc.get("fabric_code","")
+                unc_qty  = float(uc.get("qty",0))
+                priority, reason, linked_sos = get_pf_priority(fab_code, unc_qty)
+                needed_for_so = sum(s["qty"] for s in linked_sos)
+                linked_styles = list(set(s["sku"] for s in linked_sos))
+                min_rd = min((s.get("running_days",999) for s in linked_sos), default=999)
+                rows.append({
+                    "_priority_sort": {"High":0,"Medium":1,"Low":2}.get(priority,2),
+                    "Priority":        priority,
+                    "Fabric":          fab_code,
+                    "Name":            uc.get("fabric_name",""),
+                    "Design/Lot":      uc.get("design","—"),
+                    "Unchecked (mtr)": unc_qty,
+                    "Needed for SO":   needed_for_so,
+                    "Linked Styles":   ", ".join(linked_styles[:3]),
+                    "Min Running Days":min_rd if min_rd < 999 else "—",
+                    "Priority Reason": reason,
+                    "Received From":   uc.get("printer",""),
+                    "JWO":             uc.get("jwo_ref",""),
+                    "Received Date":   uc.get("receive_date",""),
+                })
+            rows.sort(key=lambda x: x["_priority_sort"])
+            for r in rows:
+                del r["_priority_sort"]
+
+            df_unc = pd.DataFrame(rows)
+            st.dataframe(df_unc, use_container_width=True, hide_index=True,
+                column_config={
+                    "Priority": st.column_config.TextColumn("Priority", width="small"),
+                    "Unchecked (mtr)": st.column_config.NumberColumn("Unchecked (mtr)", format="%.1f"),
+                })
+
+    with tab_chk:
+        st.markdown("#### ✅ Checked Fabric Stock")
+        if not pf_checked:
+            st.markdown('<div class="warn-box">Koi checked fabric nahi hai abhi.</div>', unsafe_allow_html=True)
+        else:
+            chk_rows = []
+            for key, chk in pf_checked.items():
+                chk_rows.append({
+                    "Fabric":         chk.get("fabric_code",""),
+                    "Name":           chk.get("fabric_name",""),
+                    "Design/Lot":     chk.get("design","—"),
+                    "Checked (mtr)":  float(chk.get("qty",0)),
+                    "Hard Reserved":  float(chk.get("hard_reserved",0)),
+                    "Available":      max(0, float(chk.get("qty",0)) - float(chk.get("hard_reserved",0))),
+                    "Rejected (mtr)": float(chk.get("rejected_qty",0)),
+                    "Last Check Date":chk.get("last_check_date",""),
+                })
+            st.dataframe(pd.DataFrame(chk_rows), use_container_width=True, hide_index=True)
+
+    with tab_today:
+        st.markdown(f"#### 📅 Today's Checking — {today_str}")
+        today_entries = {k:v for k,v in SS.get("pf_check_entries",{}).items() if v.get("check_date","") == today_str}
+        if not today_entries:
+            st.markdown('<div class="warn-box">Aaj koi fabric check nahi hua.</div>', unsafe_allow_html=True)
+        else:
+            t_rows = [{"Check #":k, "Fabric":v.get("fabric_code",""), "Name":v.get("fabric_name",""),
+                        "Checked":v.get("checked_qty",0), "Passed":v.get("passed_qty",0),
+                        "Rejected":v.get("rejected_qty",0), "Rework":v.get("rework_qty",0),
+                        "Checked By":v.get("checked_by",""), "JWO":v.get("jwo_ref","—")}
+                       for k,v in today_entries.items()]
+            st.dataframe(pd.DataFrame(t_rows), use_container_width=True, hide_index=True)
+            total_p = sum(v.get("passed_qty",0) for v in today_entries.values())
+            total_r = sum(v.get("rejected_qty",0) for v in today_entries.values())
+            st.markdown(f'<div class="ok-box">Today Total: Passed <strong>{total_p} mtr</strong> | Rejected <strong>{total_r} mtr</strong></div>', unsafe_allow_html=True)
+
+
+# ── RECEIVE FABRIC ────────────────────────────────────────────────────────────
+elif nav_pfc == "📥 Receive Fabric":
+    st.markdown('<h1>Printed Fabric — Receive from Printer</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Printer se fabric receive karo → automatically Unchecked Stock mein jaayega. Check hone ke baad hi usable stock mein aayega.</div>', unsafe_allow_html=True)
+
+    items_data = st.session_state.get("items", {})
+    jwo_list   = SS.get("jwo_list", {})
+    suppliers  = SS.get("suppliers", {})
+
+    # Fabric items (SFG type - printed/processed fabrics)
+    fabric_items = {k:v for k,v in items_data.items()
+                    if v.get("item_type") in ["Semi Finished Goods (SFG)"]}
+
+    rf1, rf2 = st.columns(2)
+    with rf1:
+        st.markdown("#### From JWO (Recommended)")
+        # JWOs pending receipt
+        pending_jwos = {k:v for k,v in jwo_list.items()
+                        if v.get("status") in ["Issued to Processor","In Process","Partial Received"]}
+        jwo_opts = ["— Manual Entry —"] + [
+            f"{k} | {v.get('processor_name','')} | {', '.join(l.get('output_name','') for l in v.get('lines',[]))}"
+            for k,v in pending_jwos.items()
+        ]
+        sel_jwo_pfc = st.selectbox("JWO Select", jwo_opts, key="pfc_jwo")
+        rf_date     = st.date_input("Receive Date", value=date.today(), key="pfc_date")
+        rf_challan  = st.text_input("Printer Challan No.", key="pfc_challan", placeholder="Printer ka challan")
+
+    with rf2:
+        rf_fabric   = st.selectbox("Fabric *", [""] + list(fabric_items.keys()),
+                                    format_func=lambda x: f"{x} – {fabric_items.get(x,{}).get('name','')}" if x else "Select",
+                                    key="pfc_fabric")
+        rf_qty      = st.number_input("Received Qty (mtr) *", min_value=0.0, step=0.5, key="pfc_qty")
+        rf_design   = st.text_input("Design / Lot No.", key="pfc_design", placeholder="e.g. Design-A, Lot-001")
+        rf_printer_name = ""
+        if sel_jwo_pfc and sel_jwo_pfc != "— Manual Entry —":
+            jwo_key = sel_jwo_pfc.split(" | ")[0]
+            rf_printer_name = pending_jwos.get(jwo_key,{}).get("processor_name","")
+        rf_printer  = st.text_input("Printer Name", value=rf_printer_name, key="pfc_printer")
+        rf_remarks  = st.text_area("Remarks", height=60, key="pfc_remarks")
+
+    if st.button("✅ Receive → Unchecked Stock", use_container_width=False) and rf_fabric and rf_qty > 0:
+        recv_key = f"{rf_fabric}_{rf_design or 'default'}".replace(" ","_")
+
+        # Add to unchecked stock
+        if "pf_unchecked" not in SS: SS["pf_unchecked"] = {}
+        if recv_key in SS["pf_unchecked"]:
+            SS["pf_unchecked"][recv_key]["qty"] = float(SS["pf_unchecked"][recv_key].get("qty",0)) + rf_qty
+        else:
+            SS["pf_unchecked"][recv_key] = {
+                "fabric_code":  rf_fabric,
+                "fabric_name":  fabric_items.get(rf_fabric,{}).get("name", rf_fabric),
+                "design":       rf_design,
+                "qty":          rf_qty,
+                "printer":      rf_printer,
+                "jwo_ref":      sel_jwo_pfc.split(" | ")[0] if sel_jwo_pfc != "— Manual Entry —" else "",
+                "receive_date": str(rf_date),
+                "challan":      rf_challan,
+                "remarks":      rf_remarks,
+            }
+
+        # Update JWO received qty
+        if sel_jwo_pfc and sel_jwo_pfc != "— Manual Entry —":
+            jwo_key = sel_jwo_pfc.split(" | ")[0]
+            for li, ln in enumerate(SS["jwo_list"][jwo_key]["lines"]):
+                if ln.get("output_material","") == rf_fabric:
+                    prev = float(ln.get("received_qty",0))
+                    SS["jwo_list"][jwo_key]["lines"][li]["received_qty"] = round(prev + rf_qty, 3)
+            all_recv = all(float(l.get("output_qty",0)) <= float(l.get("received_qty",0))
+                           for l in SS["jwo_list"][jwo_key]["lines"])
+            SS["jwo_list"][jwo_key]["status"] = "Received" if all_recv else "Partial Received"
+
+        # Add stock ledger entry — unchecked location
+        if "stock_ledger" not in SS: SS["stock_ledger"] = []
+        SS["stock_ledger"].append({
+            "date": str(rf_date), "doc_no": f"PF-RECV-{datetime.now().strftime('%d%m%H%M')}",
+            "doc_type": "PF-RECEIVE", "ref_no": sel_jwo_pfc.split(" | ")[0] if sel_jwo_pfc != "— Manual Entry —" else "",
+            "party": rf_printer, "material_code": rf_fabric,
+            "material_name": fabric_items.get(rf_fabric,{}).get("name",""),
+            "txn_type": "IN", "qty": rf_qty, "unit": "Meter",
+            "to_location": "Unchecked Stock",
+            "stock_after": float(items_data.get(rf_fabric,{}).get("stock",0)),
+            "remarks": f"Received from printer. Design: {rf_design}. Challan: {rf_challan}",
+        })
+
+        save_data()
+        st.success(f"✅ {rf_qty} mtr received → Unchecked Stock! Check karne ke baad usable hoga.")
+        st.rerun()
+
+    # Show pending JWO receipts
+    st.markdown("---")
+    st.markdown("#### 📋 Pending from Printer")
+    if pending_jwos:
+        pjrows = [{"JWO #":k, "Printer":v.get("processor_name",""),
+                   "Output":v.get("lines",[{}])[0].get("output_name","") if v.get("lines") else "",
+                   "Expected":sum(l.get("output_qty",0) for l in v.get("lines",[])),
+                   "Received":sum(float(l.get("received_qty",0)) for l in v.get("lines",[])),
+                   "Status":v.get("status","")}
+                  for k,v in pending_jwos.items()]
+        st.dataframe(pd.DataFrame(pjrows), use_container_width=True, hide_index=True)
+    else:
+        st.markdown('<div class="ok-box">Koi pending JWO nahi hai.</div>', unsafe_allow_html=True)
+
+
+# ── FABRIC CHECK ──────────────────────────────────────────────────────────────
+elif nav_pfc == "✅ Fabric Check":
+    st.markdown('<h1>Fabric Check Entry</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Unchecked fabric ka QC karo — Pass qty Checked Stock mein, Rejected alag, Rework alag jaayega.</div>', unsafe_allow_html=True)
+
+    pf_unchecked = SS.get("pf_unchecked", {})
+    fabric_items = {k:v for k,v in st.session_state.get("items",{}).items()
+                    if v.get("item_type") in ["Semi Finished Goods (SFG)"]}
+
+    if not pf_unchecked:
+        st.markdown('<div class="warn-box">Koi unchecked fabric nahi hai. Pehle "📥 Receive Fabric" se receive karo.</div>', unsafe_allow_html=True)
+    else:
+        # Priority list
+        st.markdown("#### 📦 Unchecked Fabric — Select to Check")
+        for key, uc in pf_unchecked.items():
+            if float(uc.get("qty",0)) <= 0:
+                continue
+            fab_code  = uc.get("fabric_code","")
+            unc_qty   = float(uc.get("qty",0))
+            priority, reason, linked_sos = get_pf_priority(fab_code, unc_qty)
+
+            with st.expander(
+                f"{pf_priority_badge(priority)} {fab_code} — {uc.get('fabric_name','')} | Unchecked: {unc_qty:.0f} mtr | Design: {uc.get('design','—')}",
+                expanded=(priority == "High")
+            ):
+                # Priority info
+                if linked_sos:
+                    st.markdown(f'<div class="warn-box" style="font-size:12px;">⚡ Priority: <strong>{priority}</strong> — {reason}</div>', unsafe_allow_html=True)
+                    with st.expander("📋 Linked SOs"):
+                        so_rows = [{"SO":s["so_no"],"SKU":s["sku"],"Qty Needed":s["qty"],
+                                    "Buyer":s["buyer"],"Delivery":s["delivery"],
+                                    "Running Days":s.get("running_days","—")} for s in linked_sos[:5]]
+                        st.dataframe(pd.DataFrame(so_rows), use_container_width=True, hide_index=True)
+
+                # Check entry
+                cc1, cc2, cc3 = st.columns(3)
+                with cc1:
+                    chk_qty  = st.number_input("Checked Qty (mtr) *", min_value=0.0,
+                                                max_value=unc_qty, value=min(unc_qty, unc_qty),
+                                                step=0.5, key=f"chk_qty_{key}")
+                    chk_by   = st.text_input("Checked By *", key=f"chk_by_{key}", placeholder="Name")
+                    chk_date = st.date_input("Check Date", value=date.today(), key=f"chk_date_{key}")
+                with cc2:
+                    pass_qty = st.number_input("✅ Passed Qty", min_value=0.0,
+                                                max_value=float(chk_qty), value=float(chk_qty),
+                                                step=0.5, key=f"pass_qty_{key}")
+                    rej_qty  = st.number_input("❌ Rejected Qty", min_value=0.0,
+                                                max_value=float(chk_qty), value=0.0,
+                                                step=0.5, key=f"rej_qty_{key}")
+                    rework_qty = st.number_input("🔄 Rework Qty", min_value=0.0,
+                                                  max_value=float(chk_qty), value=0.0,
+                                                  step=0.5, key=f"rwk_qty_{key}")
+                with cc3:
+                    chk_remarks = st.text_area("Remarks / Defects", height=80, key=f"chk_rem_{key}")
+                    total_disp = pass_qty + rej_qty + rework_qty
+                    if abs(total_disp - chk_qty) > 0.01 and chk_qty > 0:
+                        st.markdown(f'<div class="danger-box">Pass+Reject+Rework = {total_disp:.1f} ≠ {chk_qty:.1f}</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="ok-box">✅ Pass:{pass_qty:.0f} | Rej:{rej_qty:.0f} | Rework:{rework_qty:.0f}</div>', unsafe_allow_html=True)
+
+                if st.button(f"💾 Save Check Entry", key=f"save_chk_{key}") and chk_by:
+                    total_d = pass_qty + rej_qty + rework_qty
+                    if abs(total_d - chk_qty) > 0.01:
+                        st.error("Pass+Reject+Rework = Checked Qty honi chahiye!")
+                    else:
+                        chk_no = f"CHK-{SS['pf_check_counter']:04d}"
+                        SS["pf_check_counter"] += 1
+
+                        # Save check entry
+                        if "pf_check_entries" not in SS: SS["pf_check_entries"] = {}
+                        SS["pf_check_entries"][chk_no] = {
+                            "check_no":    chk_no,
+                            "check_date":  str(chk_date),
+                            "fabric_code": fab_code,
+                            "fabric_name": uc.get("fabric_name",""),
+                            "design":      uc.get("design",""),
+                            "jwo_ref":     uc.get("jwo_ref",""),
+                            "printer":     uc.get("printer",""),
+                            "checked_qty": chk_qty,
+                            "passed_qty":  pass_qty,
+                            "rejected_qty":rej_qty,
+                            "rework_qty":  rework_qty,
+                            "checked_by":  chk_by,
+                            "remarks":     chk_remarks,
+                            "source_key":  key,
+                        }
+
+                        # Deduct from unchecked
+                        SS["pf_unchecked"][key]["qty"] = max(0, unc_qty - chk_qty)
+
+                        # Add to checked stock (pass qty)
+                        if "pf_checked" not in SS: SS["pf_checked"] = {}
+                        chk_key = f"{fab_code}_checked"
+                        if chk_key not in SS["pf_checked"]:
+                            SS["pf_checked"][chk_key] = {
+                                "fabric_code": fab_code,
+                                "fabric_name": uc.get("fabric_name",""),
+                                "design":      uc.get("design",""),
+                                "qty":         0, "hard_reserved": 0,
+                                "rejected_qty":0, "last_check_date": str(chk_date),
+                            }
+                        SS["pf_checked"][chk_key]["qty"] = round(float(SS["pf_checked"][chk_key].get("qty",0)) + pass_qty, 3)
+                        SS["pf_checked"][chk_key]["rejected_qty"] = round(float(SS["pf_checked"][chk_key].get("rejected_qty",0)) + rej_qty, 3)
+                        SS["pf_checked"][chk_key]["last_check_date"] = str(chk_date)
+
+                        # Update item stock — only add PASSED qty to usable stock
+                        if pass_qty > 0 and fab_code in st.session_state["items"]:
+                            cur = float(st.session_state["items"][fab_code].get("stock",0))
+                            st.session_state["items"][fab_code]["stock"] = round(cur + pass_qty, 3)
+
+                        # Stock ledger entries
+                        if "stock_ledger" not in SS: SS["stock_ledger"] = []
+                        if pass_qty > 0:
+                            SS["stock_ledger"].append({
+                                "date": str(chk_date), "doc_no": chk_no,
+                                "doc_type": "FABRIC-CHECK", "material_code": fab_code,
+                                "material_name": uc.get("fabric_name",""),
+                                "txn_type": "IN", "qty": pass_qty, "unit": "Meter",
+                                "from_location": "Unchecked Stock",
+                                "to_location": "Checked Stock (Usable)",
+                                "stock_after": float(st.session_state["items"].get(fab_code,{}).get("stock",0)),
+                                "remarks": f"Check {chk_no} by {chk_by}. Pass:{pass_qty}, Rej:{rej_qty}",
+                            })
+
+                        save_data()
+                        st.success(f"✅ {chk_no} saved! Passed: {pass_qty} mtr → Checked Stock. Rejected: {rej_qty} mtr.")
+                        st.rerun()
+
+
+# ── HARD RESERVE ──────────────────────────────────────────────────────────────
+elif nav_pfc == "🔒 Hard Reserve":
+    st.markdown('<h1>Hard Reservation — Checked Fabric</h1>', unsafe_allow_html=True)
+    st.markdown('''<div class="info-box">
+        <strong>Hard Reserve</strong> — Checked fabric ko specific SO/SKU ke against physically reserve karo.<br>
+        ✅ Check pass hone ke BAAD hi hard reserve possible hai.<br>
+        🔵 Soft Reserve: Planning ke liye (MRP se auto) &nbsp;|&nbsp; 🔴 Hard Reserve: Production ke liye confirm
+    </div>''', unsafe_allow_html=True)
+
+    pf_checked   = SS.get("pf_checked", {})
+    so_list      = SS.get("so_list", {})
+    hard_res     = SS.get("pf_hard_reservations", {})
+    items_data   = st.session_state.get("items", {})
+
+    hr_tab1, hr_tab2 = st.tabs(["🔒 Create Reservation", "📋 Reservations List"])
+
+    with hr_tab1:
+        if not pf_checked:
+            st.markdown('<div class="warn-box">Koi checked fabric nahi hai. Pehle fabric check karo.</div>', unsafe_allow_html=True)
+        else:
+            hc1, hc2, hc3 = st.columns(3)
+            with hc1:
+                # Show checked fabrics with available qty
+                chk_opts = {k: v for k, v in pf_checked.items()
+                             if float(v.get("qty",0)) - float(v.get("hard_reserved",0)) > 0}
+                sel_fabric = st.selectbox("Fabric *", [""] + list(chk_opts.keys()),
+                                           format_func=lambda x: f"{chk_opts[x]['fabric_code']} – {chk_opts[x]['fabric_name']} | Available: {float(chk_opts[x].get('qty',0))-float(chk_opts[x].get('hard_reserved',0)):.0f} mtr" if x else "Select",
+                                           key="hr_fabric")
+                if sel_fabric:
+                    av = float(pf_checked[sel_fabric].get("qty",0)) - float(pf_checked[sel_fabric].get("hard_reserved",0))
+                    st.markdown(f'<div class="ok-box" style="font-size:12px;">Available: <strong>{av:.0f} mtr</strong></div>', unsafe_allow_html=True)
+            with hc2:
+                open_sos = {k:v for k,v in so_list.items() if v.get("status") not in ["Closed","Cancelled","Fully Received"]}
+                sel_so_hr = st.selectbox("SO *", [""] + list(open_sos.keys()),
+                                          format_func=lambda x: f"{x} – {open_sos.get(x,{}).get('buyer','')} | {open_sos.get(x,{}).get('delivery_date','')}" if x else "Select",
+                                          key="hr_so")
+                sel_sku_hr = ""
+                if sel_so_hr:
+                    so_lines = open_sos[sel_so_hr].get("lines",[])
+                    sku_opts = [""] + [f"{l.get('sku','')} – {l.get('sku_name','')}" for l in so_lines]
+                    sel_sku_hr = st.selectbox("SKU (optional)", sku_opts, key="hr_sku")
+            with hc3:
+                av_max = float(pf_checked.get(sel_fabric,{}).get("qty",0)) - float(pf_checked.get(sel_fabric,{}).get("hard_reserved",0)) if sel_fabric else 0
+                hr_qty = st.number_input("Reserve Qty (mtr) *", min_value=0.0,
+                                          max_value=av_max, value=av_max,
+                                          step=0.5, key="hr_qty")
+                hr_remarks = st.text_area("Remarks", height=60, key="hr_remarks")
+
+            if st.button("🔒 Hard Reserve", use_container_width=False) and sel_fabric and sel_so_hr and hr_qty > 0:
+                hr_no = f"HR-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                if "pf_hard_reservations" not in SS: SS["pf_hard_reservations"] = {}
+                SS["pf_hard_reservations"][hr_no] = {
+                    "hr_no":       hr_no,
+                    "date":        str(date.today()),
+                    "fabric_key":  sel_fabric,
+                    "fabric_code": pf_checked[sel_fabric].get("fabric_code",""),
+                    "fabric_name": pf_checked[sel_fabric].get("fabric_name",""),
+                    "so_no":       sel_so_hr,
+                    "sku":         sel_sku_hr.split(" – ")[0] if " – " in sel_sku_hr else sel_sku_hr,
+                    "qty":         hr_qty,
+                    "status":      "Active",
+                    "remarks":     hr_remarks,
+                }
+                # Update hard reserved qty in pf_checked
+                prev_hr = float(SS["pf_checked"][sel_fabric].get("hard_reserved",0))
+                SS["pf_checked"][sel_fabric]["hard_reserved"] = round(prev_hr + hr_qty, 3)
+                # Also update items reserved field
+                fab_code = pf_checked[sel_fabric].get("fabric_code","")
+                if fab_code in st.session_state["items"]:
+                    prev_res = float(st.session_state["items"][fab_code].get("reserved",0))
+                    st.session_state["items"][fab_code]["reserved"] = round(prev_res + hr_qty, 3)
+                save_data()
+                st.success(f"✅ {hr_qty} mtr hard reserved for {sel_so_hr}!")
+                st.rerun()
+
+    with hr_tab2:
+        if not hard_res:
+            st.markdown('<div class="warn-box">Koi hard reservation nahi hai.</div>', unsafe_allow_html=True)
+        else:
+            hr_rows = []
+            for hr_no, hr in hard_res.items():
+                hr_rows.append({
+                    "HR #":         hr_no,
+                    "Date":         hr.get("date",""),
+                    "Fabric":       hr.get("fabric_code",""),
+                    "Fabric Name":  hr.get("fabric_name",""),
+                    "SO #":         hr.get("so_no",""),
+                    "SKU":          hr.get("sku","—"),
+                    "Reserved Qty": hr.get("qty",0),
+                    "Status":       hr.get("status",""),
+                })
+            st.dataframe(pd.DataFrame(hr_rows), use_container_width=True, hide_index=True)
+
+            # Release reservation
+            st.markdown("---")
+            st.markdown("#### 🔓 Release Reservation")
+            rel_hr = st.selectbox("Release karo", [""] + list(hard_res.keys()),
+                                   format_func=lambda x: f"{x} – {hard_res[x].get('fabric_code','')} | SO:{hard_res[x].get('so_no','')} | {hard_res[x].get('qty',0)} mtr" if x else "Select",
+                                   key="rel_hr_sel")
+            if rel_hr and st.button("🔓 Release", key="rel_hr_btn"):
+                hr = hard_res[rel_hr]
+                fab_key  = hr.get("fabric_key","")
+                rel_qty  = float(hr.get("qty",0))
+                fab_code = hr.get("fabric_code","")
+                if fab_key in SS.get("pf_checked",{}):
+                    SS["pf_checked"][fab_key]["hard_reserved"] = max(0, float(SS["pf_checked"][fab_key].get("hard_reserved",0)) - rel_qty)
+                if fab_code in st.session_state["items"]:
+                    prev = float(st.session_state["items"][fab_code].get("reserved",0))
+                    st.session_state["items"][fab_code]["reserved"] = max(0, prev - rel_qty)
+                SS["pf_hard_reservations"][rel_hr]["status"] = "Released"
+                save_data()
+                st.success(f"✅ {rel_hr} released!")
+                st.rerun()
+
+
+# ── CHECK REPORTS ─────────────────────────────────────────────────────────────
+elif nav_pfc == "📊 Check Reports":
+    st.markdown('<h1>Fabric Check Reports</h1>', unsafe_allow_html=True)
+
+    check_entries = SS.get("pf_check_entries", {})
+    pf_unchecked  = SS.get("pf_unchecked", {})
+    pf_checked    = SS.get("pf_checked", {})
+
+    rep_sel = st.selectbox("Report", [
+        "1. Daily Checking Summary",
+        "2. Fabric-wise Check Status",
+        "3. Unchecked Pending Report",
+        "4. Checker-wise Summary",
+    ], key="pfc_rep")
+
+    rep_no = rep_sel.split(".")[0].strip()
+
+    if rep_no == "1":
+        date_from = st.date_input("From", value=date.today()-timedelta(days=7), key="pfc_rep_from")
+        rows = [{"Date":v.get("check_date",""),"Fabric":v.get("fabric_code",""),
+                  "Name":v.get("fabric_name",""),"Design":v.get("design","—"),
+                  "Checked":v.get("checked_qty",0),"Passed":v.get("passed_qty",0),
+                  "Rejected":v.get("rejected_qty",0),"Rework":v.get("rework_qty",0),
+                  "Checked By":v.get("checked_by","")}
+                 for v in check_entries.values()
+                 if v.get("check_date","") >= str(date_from)]
+        if rows:
+            rows.sort(key=lambda x: x["Date"], reverse=True)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            total_p = sum(r["Passed"] for r in rows)
+            total_r = sum(r["Rejected"] for r in rows)
+            st.markdown(f'<div class="ok-box">Total Passed: <strong>{total_p} mtr</strong> | Rejected: <strong>{total_r} mtr</strong></div>', unsafe_allow_html=True)
+        else:
+            st.info("Koi data nahi selected date range mein.")
+
+    elif rep_no == "2":
+        rows = []
+        all_fabrics = set(list(pf_unchecked.keys()) + list(pf_checked.keys()))
+        for key in all_fabrics:
+            uc = pf_unchecked.get(key.replace("_checked",""), {})
+            chk = pf_checked.get(key if "_checked" in key else f"{key}_checked", {})
+            fab_code = uc.get("fabric_code","") or chk.get("fabric_code","")
+            if not fab_code: continue
+            rows.append({
+                "Fabric": fab_code,
+                "Name": uc.get("fabric_name","") or chk.get("fabric_name",""),
+                "Unchecked (mtr)": float(uc.get("qty",0)) if uc else 0,
+                "Checked (mtr)": float(chk.get("qty",0)) if chk else 0,
+                "Hard Reserved": float(chk.get("hard_reserved",0)) if chk else 0,
+                "Available": max(0, float(chk.get("qty",0)) - float(chk.get("hard_reserved",0))) if chk else 0,
+                "Rejected": float(chk.get("rejected_qty",0)) if chk else 0,
+            })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep_no == "3":
+        rows = [{"Fabric":v.get("fabric_code",""),"Name":v.get("fabric_name",""),
+                  "Design":v.get("design","—"),"Unchecked":v.get("qty",0),
+                  "Printer":v.get("printer",""),"Received":v.get("receive_date",""),
+                  "JWO":v.get("jwo_ref","—")}
+                 for v in pf_unchecked.values() if float(v.get("qty",0)) > 0]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="ok-box">Koi unchecked fabric nahi hai!</div>', unsafe_allow_html=True)
+
+    elif rep_no == "4":
+        checker_summary = {}
+        for v in check_entries.values():
+            cb = v.get("checked_by","Unknown")
+            if cb not in checker_summary:
+                checker_summary[cb] = {"checked":0,"passed":0,"rejected":0,"entries":0}
+            checker_summary[cb]["checked"]  += v.get("checked_qty",0)
+            checker_summary[cb]["passed"]   += v.get("passed_qty",0)
+            checker_summary[cb]["rejected"] += v.get("rejected_qty",0)
+            checker_summary[cb]["entries"]  += 1
+        if checker_summary:
+            rows = [{"Checker":k,"Entries":v["entries"],"Total Checked":v["checked"],
+                      "Passed":v["passed"],"Rejected":v["rejected"]}
+                     for k,v in checker_summary.items()]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
