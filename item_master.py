@@ -6271,44 +6271,111 @@ elif nav_gry == "🚚 Transit Tracker":
                         save_data(); st.success("✅ Transit info updated!"); st.rerun()
 
                 with up2:
-                    st.markdown("**📍 Update Location / Status**")
-                    new_status = st.selectbox("Status", GREY_STATUSES,
-                                               index=GREY_STATUSES.index(t.get("status","PO Created")),
-                                               key=f"gry_sts_{key}")
+                    st.markdown("**📍 Grey Ka Abhi Kya Update Karna Hai?**")
 
-                    if new_status == "At Transport Location":
-                        recv_at_transport = st.number_input("Qty Received at Transport Location",
-                                                             min_value=0.0, max_value=float(t.get("ordered_qty",0)),
-                                                             value=float(t.get("ordered_qty",0)),
-                                                             step=0.5, key=f"recv_trans_{key}")
-                    elif new_status == "Sent to Factory":
-                        sent_to_factory = st.number_input("Qty Sent to Factory",
-                                                           min_value=0.0, max_value=float(t.get("transport_qty",0) or t.get("ordered_qty",0)),
-                                                           value=float(t.get("transport_qty",0) or t.get("ordered_qty",0)),
-                                                           step=0.5, key=f"sent_fac_{key}")
+                    current_status = t.get("status","PO Created")
 
-                    new_remarks = st.text_input("Remarks", key=f"gry_rem_{key}")
-
-                    if st.button("📍 Update Status", key=f"upd_loc_{key}"):
-                        upd = {"status": new_status}
-                        if new_status == "At Transport Location":
-                            recv_q = st.session_state.get(f"recv_trans_{key}", t.get("ordered_qty",0))
-                            upd["transport_qty"] = recv_q
+                    # Show context-aware action buttons based on current status
+                    if current_status == "In Transit":
+                        st.markdown('<div class="info-box" style="font-size:12px;">Grey In Transit hai — jab transport location pe pahunche tab "✅ Received at Transport Location" click karo.</div>', unsafe_allow_html=True)
+                        recv_q = st.number_input(
+                            f"📦 Qty Received at Transport Location (mtr)",
+                            min_value=0.0,
+                            max_value=float(t.get("ordered_qty",0)) * 1.1,
+                            value=float(t.get("ordered_qty",0)),
+                            step=0.5, key=f"recv_trans_{key}"
+                        )
+                        recv_date = st.date_input("Receipt Date", value=date.today(), key=f"recv_dt_{key}")
+                        recv_rem  = st.text_input("Remarks (optional)", key=f"recv_rem_{key}")
+                        if st.button("✅ Received at Transport Location", key=f"btn_recv_trans_{key}", use_container_width=True):
+                            SS["grey_po_tracker"][key].update({
+                                "status": "At Transport Location",
+                                "transport_qty": recv_q,
+                                "received_qty": recv_q,
+                            })
                             add_grey_ledger(key, "RECEIVED", recv_q, "In Transit", "Transport Location",
-                                           f"RECV-{t.get('po_no')}", f"Received at transport location. {new_remarks}")
-                        elif new_status == "Sent to Factory":
-                            sent_q = st.session_state.get(f"sent_fac_{key}", t.get("transport_qty",0))
-                            upd["factory_qty"] = float(t.get("factory_qty",0)) + sent_q
-                            upd["transport_qty"] = max(0, float(t.get("transport_qty",0)) - sent_q)
-                            # Update actual item stock
+                                           f"RECV-{t.get('po_no')}", f"Received at transport. {recv_rem}")
+                            save_data(); st.success(f"✅ {recv_q} mtr transport location pe receive hua!"); st.rerun()
+
+                    elif current_status == "At Transport Location":
+                        avail = float(t.get("transport_qty", 0))
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Transport Location pe: <strong>{avail} mtr</strong> available hai. Kahan bhejna hai?</div>', unsafe_allow_html=True)
+
+                        action = st.radio("Next Action", [
+                            "🏭 Factory bhejo (phir printer)",
+                            "🖨️ Seedha Printer ko bhejo",
+                        ], key=f"trans_action_{key}", horizontal=False)
+
+                        send_qty = st.number_input("Qty (mtr)", min_value=0.0,
+                                                    max_value=avail * 1.1,
+                                                    value=avail, step=0.5, key=f"send_qty_{key}")
+                        send_rem = st.text_input("Challan / Remarks", key=f"send_rem_{key}")
+
+                        if "Factory" in action:
+                            if st.button("🏭 Send to Factory", key=f"btn_to_fac_{key}", use_container_width=True):
+                                mat = t.get("material_code","")
+                                SS["grey_po_tracker"][key].update({
+                                    "status": "At Factory",
+                                    "factory_qty": float(t.get("factory_qty",0)) + send_qty,
+                                    "transport_qty": max(0, avail - send_qty),
+                                })
+                                if mat in st.session_state["items"]:
+                                    cur = float(st.session_state["items"][mat].get("stock",0))
+                                    st.session_state["items"][mat]["stock"] = round(cur + send_qty, 3)
+                                add_grey_ledger(key, "IN", send_qty, "Transport Location", "Factory",
+                                               f"TRF-{t.get('po_no')}", f"Sent to factory. {send_rem}")
+                                save_data(); st.success(f"✅ {send_qty} mtr factory bhej diya! Stock updated."); st.rerun()
+                        else:
+                            suppliers = SS.get("suppliers", {})
+                            printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
+                            sel_pr_direct = st.selectbox("Printer Select *", printer_opts, key=f"direct_printer_{key}")
+                            if st.button("🖨️ Direct to Printer", key=f"btn_direct_print_{key}", use_container_width=True):
+                                SS["grey_po_tracker"][key].update({
+                                    "status": "Sent to Printer",
+                                    "printer_qty": float(t.get("printer_qty",0)) + send_qty,
+                                    "transport_qty": max(0, avail - send_qty),
+                                })
+                                add_grey_ledger(key, "OUT", send_qty, "Transport Location", "Printer",
+                                               f"TRF-{t.get('po_no')}", f"Direct to printer {sel_pr_direct}. {send_rem}")
+                                save_data(); st.success(f"✅ {send_qty} mtr seedha printer ko bhej diya!"); st.rerun()
+
+                    elif current_status == "At Factory":
+                        avail = float(t.get("factory_qty", 0))
+                        st.markdown(f'<div class="ok-box" style="font-size:12px;">Factory mein: <strong>{avail} mtr</strong>. Printer ko bhejna hai?</div>', unsafe_allow_html=True)
+                        send_qty = st.number_input("Printer ko Issue Qty (mtr)", min_value=0.0,
+                                                    max_value=avail*1.1, value=avail, step=0.5, key=f"fac_send_{key}")
+                        suppliers = SS.get("suppliers",{})
+                        printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
+                        sel_printer_fac = st.selectbox("Printer", printer_opts, key=f"fac_printer_{key}")
+                        send_rem_fac = st.text_input("Challan / Remarks", key=f"fac_send_rem_{key}")
+                        if st.button("🖨️ Issue to Printer", key=f"btn_fac_print_{key}", use_container_width=True):
                             mat = t.get("material_code","")
+                            SS["grey_po_tracker"][key].update({
+                                "status": "Sent to Printer",
+                                "printer_qty": float(t.get("printer_qty",0)) + send_qty,
+                                "factory_qty": max(0, avail - send_qty),
+                            })
                             if mat in st.session_state["items"]:
                                 cur = float(st.session_state["items"][mat].get("stock",0))
-                                st.session_state["items"][mat]["stock"] = round(cur + sent_q, 3)
-                            add_grey_ledger(key, "IN", sent_q, "Transport Location", "Factory",
-                                           f"TRF-{t.get('po_no')}", f"Transferred to factory. {new_remarks}")
-                        SS["grey_po_tracker"][key].update(upd)
-                        save_data(); st.success(f"✅ Status updated to {new_status}!"); st.rerun()
+                                st.session_state["items"][mat]["stock"] = max(0, round(cur - send_qty, 3))
+                            add_grey_ledger(key, "OUT", send_qty, "Factory", "Printer",
+                                           f"TRF-{t.get('po_no')}", f"Issued to printer {sel_printer_fac}. {send_rem_fac}")
+                            save_data(); st.success(f"✅ {send_qty} mtr printer ko issue kiya!"); st.rerun()
+
+                    elif current_status in ["Sent to Printer","At Printer"]:
+                        st.markdown(f'<div class="info-box" style="font-size:12px;">Grey printer ke paas hai ({t.get("printer_qty",0)} mtr). Printed fabric receive hone pe GRN karo ya QC karo.</div>', unsafe_allow_html=True)
+                        if st.button("➡️ Go to GRN", key=f"btn_goto_grn_{key}", use_container_width=True):
+                            st.session_state["current_page"] = "📥 GRN"; st.rerun()
+
+                    else:
+                        # Generic status update for other statuses
+                        new_status = st.selectbox("Status Update", GREY_STATUSES,
+                                                   index=GREY_STATUSES.index(current_status) if current_status in GREY_STATUSES else 0,
+                                                   key=f"gry_sts_{key}")
+                        new_remarks = st.text_input("Remarks", key=f"gry_rem_{key}")
+                        if st.button("💾 Update", key=f"upd_loc_{key}"):
+                            SS["grey_po_tracker"][key]["status"] = new_status
+                            save_data(); st.success(f"✅ Updated!"); st.rerun()
 
 
 # ── LOCATION STOCK ────────────────────────────────────────────────────────────
