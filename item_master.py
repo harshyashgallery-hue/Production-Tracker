@@ -8923,14 +8923,17 @@ elif nav_prd == "➕ Create Job Order":
     pf_checked = SS.get("pf_checked", {})
     prefill    = st.session_state.pop("prd_prefill", {})
 
-    jc1, jc2 = st.columns(2)
+    jc1, jc2, jc3 = st.columns(3)
     with jc1:
-        jo_date   = st.date_input("JO Date *", value=date.today(), key="pjo_date")
-        jo_so     = st.selectbox("SO # *",
+        jo_date     = st.date_input("JO Date *", value=date.today(), key="pjo_date")
+        jo_so       = st.selectbox("SO # *",
             [""] + [k for k,v in so_list.items() if v.get("status") not in ["Closed","Cancelled","Fully Received"]],
             index=0, key="pjo_so",
-            format_func=lambda x: f"{x} — {so_list.get(x,{}).get('buyer','')} | {so_list.get(x,{}).get('delivery_date','')}" if x else "Select SO"
+            format_func=lambda x: f"{x} — {so_list.get(x,{}).get('buyer','')} | Delivery: {so_list.get(x,{}).get('delivery_date','')}" if x else "Select SO"
         )
+        if jo_so:
+            so_delivery = so_list.get(jo_so,{}).get("delivery_date","")
+            st.markdown(f'<div class="info-box" style="font-size:12px;">Delivery Date: <strong>{so_delivery}</strong></div>', unsafe_allow_html=True)
         # Pre-fill SO if coming from Ready to Process
         if prefill.get("so_no") and not st.session_state.get("pjo_so_set"):
             st.session_state["pjo_so"] = prefill["so_no"]
@@ -8941,19 +8944,17 @@ elif nav_prd == "➕ Create Job Order":
         proc_idx     = PRD_PROCESSES.index(proc_default) if proc_default in PRD_PROCESSES else 0
         jo_process   = st.selectbox("Process *", PRD_PROCESSES, index=proc_idx, key="pjo_process")
         jo_exec      = st.radio("Execution *", PRD_EXEC_TYPE, horizontal=True, key="pjo_exec")
+        jo_exp_date  = st.date_input("Expected Completion", value=date.today()+timedelta(days=3), key="pjo_exp_date")
 
-    if jo_exec == "Outsource":
-        vc1, vc2 = st.columns(2)
-        with vc1:
+    with jc3:
+        if jo_exec == "Outsource":
             vendor_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
             jo_vendor   = st.selectbox("Vendor *", vendor_opts, key="pjo_vendor")
-        with vc2:
-            jo_unit   = st.text_input("Unit / Factory", key="pjo_unit")
-    else:
-        jo_vendor = ""
-        jo_unit   = st.text_input("Department", placeholder="e.g. Cutting Floor", key="pjo_unit_ih")
-
-    jo_remarks = st.text_input("Remarks", key="pjo_remarks")
+            jo_unit     = st.text_input("Unit / Factory", key="pjo_unit")
+        else:
+            jo_vendor = ""
+            jo_unit   = st.text_input("Department", placeholder="e.g. Cutting Floor", key="pjo_unit_ih")
+        jo_remarks = st.text_input("Remarks", key="pjo_remarks")
 
     st.markdown("---")
 
@@ -9034,29 +9035,53 @@ elif nav_prd == "➕ Create Job Order":
             if jo_process == "Cutting" and any(r["mat_req"] for r in line_rows):
                 st.markdown("---")
                 st.markdown("#### 📦 Fabric Issue")
-                st.markdown('<div class="info-box" style="font-size:12px;">BOM ke basis pe fabric requirement calculate ho gayi. Checked stock se issue hoga.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="info-box" style="font-size:12px;">BOM ke basis pe fabric requirement calculate ho gayi. Rate BOM process cost se auto-fill hua hai — edit kar sakte ho.</div>', unsafe_allow_html=True)
 
                 issue_lines = []
                 for lr in line_rows:
                     for m in lr["mat_req"]:
                         fab_key   = f"{m['code']}_checked"
-                        fab_avail = max(0, float(pf_checked.get(fab_key,{}).get("qty",0)) - float(pf_checked.get(fab_key,{}).get("hard_reserved",0)))
-                        req_qty   = round(m["qty_per"] * lr["plan_qty"], 2)
-                        mi1,mi2,mi3,mi4 = st.columns([2,1,1,1])
-                        with mi1: st.markdown(f'<div style="padding-top:30px;font-size:12px;">{m["code"]} — {m["name"]}</div>', unsafe_allow_html=True)
-                        with mi2: st.markdown(f'<div style="padding-top:26px;font-size:12px;">Required: <strong>{req_qty} mtr</strong></div>', unsafe_allow_html=True)
-                        with mi3: st.markdown(f'<div style="padding-top:26px;font-size:12px;color:{"#059669" if fab_avail >= req_qty else "#ef4444"};">Available: <strong>{fab_avail} mtr</strong></div>', unsafe_allow_html=True)
+                        fab_avail = float(max(0, float(pf_checked.get(fab_key,{}).get("qty",0)) - float(pf_checked.get(fab_key,{}).get("hard_reserved",0))))
+                        req_qty   = float(round(m["qty_per"] * float(lr["plan_qty"]), 2))
+                        issue_max = float(max(fab_avail, req_qty))  # allow at least req_qty
+                        # Get rate from item master
+                        mat_rate  = float(items_data.get(m["code"],{}).get("price", 0))
+
+                        mi1,mi2,mi3,mi4,mi5 = st.columns([2,1,1,1,1])
+                        with mi1:
+                            st.markdown(f'<div style="padding-top:28px;font-size:12px;font-weight:600;">{m["code"]} — {m["name"]}</div>', unsafe_allow_html=True)
+                        with mi2:
+                            st.markdown(f'<div style="padding-top:24px;font-size:12px;">Required:<br><strong>{req_qty} mtr</strong></div>', unsafe_allow_html=True)
+                        with mi3:
+                            color = "#059669" if fab_avail >= req_qty else "#ef4444"
+                            st.markdown(f'<div style="padding-top:24px;font-size:12px;color:{color};">Available:<br><strong>{fab_avail} mtr</strong></div>', unsafe_allow_html=True)
                         with mi4:
-                            issue_qty = st.number_input("Issue Qty", min_value=0.0,
-                                max_value=fab_avail, value=min(req_qty, fab_avail),
-                                step=0.5, key=f"issue_{m['code']}_{lr['sku']}")
+                            issue_qty = st.number_input("Issue Qty (mtr)",
+                                min_value=0.0,
+                                max_value=float(issue_max),
+                                value=float(min(req_qty, fab_avail)),
+                                step=0.5,
+                                key=f"issue_{m['code']}_{lr['sku']}")
+                        with mi5:
+                            issue_rate = st.number_input("Rate (₹/mtr)",
+                                min_value=0.0,
+                                value=float(mat_rate),
+                                step=1.0,
+                                key=f"issue_rate_{m['code']}_{lr['sku']}")
+
                         issue_lines.append({
                             "material_code": m["code"],
                             "material_name": m["name"],
                             "required_qty":  req_qty,
-                            "issue_qty":     issue_qty,
+                            "issue_qty":     float(issue_qty),
+                            "rate":          float(issue_rate),
+                            "amount":        round(float(issue_qty) * float(issue_rate), 2),
                             "sku":           lr["sku"],
                         })
+
+                if issue_lines:
+                    total_issue_val = sum(il["amount"] for il in issue_lines)
+                    st.markdown(f'<div class="ok-box" style="font-size:12px;">Total Fabric Value: <strong>₹{total_issue_val:,.2f}</strong></div>', unsafe_allow_html=True)
 
             # Save JO
             st.markdown("---")
@@ -9098,6 +9123,7 @@ elif nav_prd == "➕ Create Job Order":
                     SS["prod_jo_list"][jo_no] = {
                         "jo_no":       jo_no,
                         "jo_date":     str(jo_date),
+                        "exp_date":    str(jo_exp_date),
                         "process":     jo_process,
                         "exec_type":   jo_exec,
                         "vendor_name": vendor_name,
@@ -9107,6 +9133,7 @@ elif nav_prd == "➕ Create Job Order":
                         "delivery":    so_data.get("delivery_date",""),
                         "lines":       final_lines,
                         "issued_materials": issued if 'issued' in dir() else [],
+                        "total_fabric_value": sum(il.get("amount",0) for il in (issued if 'issued' in dir() else [])),
                         "status":      "Material Issued" if (issued if 'issued' in dir() else []) else "Created",
                         "remarks":     jo_remarks,
                         "created_at":  datetime.now().isoformat(),
@@ -9163,7 +9190,10 @@ elif nav_prd == "📋 Job Order List":
                 <div class="info-row"><span class="k">Type</span><span class="v">{jo.get("exec_type","")}</span></div>
                 <div class="info-row"><span class="k">Vendor / Dept</span><span class="v">{jo.get("vendor_name","") or jo.get("unit","Inhouse")}</span></div>
                 <div class="info-row"><span class="k">Status</span><span class="v">{jo.get("status","")}</span></div>
-                <div class="info-row"><span class="k">Total Lines</span><span class="v">{len(jo.get("lines",[]))}</span></div>
+                <div class="info-row"><span class="k">JO Date</span><span class="v">{jo.get("jo_date","")}</span></div>
+                <div class="info-row"><span class="k">Expected</span><span class="v">{jo.get("exp_date","—")}</span></div>
+                <div class="info-row"><span class="k">SO Delivery</span><span class="v">{jo.get("delivery","—")}</span></div>
+                <div class="info-row"><span class="k">Fabric Value</span><span class="v">₹{jo.get("total_fabric_value",0):,.2f}</span></div>
             </div>''', unsafe_allow_html=True)
         with hc3:
             total_plan = sum(float(l.get("plan_qty",0)) for l in jo.get("lines",[]))
