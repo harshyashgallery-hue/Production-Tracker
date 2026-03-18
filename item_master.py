@@ -204,6 +204,7 @@ DEFAULT_DATA = {
     "grey_return_list": {},
     "grey_rework_list": {},
     "grey_issue_docs": {},
+    "activity_log": {},
     "grey_qc_counter": 1,
     "grey_transfer_counter": 1,
     "grey_return_counter": 1,
@@ -4685,6 +4686,66 @@ def show_print_button(doc_type, doc_no, data, btn_key):
             </a>''', unsafe_allow_html=True)
 
 
+
+def log_activity(doc_type, doc_no, action, details="", user="System"):
+    """Add activity log entry to a document"""
+    if "activity_log" not in SS:
+        SS["activity_log"] = {}
+    key = f"{doc_type}_{doc_no}"
+    if key not in SS["activity_log"]:
+        SS["activity_log"][key] = []
+    SS["activity_log"][key].append({
+        "time":    datetime.now().strftime("%d-%m-%Y %H:%M"),
+        "user":    st.session_state.get("_user_name", "System"),
+        "action":  action,
+        "details": details,
+        "icon":    _log_icon(action),
+    })
+
+def _log_icon(action):
+    icons = {
+        "Created": "🟢", "Updated": "✏️", "Deleted": "🗑️",
+        "Approved": "✅", "Rejected": "❌", "Cancelled": "🚫",
+        "Sent": "📤", "Received": "📥", "Confirmed": "✔️",
+        "Status Changed": "🔄", "Printed": "🖨️",
+        "Dispatched": "🚚", "In Transit": "🚚",
+        "At Transport": "📦", "At Factory": "🏭",
+        "Issued": "📤", "QC Done": "🔬",
+        "Returned": "↩️", "Rework": "🔄",
+        "Note": "📝",
+    }
+    for k, v in icons.items():
+        if k.lower() in action.lower():
+            return v
+    return "📋"
+
+def show_activity_log(doc_type, doc_no):
+    """Show activity log for a document"""
+    key = f"{doc_type}_{doc_no}"
+    logs = SS.get("activity_log", {}).get(key, [])
+    if not logs:
+        st.markdown('<div style="color:#94a3b8;font-size:12px;padding:8px;">Koi activity nahi abhi tak.</div>', unsafe_allow_html=True)
+        return
+    for log in reversed(logs):
+        st.markdown(f'''<div style="display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid #f1f5f9;">
+            <div style="font-size:18px;flex-shrink:0;">{log["icon"]}</div>
+            <div style="flex:1;">
+                <div style="font-size:13px;font-weight:600;">{log["action"]}</div>
+                <div style="font-size:12px;color:#64748b;">{log.get("details","")}</div>
+                <div style="font-size:11px;color:#94a3b8;margin-top:2px;">👤 {log["user"]} &nbsp;·&nbsp; 🕐 {log["time"]}</div>
+            </div>
+        </div>''', unsafe_allow_html=True)
+
+    # Add note
+    with st.expander("📝 Log Note Add Karo"):
+        note_text = st.text_area("Note", height=60, key=f"note_{doc_type}_{doc_no}", placeholder="Koi bhi note ya update likho...")
+        if st.button("📝 Add Note", key=f"add_note_{doc_type}_{doc_no}"):
+            if note_text.strip():
+                log_activity(doc_type, doc_no, "Note", note_text.strip())
+                save_data()
+                st.rerun()
+
+
 if nav_pur == "🛒 Purchase Dashboard":
     st.markdown('<h1>Purchase Dashboard</h1>', unsafe_allow_html=True)
 
@@ -5012,6 +5073,7 @@ elif nav_pur == "📋 Purchase Requisitions":
                             with ap1:
                                 if st.button("✅ Approve", key=f"apr_{pr_no}", use_container_width=True):
                                     SS["pr_list"][pr_no]["status"] = "Approved"
+                                    log_activity("PR", pr_no, "Approved", f"PR approved")
                                     save_data(); st.rerun()
                             with ap2:
                                 if st.button("❌ Reject", key=f"rej_{pr_no}", use_container_width=True):
@@ -5391,6 +5453,7 @@ elif nav_pur == "📦 Purchase Orders":
                                         "created_at": datetime.now().isoformat(),
                                     }
                             st.session_state["po_lines"] = []; st.session_state["pr_to_po"] = ""
+                            log_activity("PO", po_no, "Created", f"Supplier: {suppliers.get(supp_code,{{}}).get('name',supp_code)} | Total: ₹{total:,.2f} | Status: {btn_status}")
                             save_data(); st.success(f"✅ {po_no} saved!"); st.rerun()
 
     with po_tab1:
@@ -5444,6 +5507,10 @@ elif nav_pur == "📦 Purchase Orders":
                         SS["po_list"][po_no]["status"] = new_sts; save_data(); st.rerun()
             with ac2:
                 show_print_button("PO", po_no, po, f"print_po_{po_no}")
+
+            st.markdown("---")
+            st.markdown("#### 📋 Activity Log")
+            show_activity_log("PO", po_no)
             with ac3:
                 if po.get("status") in ["Sent to Supplier","Confirmed","Partial Received"]:
                     if st.button("📥 Create GRN", key=f"grn_po_det_{po_no}", use_container_width=True):
@@ -5611,6 +5678,7 @@ elif nav_pur == "🔧 Job Work Orders":
                 }
                 if sel_jw_pr: SS["pr_list"][sel_jw_pr]["status"] = "JWO Created"
                 st.session_state["jwo_lines"] = []; st.session_state["pr_to_jwo"] = ""
+                log_activity("JWO", jwo_no, "Created", f"Processor: {suppliers.get(proc_code,{{}}).get('name',proc_code)} | Total: ₹{jw_total:,.2f}")
                 save_data(); st.success(f"✅ {jwo_no} created! Input materials issued."); st.rerun()
 
     with jw_tab1:
@@ -5669,6 +5737,10 @@ elif nav_pur == "🔧 Job Work Orders":
                         SS["jwo_list"][jwo_no]["status"] = new_jsts; save_data(); st.rerun()
             with ac2:
                 show_print_button("JWO", jwo_no, jwo, f"print_jwo_{jwo_no}")
+
+            st.markdown("---")
+            st.markdown("#### 📋 Activity Log")
+            show_activity_log("JWO", jwo_no)
             with ac3:
                 if jwo.get("status") in ["Issued to Processor","In Process","Partial Received"]:
                     if st.button("📥 Create GRN", key=f"grn_jwo_det_{jwo_no}", use_container_width=True):
@@ -5878,6 +5950,7 @@ elif nav_pur == "📥 GRN":
                 "status":"Posted","remarks":grn_remarks,"created_at":datetime.now().isoformat(),
             }
             st.session_state["grn_from_po"] = ""; st.session_state["grn_from_jwo"] = ""
+            log_activity("GRN", grn_no, "Received", f"Party: {party_name} | Ref: {sel_grn_ref} | Challan: {grn_challan} | Total: ₹{total_val if grn_lines else 0:,.2f}")
             save_data()
             st.session_state["selected_grn"] = grn_no
             st.success(f"✅ {grn_no} posted! Stock updated.")
@@ -5946,6 +6019,10 @@ elif nav_pur == "📥 GRN":
 
             st.markdown("---")
             show_print_button("GRN", grn_no, grn, f"print_grn_{grn_no}")
+
+            st.markdown("---")
+            st.markdown("#### 📋 Activity Log")
+            show_activity_log("GRN", grn_no)
 
         else:
             gf1,gf2 = st.columns(2)
@@ -6578,7 +6655,8 @@ elif nav_gry == "🚚 Transit Tracker":
                         if _is_new_bilty:
                             add_grey_ledger(key, "IN-TRANSIT", _disp_qty, "Vendor", "In Transit",
                                            f"BILTY-{new_bilty}", f"Bilty/LR: {new_bilty}/{new_lr_no} | Invoice: {new_invoice} | Challan: {new_challan} | {new_trans} | Dispatch Qty: {_disp_qty} mtr")
-                        save_data(); st.success("✅ Transit info updated!"); st.rerun()
+                        log_activity('GREY', key, 'Dispatched', f'Bilty: {new_bilty} | LR: {new_lr_no} | Invoice: {new_invoice} | Dispatch Qty: {_disp_qty} mtr')
+                        save_data(); st.success('✅ Transit info updated!'); st.rerun()
 
                 with up2:
                     st.markdown("**📍 Grey Ka Abhi Kya Update Karna Hai?**")
@@ -6644,6 +6722,7 @@ elif nav_gry == "🚚 Transit Tracker":
                             })
                             add_grey_ledger(key, "RECEIVED", _recv_q, "In Transit", _recv_at,
                                            _recv_no, f"Received at {_recv_at}. Challan:{_recv_challan}. By:{_recv_by}. {_recv_rem}")
+                            log_activity("GREY", key, "At Transport", f"Received {_recv_q} mtr at {_recv_at}. Receipt: {_recv_no}")
                             save_data()
                             st.success(f"✅ {_recv_q} mtr receive hua! Receipt No: {_recv_no}")
                             st.rerun()
