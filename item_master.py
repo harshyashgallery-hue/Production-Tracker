@@ -207,6 +207,55 @@ DEFAULT_DATA = {
     "grey_qc_counter": 1,
     "grey_transfer_counter": 1,
     "grey_return_counter": 1,
+    "users": {
+        "admin": {
+            "name": "Admin",
+            "password": "admin123",
+            "role": "Admin",
+            "active": True,
+        }
+    },
+    "roles": {
+        "Admin": {
+            "pages": "ALL",
+            "can_edit": True,
+            "can_delete": True,
+            "can_approve": True,
+            "can_create": True,
+        },
+        "Manager": {
+            "pages": "ALL",
+            "can_edit": True,
+            "can_delete": False,
+            "can_approve": True,
+            "can_create": True,
+        },
+        "Operator": {
+            "pages": ["📊 Item Master Dashboard","📋 Item Master List","📋 Demand Management",
+                      "📊 SO Dashboard","📋 SO List & Tracking","🏭 MRP Dashboard",
+                      "📦 Material Requirements","🛒 Purchase Dashboard","📋 Purchase Requisitions",
+                      "📦 Purchase Orders","🔧 Job Work Orders","📥 GRN",
+                      "📦 Inventory","📋 Stock Ledger",
+                      "🧵 Grey Dashboard","🚚 Transit Tracker","📍 Location Stock",
+                      "🔬 Grey QC","📤 Grey Transfer","📋 Grey Ledger"],
+            "can_edit": False,
+            "can_delete": False,
+            "can_approve": False,
+            "can_create": True,
+        },
+        "Viewer": {
+            "pages": ["📊 Item Master Dashboard","📋 Item Master List",
+                      "📊 SO Dashboard","📋 SO List & Tracking","📈 SO Reports",
+                      "🏭 MRP Dashboard","📦 Material Requirements",
+                      "🛒 Purchase Dashboard","📦 Inventory","📋 Stock Ledger",
+                      "🧵 Grey Dashboard","📍 Location Stock","📋 Grey Ledger",
+                      "📅 TNA Dashboard","📋 TNA List"],
+            "can_edit": False,
+            "can_delete": False,
+            "can_approve": False,
+            "can_create": False,
+        },
+    },
 }
 
 @st.cache_resource
@@ -330,6 +379,10 @@ def load_pkg_lines():
 load_data()
 load_pkg_lines()
 
+# ── LOGIN GATE ────────────────────────────────────────────────────────────────
+if not require_login():
+    st.stop()
+
 ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)",
               "Grey Fabric", "Accessories", "Packing Materials", "Fuel & Lubricants"]
 MATERIAL_GROUPS = [
@@ -345,6 +398,66 @@ SEASONS = ["SS25", "AW25", "SS26", "AW26", "Resort 2025", "Holiday 2025"]
 UNITS = ["Meter", "KG", "Gram", "Piece", "Set", "Box", "Roll", "Litre", "Dozen"]
 SIZES_ALL = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "Free Size"]
 HSN_CODES = ["6211", "6206", "6204", "6203", "6205", "6207", "6208", "6212", "5208", "5209"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTH & PERMISSION SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_current_user():
+    return st.session_state.get("_logged_in_user", None)
+
+def get_current_role():
+    user = get_current_user()
+    if not user: return None
+    return SS.get("users", {}).get(user, {}).get("role", "Viewer")
+
+def can(action):
+    """Check if current user can perform action: edit/delete/approve/create"""
+    role = get_current_role()
+    if not role: return False
+    role_data = SS.get("roles", {}).get(role, {})
+    return role_data.get(f"can_{action}", False)
+
+def can_access_page(page_name):
+    role = get_current_role()
+    if not role: return False
+    role_data = SS.get("roles", {}).get(role, {})
+    pages = role_data.get("pages", [])
+    return pages == "ALL" or page_name in pages
+
+def require_login():
+    """Show login form if not logged in. Returns True if logged in."""
+    load_data()
+    if st.session_state.get("_logged_in_user"):
+        return True
+
+    # Center the login form
+    _, col, _ = st.columns([1.5, 2, 1.5])
+    with col:
+        st.markdown("""
+        <div style="text-align:center;padding:40px 0 20px;">
+            <div style="font-size:32px;">🪡</div>
+            <div style="font-size:24px;font-weight:800;margin:8px 0;">Garment ERP</div>
+            <div style="font-size:13px;color:#94a3b8;margin-bottom:28px;">Production Management System</div>
+        </div>""", unsafe_allow_html=True)
+
+        with st.form("login_form"):
+            username = st.text_input("👤 Username", placeholder="Enter username")
+            password = st.text_input("🔒 Password", type="password", placeholder="Enter password")
+            submitted = st.form_submit_button("Login →", use_container_width=True)
+
+        if submitted:
+            users = SS.get("users", {})
+            user_data = users.get(username.strip())
+            if user_data and user_data.get("password") == password and user_data.get("active", True):
+                st.session_state["_logged_in_user"] = username.strip()
+                st.session_state["_user_name"]      = user_data.get("name", username)
+                st.session_state["_user_role"]      = user_data.get("role", "Viewer")
+                st.rerun()
+            else:
+                st.error("❌ Galat username ya password!")
+    return False
 
 
 # ─── Page routing via session state ────────────────────────────────────────────────
@@ -388,6 +501,8 @@ ALL_PAGES = [
     ("GRY", "↩️ Return / Rework"),
     ("GRY", "📤 Grey Transfer"),
     ("GRY", "📋 Grey Ledger"),
+    ("ADM", "⚙️ User Management"),
+    ("ADM", "🔐 Role Permissions"),
 ]
 IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
 SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
@@ -396,62 +511,49 @@ TNA_PAGES = [p for m, p in ALL_PAGES if m == "TNA"]
 PUR_PAGES = [p for m, p in ALL_PAGES if m == "PUR"]
 INV_PAGES = [p for m, p in ALL_PAGES if m == "INV"]
 GRY_PAGES = [p for m, p in ALL_PAGES if m == "GRY"]
+ADM_PAGES = [p for m, p in ALL_PAGES if m == "ADM"]
 
 if "current_page" not in st.session_state:
     st.session_state["current_page"] = "📊 Item Master Dashboard"
 
 with st.sidebar:
     st.markdown('<div style="padding:16px 4px 8px;"><div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div><div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div></div>', unsafe_allow_html=True)
+
+    # User info + logout
+    _uname = st.session_state.get("_user_name","")
+    _urole = st.session_state.get("_user_role","")
+    _role_colors = {"Admin":"#c8a96e","Manager":"#0ea5e9","Operator":"#059669","Viewer":"#94a3b8"}
+    _rc = _role_colors.get(_urole,"#94a3b8")
+    st.markdown(f'''<div style="display:flex;justify-content:space-between;align-items:center;background:#1e293b;border-radius:8px;padding:8px 12px;margin-bottom:6px;">
+        <div><div style="font-size:13px;font-weight:700;color:#fff;">👤 {_uname}</div>
+        <div style="font-size:10px;font-weight:700;color:{_rc};">{_urole}</div></div>
+    </div>''', unsafe_allow_html=True)
+    if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+        for k in ["_logged_in_user","_user_name","_user_role"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
     st.markdown("---")
 
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px 0;">ITEM MASTER</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="IM"]:
-        is_active = st.session_state["current_page"] == pg
-        btn_style = "background:#c8a96e;color:#1c1c2e;font-weight:700;" if is_active else "background:transparent;color:#bbb;"
-        st.markdown(f'<div style="margin:1px 0;">', unsafe_allow_html=True)
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
+    def _sidebar_section(module_id, label):
+        pages_in_module = [(m,p) for m,p in ALL_PAGES if m==module_id]
+        accessible = [(m,p) for m,p in pages_in_module if can_access_page(p)]
+        if not accessible: return
+        st.markdown(f'<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">{label}</p>', unsafe_allow_html=True)
+        for _, pg in accessible:
+            if st.button(pg, key=f"btn_{pg}", use_container_width=True):
+                st.session_state["current_page"] = pg
+                st.rerun()
 
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">SALES</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="SO"]:
-        is_active = st.session_state["current_page"] == pg
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
-
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">MRP</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="MRP"]:
-        _active = st.session_state["current_page"] == pg
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
-
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">TNA</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="TNA"]:
-        _active = st.session_state["current_page"] == pg
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
-
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">PURCHASE</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="PUR"]:
-        _active = st.session_state["current_page"] == pg
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
-
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">INVENTORY</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="INV"]:
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
-
-    st.markdown('<p style="font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:10px 0 6px 0;">GREY FABRIC</p>', unsafe_allow_html=True)
-    for _, pg in [(m,p) for m,p in ALL_PAGES if m=="GRY"]:
-        if st.button(pg, key=f"btn_{pg}", use_container_width=True):
-            st.session_state["current_page"] = pg
-            st.rerun()
+    _sidebar_section("IM",  "ITEM MASTER")
+    _sidebar_section("SO",  "SALES")
+    _sidebar_section("MRP", "MRP")
+    _sidebar_section("TNA", "TNA")
+    _sidebar_section("PUR", "PURCHASE")
+    _sidebar_section("INV", "INVENTORY")
+    _sidebar_section("GRY", "GREY FABRIC")
+    if get_current_role() == "Admin":
+        _sidebar_section("ADM", "ADMIN")
 
     st.markdown("---")
     _ni = len(st.session_state.get("items", {}))
@@ -468,6 +570,7 @@ nav_tna = _cp if _cp in TNA_PAGES else None
 nav_pur = _cp if _cp in PUR_PAGES else None
 nav_inv = _cp if _cp in INV_PAGES else None
 nav_gry = _cp if _cp in GRY_PAGES else None
+nav_adm = _cp if _cp in ADM_PAGES else None
 
 SS = st.session_state
 
@@ -5379,8 +5482,25 @@ elif nav_pur == "📦 Purchase Orders":
                 with r4: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{po.get("total",0):,.0f}</div>', unsafe_allow_html=True)
                 with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(po.get("status",""))}</div>', unsafe_allow_html=True)
                 with r6:
-                    if st.button("Open", key=f"open_po_{po_no}", use_container_width=True):
-                        st.session_state["selected_po"] = po_no; st.rerun()
+                    pb1, pb2 = st.columns([2,1])
+                    with pb1:
+                        if st.button("Open", key=f"open_po_{po_no}", use_container_width=True):
+                            st.session_state["selected_po"] = po_no; st.rerun()
+                    with pb2:
+                        if can("delete") and po.get("status") == "Draft":
+                            if st.button("🗑", key=f"del_po_{po_no}", use_container_width=True):
+                                st.session_state[f"confirm_del_po_{po_no}"] = True
+                if st.session_state.get(f"confirm_del_po_{po_no}"):
+                    st.markdown(f'<div class="danger-box">PO {po_no} delete karna hai? Yeh undo nahi hoga!</div>', unsafe_allow_html=True)
+                    cc1,cc2 = st.columns(2)
+                    with cc1:
+                        if st.button("✅ Haan Delete", key=f"conf_del_po_{po_no}"):
+                            del SS["po_list"][po_no]
+                            st.session_state.pop(f"confirm_del_po_{po_no}", None)
+                            save_data(); st.success(f"Deleted {po_no}"); st.rerun()
+                    with cc2:
+                        if st.button("❌ Cancel", key=f"canc_del_po_{po_no}"):
+                            st.session_state.pop(f"confirm_del_po_{po_no}", None); st.rerun()
                 st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
 
 
@@ -5587,8 +5707,25 @@ elif nav_pur == "🔧 Job Work Orders":
                 with r4: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{jwo.get("total",0):,.0f}</div>', unsafe_allow_html=True)
                 with r5: st.markdown(f'<div style="padding-top:6px;">{pur_badge(jwo.get("status",""))}</div>', unsafe_allow_html=True)
                 with r6:
-                    if st.button("Open", key=f"open_jwo_{jwo_no}", use_container_width=True):
-                        st.session_state["selected_jwo"] = jwo_no; st.rerun()
+                    jb1, jb2 = st.columns([2,1])
+                    with jb1:
+                        if st.button("Open", key=f"open_jwo_{jwo_no}", use_container_width=True):
+                            st.session_state["selected_jwo"] = jwo_no; st.rerun()
+                    with jb2:
+                        if can("delete") and jwo.get("status") == "Draft":
+                            if st.button("🗑", key=f"del_jwo_{jwo_no}", use_container_width=True):
+                                st.session_state[f"confirm_del_jwo_{jwo_no}"] = True
+                if st.session_state.get(f"confirm_del_jwo_{jwo_no}"):
+                    st.markdown(f'<div class="danger-box">JWO {jwo_no} delete karna hai?</div>', unsafe_allow_html=True)
+                    cc1,cc2 = st.columns(2)
+                    with cc1:
+                        if st.button("✅ Haan Delete", key=f"conf_del_jwo_{jwo_no}"):
+                            del SS["jwo_list"][jwo_no]
+                            st.session_state.pop(f"confirm_del_jwo_{jwo_no}", None)
+                            save_data(); st.success(f"Deleted {jwo_no}"); st.rerun()
+                    with cc2:
+                        if st.button("❌ Cancel", key=f"canc_del_jwo_{jwo_no}"):
+                            st.session_state.pop(f"confirm_del_jwo_{jwo_no}", None); st.rerun()
                 st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
 
 
@@ -5848,8 +5985,25 @@ elif nav_pur == "📥 GRN":
                 with r5: st.markdown(f'<div style="padding-top:8px;font-size:12px;">{grn.get("grn_type","")}<br>Ref: {grn.get("ref_no","—")}</div>', unsafe_allow_html=True)
                 with r6: st.markdown(f'<div style="padding-top:8px;font-size:13px;font-weight:600;color:#c8a96e;">₹{grn.get("total_value",0):,.2f}</div>', unsafe_allow_html=True)
                 with r7:
-                    if st.button("Open", key=f"open_grn_{grn_no}", use_container_width=True):
-                        st.session_state["selected_grn"] = grn_no; st.rerun()
+                    gb1, gb2 = st.columns([2,1])
+                    with gb1:
+                        if st.button("Open", key=f"open_grn_{grn_no}", use_container_width=True):
+                            st.session_state["selected_grn"] = grn_no; st.rerun()
+                    with gb2:
+                        if can("delete"):
+                            if st.button("🗑", key=f"del_grn_{grn_no}", use_container_width=True):
+                                st.session_state[f"confirm_del_grn_{grn_no}"] = True
+                if st.session_state.get(f"confirm_del_grn_{grn_no}"):
+                    st.markdown(f'<div class="danger-box">⚠️ GRN {grn_no} delete hoga — stock reverse nahi hoga! Sure ho?</div>', unsafe_allow_html=True)
+                    cc1,cc2 = st.columns(2)
+                    with cc1:
+                        if st.button("✅ Delete", key=f"conf_del_grn_{grn_no}"):
+                            del SS["grn_list"][grn_no]
+                            st.session_state.pop(f"confirm_del_grn_{grn_no}", None)
+                            save_data(); st.success(f"Deleted {grn_no}"); st.rerun()
+                    with cc2:
+                        if st.button("❌ Cancel", key=f"canc_del_grn_{grn_no}"):
+                            st.session_state.pop(f"confirm_del_grn_{grn_no}", None); st.rerun()
                 st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
 
 elif nav_pur == "👥 Supplier Master":
@@ -6262,14 +6416,15 @@ if nav_gry == "🧵 Grey Dashboard":
     at_printer     = 0
     rejected_qty   = 0
     for v in tracker.values():
-        ordered  = float(v.get("ordered_qty", 0))
-        received = float(v.get("received_qty", 0))   # reached transport/factory
-        trans_q  = float(v.get("transport_qty", 0))
-        fac_q    = float(v.get("factory_qty", 0))
-        print_q  = float(v.get("printer_qty", 0))
-        rej_q    = float(v.get("rejected_qty", 0))
-        # In Transit = ordered but not yet received anywhere
-        in_transit_qty += max(0, ordered - received)
+        ordered   = float(v.get("ordered_qty", 0))
+        dispatched = float(v.get("dispatched_qty", ordered))  # vendor ne kitna bheja
+        received  = float(v.get("received_qty", 0))   # reached transport/factory
+        trans_q   = float(v.get("transport_qty", 0))
+        fac_q     = float(v.get("factory_qty", 0))
+        print_q   = float(v.get("printer_qty", 0))
+        rej_q     = float(v.get("rejected_qty", 0))
+        # In Transit = dispatched by vendor but not yet received anywhere
+        in_transit_qty += max(0, dispatched - received)
         at_transport   += trans_q
         at_factory     += fac_q
         at_printer     += print_q
@@ -6297,9 +6452,11 @@ if nav_gry == "🧵 Grey Dashboard":
 
         rows = []
         for key, t in tracker.items():
-            ordered  = float(t.get("ordered_qty", 0))
-            received = float(t.get("received_qty", 0))
-            in_tran  = max(0, ordered - received)
+            ordered    = float(t.get("ordered_qty", 0))
+            dispatched = float(t.get("dispatched_qty", ordered))
+            received   = float(t.get("received_qty", 0))
+            pending_po = max(0, ordered - dispatched)   # vendor ne abhi dispatch nahi kiya
+            in_tran    = max(0, dispatched - received)  # dispatched but not yet received
             trans_q  = float(t.get("transport_qty", 0))
             fac_q    = float(t.get("factory_qty", 0))
             print_q  = float(t.get("printer_qty", 0))
@@ -6311,17 +6468,19 @@ if nav_gry == "🧵 Grey Dashboard":
             elif in_tran > 0: disp_status = "🚚 In Transit"
             else:              disp_status = "✅ Closed"
             rows.append({
-                "PO #":          t.get("po_no",""),
-                "Grey Item":     t.get("material_code",""),
-                "Ordered (m)":   ordered,
-                "🚚 In Transit": in_tran,
-                "📦 Transport":  trans_q,
-                "🏭 Factory":    fac_q,
-                "🖨️ Printer":   print_q,
-                "❌ Rejected":   rej_q,
-                "Supplier":      t.get("supplier",""),
-                "Where is it?":  disp_status,
-                "Bilty":         t.get("bilty_no","—"),
+                "PO #":            t.get("po_no",""),
+                "Grey Item":       t.get("material_code",""),
+                "Ordered (m)":     ordered,
+                "Dispatched (m)":  dispatched,
+                "Pending Dispatch":pending_po,
+                "🚚 In Transit":   in_tran,
+                "📦 Transport":    trans_q,
+                "🏭 Factory":      fac_q,
+                "🖨️ Printer":     print_q,
+                "❌ Rejected":     rej_q,
+                "Supplier":        t.get("supplier",""),
+                "Where is it?":    disp_status,
+                "Bilty/LR":        f"{t.get('bilty_no','—')} / {t.get('lr_no','—')}",
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -6367,9 +6526,11 @@ elif nav_gry == "🚚 Transit Tracker":
                         <div style="font-size:13px;">SO Ref: <strong>{t.get("so_ref","—")}</strong></div>
                     </div>''', unsafe_allow_html=True)
                 with th2:
+                    _disp_q = float(t.get("dispatched_qty", t.get("ordered_qty",0)))
                     st.markdown(f'''<div class="card card-left-blue">
                         <div class="sec-label">Transit Details</div>
-                        <div style="font-size:13px;">Bilty: <strong>{t.get("bilty_no","—")}</strong></div>
+                        <div style="font-size:13px;">Bilty/LR: <strong>{t.get("bilty_no","—")} / {t.get("lr_no","—")}</strong></div>
+                        <div style="font-size:13px;">Dispatch Qty: <strong>{_disp_q:.0f} mtr</strong></div>
                         <div style="font-size:13px;">Transporter: <strong>{t.get("transporter","—")}</strong></div>
                         <div style="font-size:13px;">Vehicle: <strong>{t.get("vehicle_no","—")}</strong></div>
                         <div style="font-size:13px;">Dispatch: <strong>{t.get("dispatch_date","—")}</strong></div>
@@ -6392,7 +6553,16 @@ elif nav_gry == "🚚 Transit Tracker":
 
                 with up1:
                     st.markdown("**📋 Update Bilty / Transit Info**")
-                    new_bilty    = st.text_input("Bilty No.", value=t.get("bilty_no",""), key=f"bilty_{key}")
+                    new_bilty    = st.text_input("Bilty No. / LR No. *", value=t.get("bilty_no",""), key=f"bilty_{key}",
+                                                  placeholder="e.g. LR-12345 / Bilty 1012")
+                    new_lr_no    = st.text_input("LR No. (if separate)", value=t.get("lr_no",""), key=f"lr_{key}",
+                                                  placeholder="Lorry Receipt Number")
+                    new_dispatch_qty = st.number_input("Dispatch Qty (mtr) *",
+                                                  min_value=0.0,
+                                                  max_value=float(t.get("ordered_qty",0)),
+                                                  value=float(t.get("dispatched_qty", t.get("ordered_qty",0))),
+                                                  step=0.5, key=f"disp_qty_{key}",
+                                                  help="Vendor ne kitna dispatch kiya — PO se kam bhi ho sakta hai")
                     new_trans    = st.text_input("Transporter", value=t.get("transporter",""), key=f"trans_{key}")
                     new_vehicle  = st.text_input("Vehicle No.", value=t.get("vehicle_no",""), key=f"veh_{key}")
                     new_dispatch = st.date_input("Dispatch Date",
@@ -6403,34 +6573,42 @@ elif nav_gry == "🚚 Transit Tracker":
                                                   key=f"eta_{key}")
 
                     if st.button("💾 Update Transit Info", key=f"upd_transit_{key}"):
+                        _disp_qty = float(st.session_state.get(f"disp_qty_{key}", t.get("ordered_qty",0)))
+                        _is_new_bilty = new_bilty and t.get("status") in ["PO Created","Vendor Dispatch Pending"]
                         SS["grey_po_tracker"][key].update({
                             "bilty_no":        new_bilty,
+                            "lr_no":           new_lr_no,
+                            "dispatched_qty":  _disp_qty,
                             "transporter":     new_trans,
                             "vehicle_no":      new_vehicle,
                             "dispatch_date":   str(new_dispatch),
                             "expected_arrival":str(new_eta),
                             "status":          "In Transit" if new_bilty else t.get("status","PO Created"),
                         })
-                        if new_bilty and t.get("status") in ["PO Created","Vendor Dispatch Pending"]:
-                            SS["grey_po_tracker"][key]["status"] = "In Transit"
-                            add_grey_ledger(key, "IN-TRANSIT", t.get("ordered_qty",0), "Vendor", "In Transit",
-                                           f"BILTY-{new_bilty}", f"Bilty {new_bilty} | {new_trans}")
+                        if _is_new_bilty:
+                            add_grey_ledger(key, "IN-TRANSIT", _disp_qty, "Vendor", "In Transit",
+                                           f"BILTY-{new_bilty}", f"Bilty/LR: {new_bilty}/{new_lr_no} | {new_trans} | Dispatch Qty: {_disp_qty} mtr")
                         save_data(); st.success("✅ Transit info updated!"); st.rerun()
 
                 with up2:
                     st.markdown("**📍 Grey Ka Abhi Kya Update Karna Hai?**")
 
                     # Calculate actual pending qty at each location
-                    _ordered   = float(t.get("ordered_qty", 0))
-                    _received  = float(t.get("received_qty", 0))   # total received at transport/factory
-                    _trans_q   = float(t.get("transport_qty", 0))
-                    _fac_q     = float(t.get("factory_qty", 0))
-                    _print_q   = float(t.get("printer_qty", 0))
-                    _pending_recv = max(0, _ordered - _received)    # still in transit (not yet received)
-                    _has_bilty = bool(t.get("bilty_no",""))
+                    _ordered      = float(t.get("ordered_qty", 0))
+                    _dispatched   = float(t.get("dispatched_qty", _ordered))
+                    _received     = float(t.get("received_qty", 0))
+                    _trans_q      = float(t.get("transport_qty", 0))
+                    _fac_q        = float(t.get("factory_qty", 0))
+                    _print_q      = float(t.get("printer_qty", 0))
+                    _pending_recv = max(0, _dispatched - _received)  # dispatched but not yet received
+                    _pending_po   = max(0, _ordered - _dispatched)   # vendor ne abhi dispatch nahi kiya
+                    _has_bilty    = bool(t.get("bilty_no",""))
 
                     # Show current location summary
                     st.markdown(f'''<div style="background:#f8fafc;border:1px solid #e2e5ef;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:8px;">
+                        📋 PO: <strong>{_ordered:.0f} mtr</strong> &nbsp;|&nbsp;
+                        📤 Dispatched: <strong>{_dispatched:.0f} mtr</strong> &nbsp;|&nbsp;
+                        ⏳ Pending Dispatch: <strong>{_pending_po:.0f} mtr</strong><br>
                         🚚 In Transit: <strong>{_pending_recv:.0f} mtr</strong> &nbsp;|&nbsp;
                         📦 Transport: <strong>{_trans_q:.0f} mtr</strong> &nbsp;|&nbsp;
                         🏭 Factory: <strong>{_fac_q:.0f} mtr</strong> &nbsp;|&nbsp;
@@ -6444,7 +6622,7 @@ elif nav_gry == "🚚 Transit Tracker":
                         rc1, rc2 = st.columns(2)
                         with rc1:
                             st.number_input("Qty Received (mtr)", min_value=0.0,
-                                max_value=_pending_recv,
+                                max_value=_dispatched,  # can't receive more than dispatched
                                 value=_pending_recv,
                                 step=0.5, key=f"recv_trans_{key}")
                             st.date_input("Receipt Date", value=date.today(), key=f"recv_dt_{key}")
@@ -7258,3 +7436,151 @@ elif nav_gry == "📋 Grey Ledger":
                     st.markdown(f'Current Status: {grey_status_color(t.get("status",""))}', unsafe_allow_html=True)
         else:
             st.markdown('<div class="warn-box">Filter ke hisaab se koi entry nahi mili.</div>', unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADMIN MODULE — User Management & Role Permissions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+elif nav_adm == "⚙️ User Management":
+    if get_current_role() != "Admin":
+        st.error("❌ Sirf Admin access kar sakta hai.")
+        st.stop()
+
+    st.markdown('<h1>User Management</h1>', unsafe_allow_html=True)
+
+    users = SS.get("users", {})
+    roles = SS.get("roles", {})
+
+    ut1, ut2 = st.tabs(["👥 User List", "➕ Add / Edit User"])
+
+    with ut1:
+        if not users:
+            st.info("Koi user nahi hai.")
+        else:
+            for uname, udata in users.items():
+                r1,r2,r3,r4,r5 = st.columns([1.5,2,1.5,1,1.5])
+                with r1: st.markdown(f'<div style="padding-top:8px;font-weight:700;">{uname}</div>', unsafe_allow_html=True)
+                with r2: st.markdown(f'<div style="padding-top:8px;">{udata.get("name","")}</div>', unsafe_allow_html=True)
+                with r3:
+                    _rc = {"Admin":"#c8a96e","Manager":"#0ea5e9","Operator":"#059669","Viewer":"#94a3b8"}.get(udata.get("role",""),"#94a3b8")
+                    st.markdown(f'<div style="padding-top:6px;"><span style="background:#1e293b;color:{_rc};padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;">{udata.get("role","")}</span></div>', unsafe_allow_html=True)
+                with r4:
+                    active = udata.get("active", True)
+                    st.markdown(f'<div style="padding-top:8px;font-size:12px;color:{"#059669" if active else "#ef4444"};">{"✅ Active" if active else "❌ Inactive"}</div>', unsafe_allow_html=True)
+                with r5:
+                    if uname != "admin":  # Protect main admin
+                        tc1, tc2 = st.columns(2)
+                        with tc1:
+                            if st.button("✏️ Edit", key=f"edit_usr_{uname}", use_container_width=True):
+                                st.session_state["edit_user"] = uname
+                                st.session_state["current_page"] = "⚙️ User Management"
+                                st.rerun()
+                        with tc2:
+                            if active:
+                                if st.button("🚫 Disable", key=f"dis_usr_{uname}", use_container_width=True):
+                                    SS["users"][uname]["active"] = False
+                                    save_data(); st.rerun()
+                            else:
+                                if st.button("✅ Enable", key=f"ena_usr_{uname}", use_container_width=True):
+                                    SS["users"][uname]["active"] = True
+                                    save_data(); st.rerun()
+                st.markdown('<hr style="margin:4px 0;">', unsafe_allow_html=True)
+
+    with ut2:
+        edit_uname = st.session_state.get("edit_user","")
+        edit_data  = users.get(edit_uname, {}) if edit_uname else {}
+        is_edit    = bool(edit_uname)
+
+        st.markdown(f"#### {'✏️ Edit User: ' + edit_uname if is_edit else '➕ Add New User'}")
+
+        uc1, uc2 = st.columns(2)
+        with uc1:
+            new_uname    = st.text_input("Username *", value=edit_uname if is_edit else "", disabled=is_edit, key="new_uname")
+            new_name     = st.text_input("Full Name *", value=edit_data.get("name",""), key="new_name")
+            new_role     = st.selectbox("Role *", list(roles.keys()),
+                                         index=list(roles.keys()).index(edit_data.get("role","Viewer")) if edit_data.get("role") in roles else 0,
+                                         key="new_role")
+        with uc2:
+            new_pass     = st.text_input("Password *" + (" (leave blank = no change)" if is_edit else ""),
+                                          type="password", key="new_pass")
+            new_pass2    = st.text_input("Confirm Password *", type="password", key="new_pass2")
+            new_active   = st.checkbox("Active", value=edit_data.get("active", True), key="new_active")
+
+        bc1, bc2 = st.columns(2)
+        with bc1:
+            if st.button("💾 Save User", use_container_width=True):
+                uname_to_save = edit_uname if is_edit else new_uname.strip()
+                if not uname_to_save:
+                    st.error("Username required!")
+                elif not new_name.strip():
+                    st.error("Name required!")
+                elif not is_edit and not new_pass:
+                    st.error("Password required for new user!")
+                elif new_pass and new_pass != new_pass2:
+                    st.error("Passwords match nahi kar rahe!")
+                else:
+                    existing = SS["users"].get(uname_to_save, {})
+                    SS["users"][uname_to_save] = {
+                        "name":     new_name.strip(),
+                        "role":     new_role,
+                        "password": new_pass if new_pass else existing.get("password",""),
+                        "active":   new_active,
+                    }
+                    st.session_state.pop("edit_user", None)
+                    save_data()
+                    st.success(f"✅ User '{uname_to_save}' {'updated' if is_edit else 'created'}!")
+                    st.rerun()
+        with bc2:
+            if is_edit and st.button("✕ Cancel Edit", use_container_width=True):
+                st.session_state.pop("edit_user", None)
+                st.rerun()
+
+
+elif nav_adm == "🔐 Role Permissions":
+    if get_current_role() != "Admin":
+        st.error("❌ Sirf Admin access kar sakta hai.")
+        st.stop()
+
+    st.markdown('<h1>Role Permissions</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Har role ke liye permissions define karo — kaunse pages accessible hain aur kya actions allowed hain.</div>', unsafe_allow_html=True)
+
+    roles = SS.get("roles", {})
+    all_page_names = [p for _,p in ALL_PAGES]
+
+    for role_name, role_data in roles.items():
+        with st.expander(f"🔐 {role_name}", expanded=(role_name != "Admin")):
+            if role_name == "Admin":
+                st.markdown('<div class="ok-box">Admin ko saari permissions hain — change nahi ho sakti.</div>', unsafe_allow_html=True)
+                continue
+
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                st.markdown("**Actions:**")
+                can_edit_v    = st.checkbox("✏️ Can Edit",    value=role_data.get("can_edit",False),    key=f"perm_edit_{role_name}")
+                can_delete_v  = st.checkbox("🗑 Can Delete",  value=role_data.get("can_delete",False),  key=f"perm_del_{role_name}")
+                can_approve_v = st.checkbox("✅ Can Approve", value=role_data.get("can_approve",False), key=f"perm_appr_{role_name}")
+                can_create_v  = st.checkbox("➕ Can Create",  value=role_data.get("can_create",True),   key=f"perm_cre_{role_name}")
+            with rc2:
+                st.markdown("**Page Access:**")
+                cur_pages = role_data.get("pages", [])
+                if cur_pages == "ALL":
+                    cur_pages = all_page_names
+                sel_pages = st.multiselect(
+                    "Accessible Pages",
+                    options=all_page_names,
+                    default=[p for p in cur_pages if p in all_page_names],
+                    key=f"perm_pages_{role_name}"
+                )
+
+            if st.button(f"💾 Save {role_name} Permissions", key=f"save_perm_{role_name}"):
+                SS["roles"][role_name] = {
+                    "pages":       sel_pages,
+                    "can_edit":    can_edit_v,
+                    "can_delete":  can_delete_v,
+                    "can_approve": can_approve_v,
+                    "can_create":  can_create_v,
+                }
+                save_data()
+                st.success(f"✅ {role_name} permissions saved!")
+                st.rerun()
