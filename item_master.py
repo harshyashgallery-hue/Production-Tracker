@@ -4922,6 +4922,78 @@ def make_print_html(doc_type, doc_no, data):
         </div>
         </body></html>"""
 
+    elif doc_type == "PJO":
+        # Production Job Order print
+        lines = data.get("lines", [])
+        issued = data.get("issued_materials", [])
+        rows = ""
+        for i, ln in enumerate(lines, 1):
+            rows += f"""<tr>
+                <td>{i}</td>
+                <td><strong>{ln.get('sku','')}</strong><br>{ln.get('sku_name','')}</td>
+                <td style="text-align:right;">{ln.get('so_qty',0):.0f}</td>
+                <td style="text-align:right;"><strong>{ln.get('plan_qty',0):.0f}</strong></td>
+                <td style="text-align:right;">₹{ln.get('proc_rate',0):,.2f}</td>
+                <td style="text-align:right;"><strong>₹{ln.get('proc_amt',0):,.2f}</strong></td>
+                <td>{ln.get('proc_unit','per piece')}</td>
+            </tr>"""
+
+        fab_rows = ""
+        for fi, il in enumerate(issued, 1):
+            fab_rows += f"""<tr>
+                <td>{fi}</td>
+                <td><strong>{il.get('material_code','')}</strong> — {il.get('material_name','')}</td>
+                <td>{il.get('sku','')}</td>
+                <td style="text-align:right;">{il.get('required_qty',0)} mtr</td>
+                <td style="text-align:right;"><strong>{il.get('issue_qty',0)} mtr</strong></td>
+            </tr>"""
+
+        total_proc = sum(float(l.get('proc_amt',0)) for l in lines)
+        total_plan = sum(float(l.get('plan_qty',0)) for l in lines)
+
+        html = f"""<!DOCTYPE html><html><head><title>{doc_no}</title>{css}</head><body>
+        <div class="header">
+            <div><div class="company-name">{company}</div><div style="font-size:12px;color:#666;">Production Department</div></div>
+            <div style="text-align:right;">
+                <div class="doc-title">PRODUCTION JOB ORDER</div>
+                <div class="doc-no">{doc_no}</div>
+                <div class="doc-no">Date: {data.get('jo_date','')}</div>
+            </div>
+        </div>
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="label">Job Details</div>
+                <div class="info-row"><span class="k">Process</span><span class="v">{data.get('process','')}</span></div>
+                <div class="info-row"><span class="k">SO #</span><span class="v">{data.get('so_no','')}</span></div>
+                <div class="info-row"><span class="k">Buyer</span><span class="v">{data.get('buyer','')}</span></div>
+                <div class="info-row"><span class="k">SO Delivery</span><span class="v">{data.get('delivery','')}</span></div>
+                <div class="info-row"><span class="k">Execution</span><span class="v">{data.get('exec_type','')}</span></div>
+            </div>
+            <div class="info-box">
+                <div class="label">Vendor / Department</div>
+                <div class="value" style="font-size:15px;">{data.get('vendor_name','') or data.get('unit','Inhouse')}</div>
+                <div class="info-row"><span class="k">JO Date</span><span class="v">{data.get('jo_date','')}</span></div>
+                <div class="info-row"><span class="k">Expected</span><span class="v">{data.get('exp_date','—')}</span></div>
+                <div class="info-row"><span class="k">Total Pieces</span><span class="v">{total_plan:.0f} pcs</span></div>
+                <div class="info-row"><span class="k">Process Amount</span><span class="v">₹{total_proc:,.2f}</span></div>
+            </div>
+        </div>
+        <table>
+            <thead><tr><th>#</th><th>SKU / Style</th><th>SO Qty</th><th>Plan Qty</th><th>Rate</th><th>Amount</th><th>Unit</th></tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+        <div class="totals"><table>
+            <tr class="grand-total"><td><strong>Total Process Amount</strong></td><td><strong>₹{total_proc:,.2f}</strong></td></tr>
+        </table></div>
+        {"<h3 style='margin-top:20px;'>Fabric Issue</h3><table><thead><tr><th>#</th><th>Material</th><th>SKU</th><th>Required</th><th>Issue Qty</th></tr></thead><tbody>" + fab_rows + "</tbody></table>" if fab_rows else ""}
+        {"<div class='info-box' style='margin-top:12px;'><strong>Remarks:</strong> " + data.get('remarks','') + "</div>" if data.get('remarks') else ""}
+        <div class="footer">
+            <div class="sign-box"><div class="sign-line">Prepared By</div></div>
+            <div class="sign-box"><div class="sign-line">Authorized By</div></div>
+            <div class="sign-box"><div class="sign-line">Received By (Vendor)</div></div>
+        </div>
+        </body></html>"""
+
     return html
 
 def show_print_button(doc_type, doc_no, data, btn_key):
@@ -9460,4 +9532,3 @@ elif nav_prd == "📊 Production Reports":
                                   "SKU":ln["sku"],"Planned":plan,"Output":out,
                                   "Wastage":wst,"Eff%":round(out/plan*100,1)})
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    
