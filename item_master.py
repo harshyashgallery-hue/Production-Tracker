@@ -642,101 +642,200 @@ def badge(status):
 # DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 if nav_home == "🏠 Home":
-    # ── KPI Stats ──────────────────────────────────────────────────────────────
-    items_data = st.session_state.get("items", {})
-    so_list    = st.session_state.get("so_list", {})
-    po_list    = st.session_state.get("po_list", {})
-    jwo_list   = st.session_state.get("jwo_list", {})
-    tna_list   = st.session_state.get("tna_list", {})
-    tracker    = st.session_state.get("grey_po_tracker", {})
+    items_data  = st.session_state.get("items", {})
+    so_list     = st.session_state.get("so_list", {})
+    po_list     = st.session_state.get("po_list", {})
+    jwo_list    = st.session_state.get("jwo_list", {})
+    tna_list    = st.session_state.get("tna_list", {})
+    tracker     = st.session_state.get("grey_po_tracker", {})
+    open_sos    = sum(1 for s in so_list.values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
+    open_pos    = sum(1 for p in po_list.values()  if p.get("status") not in ["Received","Closed","Cancelled"])
+    open_jwos   = sum(1 for j in jwo_list.values() if j.get("status") not in ["Received","Closed","Cancelled"])
+    delayed_tna = sum(1 for t in tna_list.values() for ln in t.get("lines",[]) if ln.get("status")=="Delayed")
+    grey_transit= sum(max(0, float(v.get("dispatched_qty",v.get("ordered_qty",0))) - float(v.get("received_qty",0))) for v in tracker.values())
 
-    open_sos   = sum(1 for s in so_list.values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
-    open_pos   = sum(1 for p in po_list.values()  if p.get("status") not in ["Received","Closed","Cancelled"])
-    open_jwos  = sum(1 for j in jwo_list.values() if j.get("status") not in ["Received","Closed","Cancelled"])
-    delayed_tna= sum(1 for t in tna_list.values() for ln in t.get("lines",[]) if ln.get("status")=="Delayed")
-    grey_transit = sum(max(0, float(v.get("dispatched_qty",v.get("ordered_qty",0))) - float(v.get("received_qty",0))) for v in tracker.values())
-
-    st.markdown(f'''
-    <div style="padding:20px 0 10px;">
-        <div style="font-size:28px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div>
-        <div style="font-size:13px;color:#94a3b8;margin-top:4px;">Production Management System — Select a module to get started</div>
+    st.markdown(f'''<div style="padding:16px 0 8px;">
+        <div style="font-size:26px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div>
+        <div style="font-size:12px;color:#94a3b8;">Production Management System</div>
     </div>''', unsafe_allow_html=True)
 
-    # Quick stats bar
-    st.markdown(f'''<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
-        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">📦 Items: <strong style="color:#c8a96e;">{len(items_data)}</strong></div>
-        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">📋 Open SOs: <strong style="color:#0ea5e9;">{open_sos}</strong></div>
-        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">📦 Open POs: <strong style="color:#059669;">{open_pos}</strong></div>
-        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">🔧 Open JWOs: <strong style="color:#8b5cf6;">{open_jwos}</strong></div>
-        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">🚚 Grey In Transit: <strong style="color:#d97706;">{grey_transit:.0f} mtr</strong></div>
-        {"<div style='background:#fee2e2;border-radius:8px;padding:8px 16px;font-size:12px;'>⚠️ TNA Delayed: <strong style=\"color:#ef4444;\">" + str(delayed_tna) + "</strong></div>" if delayed_tna > 0 else ""}
+    # Quick stats
+    st.markdown(f'''<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">
+        <div style="background:#1e293b;border-radius:8px;padding:7px 14px;font-size:12px;">📦 Items: <strong style="color:#c8a96e;">{len(items_data)}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:7px 14px;font-size:12px;">📋 Open SOs: <strong style="color:#0ea5e9;">{open_sos}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:7px 14px;font-size:12px;">📦 Open POs: <strong style="color:#059669;">{open_pos}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:7px 14px;font-size:12px;">🔧 JWOs: <strong style="color:#8b5cf6;">{open_jwos}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:7px 14px;font-size:12px;">🚚 Grey Transit: <strong style="color:#d97706;">{grey_transit:.0f}m</strong></div>
+        {"<div style=\'background:#fee2e2;border-radius:8px;padding:7px 14px;font-size:12px;\'>⚠️ TNA Delayed: <strong style=\"color:#ef4444;\">" + str(delayed_tna) + "</strong></div>" if delayed_tna > 0 else ""}
     </div>''', unsafe_allow_html=True)
 
-    # Module tiles
+    # Module definitions with their sub-pages
     MODULES = [
-        ("ITEM MASTER",   "📦", "Items, BOM,\nRouting, Merchants",   "📊 Item Master Dashboard",  "#0ea5e9", "#dbeafe"),
-        ("SALES",         "🛒", "Demands, Orders,\nTracking",         "📊 SO Dashboard",           "#059669", "#d1fae5"),
-        ("MRP",           "⚙️", "Requirement Planning,\nReservations","🏭 MRP Dashboard",          "#8b5cf6", "#ede9fe"),
-        ("TNA",           "📅", "Time & Action,\nMilestone Tracking", "📅 TNA Dashboard",          "#d97706", "#fef3c7"),
-        ("PURCHASE",      "🏭", "PR, PO, Job Work,\nGRN",            "🛒 Purchase Dashboard",     "#ec4899", "#fce7f3"),
-        ("GREY FABRIC",   "🧵", "Transit, QC,\nTransfer, Ledger",    "🧵 Grey Dashboard",         "#f59e0b", "#fef3c7"),
-        ("INVENTORY",     "📋", "Stock, Ledger,\nAdjustments",       "📦 Inventory",              "#14b8a6", "#ccfbf1"),
-        ("REPORTS",       "📊", "SO, MRP, Purchase,\nTNA Reports",   "📊 MRP Reports",            "#6366f1", "#e0e7ff"),
+        {
+            "name": "ITEM MASTER", "icon": "📦", "color": "#0ea5e9", "bg": "#dbeafe",
+            "desc": "Items, BOM, Routing, Merchants",
+            "pages": [
+                ("📊 Dashboard",     "📊 Item Master Dashboard"),
+                ("➕ Create Item",   "➕ Create Item"),
+                ("📋 Item List",     "📋 Item Master List"),
+                ("🔩 BOM",           "🔩 BOM Management"),
+                ("🔄 Routing",       "🔄 Routing Master"),
+                ("👤 Merchant",      "👤 Merchant Master"),
+                ("📦 Buyer Pkg",     "📦 Buyer Packaging"),
+            ]
+        },
+        {
+            "name": "SALES", "icon": "🛒", "color": "#059669", "bg": "#d1fae5",
+            "desc": "Demands, Orders, Reports",
+            "pages": [
+                ("📊 Dashboard",     "📊 SO Dashboard"),
+                ("📋 Demands",       "📋 Demand Management"),
+                ("➕ Create SO",     "➕ Create Sales Order"),
+                ("📂 SO List",       "📂 SO List & Tracking"),
+                ("📈 Reports",       "📈 SO Reports"),
+                ("⚙️ Settings",      "⚙️ SO Settings"),
+            ]
+        },
+        {
+            "name": "MRP", "icon": "⚙️", "color": "#8b5cf6", "bg": "#ede9fe",
+            "desc": "Requirement Planning",
+            "pages": [
+                ("🏭 Dashboard",     "🏭 MRP Dashboard"),
+                ("▶ Run MRP",        "▶ Run MRP"),
+                ("📦 Requirements",  "📦 Material Requirements"),
+                ("🔒 Reservations",  "🔒 Reservations"),
+                ("📊 Reports",       "📊 MRP Reports"),
+            ]
+        },
+        {
+            "name": "TNA", "icon": "📅", "color": "#d97706", "bg": "#fef3c7",
+            "desc": "Time & Action Calendar",
+            "pages": [
+                ("📅 Dashboard",     "📅 TNA Dashboard"),
+                ("➕ Create TNA",    "➕ Create TNA"),
+                ("📋 TNA List",      "📋 TNA List"),
+                ("📁 Templates",     "📁 TNA Templates"),
+                ("📊 Reports",       "📊 TNA Reports"),
+            ]
+        },
+        {
+            "name": "PURCHASE", "icon": "🏭", "color": "#ec4899", "bg": "#fce7f3",
+            "desc": "PR, PO, Job Work, GRN",
+            "pages": [
+                ("🛒 Dashboard",     "🛒 Purchase Dashboard"),
+                ("📋 PR",            "📋 Purchase Requisitions"),
+                ("📦 PO",            "📦 Purchase Orders"),
+                ("🔧 Job Work",      "🔧 Job Work Orders"),
+                ("📥 GRN",           "📥 GRN"),
+                ("👥 Suppliers",     "👥 Supplier Master"),
+                ("📊 Reports",       "📊 Purchase Reports"),
+            ]
+        },
+        {
+            "name": "GREY FABRIC", "icon": "🧵", "color": "#f59e0b", "bg": "#fef9c3",
+            "desc": "Transit, QC, Transfer",
+            "pages": [
+                ("🧵 Dashboard",     "🧵 Grey Dashboard"),
+                ("🚚 Transit",       "🚚 Transit Tracker"),
+                ("📍 Locations",     "📍 Location Stock"),
+                ("🔬 QC",            "🔬 Grey QC"),
+                ("↩️ Return/Rework", "↩️ Return / Rework"),
+                ("📤 Transfer",      "📤 Grey Transfer"),
+                ("📋 Ledger",        "📋 Grey Ledger"),
+            ]
+        },
+        {
+            "name": "INVENTORY", "icon": "📋", "color": "#14b8a6", "bg": "#ccfbf1",
+            "desc": "Stock, Ledger, Adjustments",
+            "pages": [
+                ("📦 Inventory",     "📦 Inventory"),
+                ("📋 Stock Ledger",  "📋 Stock Ledger"),
+            ]
+        },
+        {
+            "name": "ADMIN", "icon": "🔐", "color": "#64748b", "bg": "#f1f5f9",
+            "desc": "Users, Roles",
+            "pages": [
+                ("⚙️ Users",         "⚙️ User Management"),
+                ("🔐 Roles",         "🔐 Role Permissions"),
+            ]
+        },
     ]
 
-    cols = st.columns(4)
-    for idx, (name, icon, desc, target_page, color, bg) in enumerate(MODULES):
-        with cols[idx % 4]:
-            st.markdown(f'''
-            <div style="background:{bg};border:2px solid {color}20;border-radius:14px;
-                        padding:20px 16px;margin-bottom:16px;text-align:center;
-                        transition:all 0.2s;">
-                <div style="font-size:36px;margin-bottom:8px;">{icon}</div>
-                <div style="font-size:14px;font-weight:800;color:#1e293b;">{name}</div>
-                <div style="font-size:11px;color:#64748b;margin-top:4px;white-space:pre-line;">{desc}</div>
-            </div>''', unsafe_allow_html=True)
-            if st.button(f"Open {name}", key=f"tile_{name}", use_container_width=True):
-                st.session_state["current_page"] = target_page
-                st.rerun()
+    # Track which module is expanded
+    if "home_expanded" not in st.session_state:
+        st.session_state["home_expanded"] = None
 
+    # Render tiles — 4 per row
+    for row_start in range(0, len(MODULES), 4):
+        row_mods = MODULES[row_start:row_start+4]
+        cols = st.columns(4)
+        for col_idx, mod in enumerate(row_mods):
+            with cols[col_idx]:
+                is_expanded = st.session_state["home_expanded"] == mod["name"]
+                border = f"3px solid {mod['color']}" if is_expanded else f"2px solid {mod['color']}30"
+                st.markdown(f'''<div style="background:{mod["bg"]};border:{border};border-radius:14px;
+                    padding:18px 14px 12px;text-align:center;cursor:pointer;margin-bottom:4px;">
+                    <div style="font-size:32px;">{mod["icon"]}</div>
+                    <div style="font-size:13px;font-weight:800;color:#1e293b;margin-top:6px;">{mod["name"]}</div>
+                    <div style="font-size:11px;color:#64748b;margin-top:3px;">{mod["desc"]}</div>
+                </div>''', unsafe_allow_html=True)
+                if st.button("▼ Open" if not is_expanded else "▲ Close",
+                             key=f"mod_tile_{mod['name']}",
+                             use_container_width=True):
+                    st.session_state["home_expanded"] = None if is_expanded else mod["name"]
+                    st.rerun()
+
+        # Show sub-pages for expanded module in this row
+        expanded_in_row = next((m for m in row_mods if st.session_state["home_expanded"] == m["name"]), None)
+        if expanded_in_row:
+            st.markdown(f'''<div style="background:{expanded_in_row["bg"]};border:2px solid {expanded_in_row["color"]};
+                border-radius:12px;padding:16px;margin-bottom:16px;">
+                <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px;">
+                    {expanded_in_row["icon"]} {expanded_in_row["name"]}
+                </div>''', unsafe_allow_html=True)
+            # Sub-page buttons — 4 per row
+            sub_pages = expanded_in_row["pages"]
+            sub_cols = st.columns(min(4, len(sub_pages)))
+            for si, (label, page) in enumerate(sub_pages):
+                with sub_cols[si % 4]:
+                    if st.button(label, key=f"sub_{page}", use_container_width=True):
+                        st.session_state["current_page"] = page
+                        st.session_state["home_expanded"] = None
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    # Alerts at bottom
     st.markdown("---")
-
-    # Recent activity / alerts
-    ac1, ac2 = st.columns(2)
-    with ac1:
+    al1, al2 = st.columns(2)
+    with al1:
         st.markdown("#### 🚨 Alerts")
         alerts = []
-        # Overdue TNA
         for tna_no, tna in tna_list.items():
             for ln in tna.get("lines",[]):
                 if ln.get("status") == "Delayed":
-                    alerts.append(f"⚠️ TNA Delayed: **{tna.get('style_name','')}** — {ln['activity']} ({ln['delay_days']}d late)")
-        # Grey in transit overdue
+                    alerts.append(f"⚠️ **{tna.get('style_name','')}** — {ln['activity']} ({ln['delay_days']}d late)")
         for k, t in tracker.items():
-            if t.get("status") == "In Transit" and t.get("expected_arrival","") < str(date.today()):
-                alerts.append(f"🚚 Grey Overdue: **{t.get('material_code','')}** — Expected {t.get('expected_arrival','')}")
-        # Pending POs
-        for po_no, po in po_list.items():
-            if po.get("status") == "Sent to Supplier":
-                alerts.append(f"📦 PO Pending Confirm: **{po_no}** — {po.get('supplier_name','')}")
+            if t.get("expected_arrival","") < str(date.today()) and float(t.get("dispatched_qty",t.get("ordered_qty",0))) > float(t.get("received_qty",0)):
+                alerts.append(f"🚚 Grey overdue: **{t.get('material_code','')}** exp {t.get('expected_arrival','')}")
         if alerts:
-            for a in alerts[:6]:
-                st.markdown(f'<div style="background:#fef2f2;border-left:3px solid #ef4444;padding:8px 12px;margin:4px 0;border-radius:0 6px 6px 0;font-size:13px;">{a}</div>', unsafe_allow_html=True)
+            for a in alerts[:5]:
+                st.markdown(f'<div style="background:#fef2f2;border-left:3px solid #ef4444;padding:8px 12px;margin:3px 0;border-radius:0 6px 6px 0;font-size:13px;">{a}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="ok-box">✅ Koi alert nahi — sab theek hai!</div>', unsafe_allow_html=True)
-
-    with ac2:
-        st.markdown("#### 📋 Recent Documents")
+            st.markdown('<div class="ok-box">✅ Koi alert nahi!</div>', unsafe_allow_html=True)
+    with al2:
+        st.markdown("#### 📋 Recent")
         recent = []
-        for po_no, po in list(po_list.items())[-5:]:
+        for po_no, po in list(po_list.items())[-4:]:
             recent.append(("PO", po_no, po.get("supplier_name",""), po.get("status",""), po.get("po_date","")))
         for so_no, so in list(so_list.items())[-3:]:
             recent.append(("SO", so_no, so.get("buyer",""), so.get("status",""), so.get("so_date","")))
         recent.sort(key=lambda x: x[4], reverse=True)
-        for doc_type, doc_no, party, status, doc_date in recent[:6]:
-            color = {"PO":"#0ea5e9","SO":"#059669","JWO":"#8b5cf6"}.get(doc_type,"#64748b")
-            st.markdown(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px;"><span><span style="color:{color};font-weight:700;">{doc_type}</span> {doc_no} — {party}</span><span style="color:#94a3b8;">{status}</span></div>', unsafe_allow_html=True)
-
+        for doc_type, doc_no, party, status, _ in recent[:6]:
+            color = {"PO":"#0ea5e9","SO":"#059669"}.get(doc_type,"#64748b")
+            st.markdown(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px;"><span><strong style="color:{color};">{doc_type}</strong> {doc_no} — {party}</span><span style="color:#94a3b8;font-size:11px;">{status}</span></div>', unsafe_allow_html=True)
 
 if nav == "📊 Item Master Dashboard":
     st.markdown('<h1>Item Master & BOM Dashboard</h1>', unsafe_allow_html=True)
