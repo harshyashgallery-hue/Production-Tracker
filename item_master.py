@@ -4578,7 +4578,9 @@ def make_print_html(doc_type, doc_no, data):
                 <div class="label">Supplier / Vendor</div>
                 <div class="value" style="font-size:15px;">{data.get('supplier_name','—')}</div>
                 <div class="info-row"><span class="k">PO Number</span><span class="v">{data.get('po_no','—')}</span></div>
-                <div class="info-row"><span class="k">Bilty No.</span><span class="v">{data.get('bilty_no','—')}</span></div>
+                <div class="info-row"><span class="k">Bilty No./LR</span><span class="v">{data.get('bilty_no','—')} / {data.get('lr_no','—')}</span></div>
+                <div class="info-row"><span class="k">Vendor Invoice No.</span><span class="v">{data.get('vendor_invoice','—')}</span></div>
+                <div class="info-row"><span class="k">Vendor Challan No.</span><span class="v">{data.get('vendor_challan','—')}</span></div>
                 <div class="info-row"><span class="k">Transporter</span><span class="v">{data.get('transporter','—')}</span></div>
                 <div class="info-row"><span class="k">Vehicle No.</span><span class="v">{data.get('vehicle_no','—')}</span></div>
                 <div class="info-row"><span class="k">Dispatch Date</span><span class="v">{data.get('dispatch_date','—')}</span></div>
@@ -6457,6 +6459,8 @@ if nav_gry == "🧵 Grey Dashboard":
                 "Supplier":        t.get("supplier",""),
                 "Where is it?":    disp_status,
                 "Bilty/LR":        f"{t.get('bilty_no','—')} / {t.get('lr_no','—')}",
+                "Invoice No.":     t.get("vendor_invoice","—"),
+                "Challan No.":     t.get("vendor_challan","—"),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -6506,6 +6510,8 @@ elif nav_gry == "🚚 Transit Tracker":
                     st.markdown(f'''<div class="card card-left-blue">
                         <div class="sec-label">Transit Details</div>
                         <div style="font-size:13px;">Bilty/LR: <strong>{t.get("bilty_no","—")} / {t.get("lr_no","—")}</strong></div>
+                        <div style="font-size:13px;">Invoice No.: <strong>{t.get("vendor_invoice","—")}</strong></div>
+                        <div style="font-size:13px;">Challan No.: <strong>{t.get("vendor_challan","—")}</strong></div>
                         <div style="font-size:13px;">Dispatch Qty: <strong>{_disp_q:.0f} mtr</strong></div>
                         <div style="font-size:13px;">Transporter: <strong>{t.get("transporter","—")}</strong></div>
                         <div style="font-size:13px;">Vehicle: <strong>{t.get("vehicle_no","—")}</strong></div>
@@ -6533,6 +6539,10 @@ elif nav_gry == "🚚 Transit Tracker":
                                                   placeholder="e.g. LR-12345 / Bilty 1012")
                     new_lr_no    = st.text_input("LR No. (if separate)", value=t.get("lr_no",""), key=f"lr_{key}",
                                                   placeholder="Lorry Receipt Number")
+                    new_invoice  = st.text_input("Vendor Invoice No. *", value=t.get("vendor_invoice",""), key=f"inv_{key}",
+                                                  placeholder="e.g. INV/2024/001")
+                    new_challan  = st.text_input("Vendor Challan No.", value=t.get("vendor_challan",""), key=f"challan_{key}",
+                                                  placeholder="e.g. CHN/2024/001")
                     new_dispatch_qty = st.number_input("Dispatch Qty (mtr) *",
                                                   min_value=0.0,
                                                   max_value=float(t.get("ordered_qty",0)),
@@ -6554,6 +6564,8 @@ elif nav_gry == "🚚 Transit Tracker":
                         SS["grey_po_tracker"][key].update({
                             "bilty_no":        new_bilty,
                             "lr_no":           new_lr_no,
+                            "vendor_invoice":  new_invoice,
+                            "vendor_challan":  new_challan,
                             "dispatched_qty":  _disp_qty,
                             "transporter":     new_trans,
                             "vehicle_no":      new_vehicle,
@@ -6563,7 +6575,7 @@ elif nav_gry == "🚚 Transit Tracker":
                         })
                         if _is_new_bilty:
                             add_grey_ledger(key, "IN-TRANSIT", _disp_qty, "Vendor", "In Transit",
-                                           f"BILTY-{new_bilty}", f"Bilty/LR: {new_bilty}/{new_lr_no} | {new_trans} | Dispatch Qty: {_disp_qty} mtr")
+                                           f"BILTY-{new_bilty}", f"Bilty/LR: {new_bilty}/{new_lr_no} | Invoice: {new_invoice} | Challan: {new_challan} | {new_trans} | Dispatch Qty: {_disp_qty} mtr")
                         save_data(); st.success("✅ Transit info updated!"); st.rerun()
 
                 with up2:
@@ -6640,6 +6652,8 @@ elif nav_gry == "🚚 Transit Tracker":
                             _receipt_data = {
                                 "po_no": t.get("po_no",""), "receipt_date": t.get("last_receipt_date",""),
                                 "supplier_name": t.get("supplier",""), "bilty_no": t.get("bilty_no",""),
+                                "lr_no": t.get("lr_no",""), "vendor_invoice": t.get("vendor_invoice",""),
+                                "vendor_challan": t.get("vendor_challan",""),
                                 "transporter": t.get("transporter",""), "vehicle_no": t.get("vehicle_no",""),
                                 "dispatch_date": t.get("dispatch_date",""), "received_at": t.get("last_recv_at",""),
                                 "received_by": t.get("last_recv_by",""), "challan_no": t.get("last_challan",""),
