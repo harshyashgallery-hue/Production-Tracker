@@ -6255,11 +6255,25 @@ if nav_gry == "🧵 Grey Dashboard":
 
     # KPIs
     total_orders  = len(set(v.get("po_no") for v in tracker.values()))
-    in_transit_qty= sum(v.get("ordered_qty",0) for v in tracker.values() if v.get("status") == "In Transit")
-    at_transport  = sum(v.get("transport_qty",0) for v in tracker.values())
-    at_factory    = sum(v.get("factory_qty",0) for v in tracker.values())
-    at_printer    = sum(v.get("printer_qty",0) for v in tracker.values())
-    rejected_qty  = sum(v.get("rejected_qty",0) for v in tracker.values())
+    # Calculate location-wise qty directly from tracker fields (not from status)
+    in_transit_qty = 0
+    at_transport   = 0
+    at_factory     = 0
+    at_printer     = 0
+    rejected_qty   = 0
+    for v in tracker.values():
+        ordered  = float(v.get("ordered_qty", 0))
+        received = float(v.get("received_qty", 0))   # reached transport/factory
+        trans_q  = float(v.get("transport_qty", 0))
+        fac_q    = float(v.get("factory_qty", 0))
+        print_q  = float(v.get("printer_qty", 0))
+        rej_q    = float(v.get("rejected_qty", 0))
+        # In Transit = ordered but not yet received anywhere
+        in_transit_qty += max(0, ordered - received)
+        at_transport   += trans_q
+        at_factory     += fac_q
+        at_printer     += print_q
+        rejected_qty   += rej_q
 
     c1,c2,c3,c4,c5,c6 = st.columns(6)
     for col,val,lbl,cls in [
@@ -6280,20 +6294,34 @@ if nav_gry == "🧵 Grey Dashboard":
     else:
         # Active orders summary
         st.markdown("#### 📋 Grey Fabric PO Status")
+
         rows = []
         for key, t in tracker.items():
+            ordered  = float(t.get("ordered_qty", 0))
+            received = float(t.get("received_qty", 0))
+            in_tran  = max(0, ordered - received)
+            trans_q  = float(t.get("transport_qty", 0))
+            fac_q    = float(t.get("factory_qty", 0))
+            print_q  = float(t.get("printer_qty", 0))
+            rej_q    = float(t.get("rejected_qty", 0))
+            # Derive display status from quantities
+            if print_q > 0:   disp_status = "🖨️ At Printer"
+            elif fac_q > 0:   disp_status = "🏭 At Factory"
+            elif trans_q > 0: disp_status = "📦 At Transport"
+            elif in_tran > 0: disp_status = "🚚 In Transit"
+            else:              disp_status = "✅ Closed"
             rows.append({
-                "PO #":         t.get("po_no",""),
-                "Grey Item":    t.get("material_code",""),
-                "Ordered (m)":  t.get("ordered_qty",0),
-                "Received (m)": t.get("received_qty",0),
-                "Factory (m)":  t.get("factory_qty",0),
-                "Transport(m)": t.get("transport_qty",0),
-                "Printer (m)":  t.get("printer_qty",0),
-                "Rejected(m)":  t.get("rejected_qty",0),
-                "Supplier":     t.get("supplier",""),
-                "Status":       t.get("status",""),
-                "Bilty No.":    t.get("bilty_no","—"),
+                "PO #":          t.get("po_no",""),
+                "Grey Item":     t.get("material_code",""),
+                "Ordered (m)":   ordered,
+                "🚚 In Transit": in_tran,
+                "📦 Transport":  trans_q,
+                "🏭 Factory":    fac_q,
+                "🖨️ Printer":   print_q,
+                "❌ Rejected":   rej_q,
+                "Supplier":      t.get("supplier",""),
+                "Where is it?":  disp_status,
+                "Bilty":         t.get("bilty_no","—"),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -6384,6 +6412,7 @@ elif nav_gry == "🚚 Transit Tracker":
                             "status":          "In Transit" if new_bilty else t.get("status","PO Created"),
                         })
                         if new_bilty and t.get("status") in ["PO Created","Vendor Dispatch Pending"]:
+                            SS["grey_po_tracker"][key]["status"] = "In Transit"
                             add_grey_ledger(key, "IN-TRANSIT", t.get("ordered_qty",0), "Vendor", "In Transit",
                                            f"BILTY-{new_bilty}", f"Bilty {new_bilty} | {new_trans}")
                         save_data(); st.success("✅ Transit info updated!"); st.rerun()
@@ -6425,8 +6454,8 @@ elif nav_gry == "🚚 Transit Tracker":
 
                             SS["grey_po_tracker"][key].update({
                                 "status":        "At Transport Location",
-                                "transport_qty": _recv_q,
-                                "received_qty":  _recv_q,
+                                "transport_qty": float(t.get("transport_qty",0)) + _recv_q,
+                                "received_qty":  float(t.get("received_qty",0)) + _recv_q,
                                 "last_receipt_no":   _recv_no,
                                 "last_receipt_date": _recv_dt,
                                 "last_recv_at":      _recv_at,
