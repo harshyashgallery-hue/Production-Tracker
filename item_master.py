@@ -475,6 +475,8 @@ ALL_PAGES = [
     ("SO", "📂 SO List & Tracking"),
     ("SO", "📈 SO Reports"),
     ("SO", "⚙️ SO Settings"),
+    ("SO", "📊 Master Tracker"),
+
     ("MRP", "🏭 MRP Dashboard"),
     ("MRP", "▶ Run MRP"),
     ("MRP", "📦 Material Requirements"),
@@ -723,6 +725,7 @@ if nav_home == "🏠 Home":
                 ("📂 SO List",       "📂 SO List & Tracking"),
                 ("📈 Reports",       "📈 SO Reports"),
                 ("⚙️ Settings",      "⚙️ SO Settings"),
+                ("📊 Master Tracker","📊 Master Tracker"),
             ]
         },
         {
@@ -10028,3 +10031,433 @@ elif nav_gry == "🎯 Grey Planning":
         with st.expander(f"📋 Previous Plans for {sel_grey} ({len(recent_plans)})"):
             for plan in reversed(recent_plans[-5:]):
                 st.markdown(f'<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #f1f5f9;"><strong>{plan["date"]}</strong> | Total: {plan["total_alloc"]:.0f} mtr | SKUs: {len(plan["items"])}</div>', unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MASTER TRACKING REPORT
+# SO → SKU → Har Process ka Status ek jagah
+# ═══════════════════════════════════════════════════════════════════════════════
+
+elif nav_so == "📊 Master Tracker":
+    st.markdown('<h1>📊 Master Tracking Report</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Ek SO ka pura safar — Grey Purchase se Final Production tak — sab ek jagah dikhta hai.</div>', unsafe_allow_html=True)
+
+    so_list      = SS.get("so_list", {})
+    po_list      = SS.get("po_list", {})
+    jwo_list     = SS.get("jwo_list", {})
+    pr_list      = SS.get("pr_list", {})
+    grn_list     = SS.get("grn_list", {})
+    tracker      = SS.get("grey_po_tracker", {})
+    hard_res     = SS.get("pf_hard_reservations", {})
+    pf_checked   = SS.get("pf_checked", {})
+    pf_unchecked = SS.get("pf_unchecked", {})
+    prod_jos     = SS.get("prod_jo_list", {})
+    mrp_result   = SS.get("mrp_result", {})
+    items_data   = st.session_state.get("items", {})
+    boms_data    = st.session_state.get("boms", {})
+    today_str    = str(date.today())
+
+    # ── Filters ────────────────────────────────────────────────────────────────
+    fc1, fc2, fc3, fc4 = st.columns(4)
+    with fc1:
+        open_so_keys = [k for k,v in so_list.items() if v.get("status") not in ["Cancelled"]]
+        sel_sos = st.multiselect("SO Filter", open_so_keys,
+            default=open_so_keys[:5] if len(open_so_keys) > 5 else open_so_keys,
+            key="mt_sos")
+    with fc2:
+        f_buyer = st.text_input("🔍 Buyer", key="mt_buyer")
+    with fc3:
+        view_mode = st.radio("View", ["SKU-wise", "SO Summary"], horizontal=True, key="mt_view")
+    with fc4:
+        show_cols = st.multiselect("Columns",
+            ["Grey", "Printing/JWO", "GRN", "Fabric Check", "Hard Reserve", "Production"],
+            default=["Grey", "Printing/JWO", "GRN", "Fabric Check", "Hard Reserve", "Production"],
+            key="mt_cols")
+
+    st.markdown("---")
+
+    def status_dot(status, good_vals, warn_vals=[], label=""):
+        if status in good_vals:   return f'<span style="color:#059669;font-weight:700;">✅ {label or status}</span>'
+        elif status in warn_vals: return f'<span style="color:#d97706;font-weight:700;">⚠️ {label or status}</span>'
+        elif status:              return f'<span style="color:#ef4444;font-weight:700;">❌ {label or status}</span>'
+        return f'<span style="color:#94a3b8;">— {label}</span>'
+
+    def days_diff(date_str, ref=None):
+        if not date_str: return None
+        try:
+            d = date.fromisoformat(date_str)
+            ref_d = date.fromisoformat(ref) if ref else date.today()
+            return (d - ref_d).days
+        except: return None
+
+    def delay_badge(days):
+        if days is None: return '<span style="color:#94a3b8;">—</span>'
+        if days < 0:   return f'<span style="color:#ef4444;font-weight:700;">🔴 {abs(days)}d Late</span>'
+        elif days == 0: return f'<span style="color:#d97706;font-weight:700;">🟡 Today</span>'
+        elif days <= 3: return f'<span style="color:#d97706;font-weight:700;">🟡 {days}d left</span>'
+        return f'<span style="color:#059669;">🟢 {days}d left</span>'
+
+    if not sel_sos:
+        st.info("SO select karo upar se.")
+        st.stop()
+
+    # ── Build report data ──────────────────────────────────────────────────────
+    for so_no in sel_sos:
+        so = so_list.get(so_no, {})
+        if f_buyer and f_buyer.lower() not in so.get("buyer","").lower():
+            continue
+
+        delivery = so.get("delivery_date","")
+        so_delay = days_diff(delivery)
+
+        # SO Header
+        so_col = "#fee2e2" if so_delay is not None and so_delay < 7 else "#f8fafc"
+        st.markdown(f'''<div style="background:{so_col};border:2px solid #1a3a5c;border-radius:10px;padding:10px 16px;margin:8px 0;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                <div>
+                    <span style="font-size:16px;font-weight:800;color:#1a3a5c;">{so_no}</span>
+                    <span style="color:#64748b;margin-left:12px;">Buyer: <strong>{so.get("buyer","—")}</strong></span>
+                    <span style="color:#64748b;margin-left:12px;">Season: <strong>{so.get("season","—")}</strong></span>
+                </div>
+                <div style="display:flex;gap:16px;font-size:13px;">
+                    <span>📅 Delivery: <strong>{delivery or "—"}</strong></span>
+                    <span>{delay_badge(so_delay)}</span>
+                    <span style="color:#0ea5e9;">Status: <strong>{so.get("status","")}</strong></span>
+                </div>
+            </div>
+        </div>''', unsafe_allow_html=True)
+
+        so_lines = so.get("lines", [])
+        if not so_lines:
+            st.markdown('<div style="padding:6px 16px;color:#94a3b8;">No lines in this SO.</div>', unsafe_allow_html=True)
+            continue
+
+        if view_mode == "SKU-wise":
+            # ── Per-SKU detailed view ──────────────────────────────────────────
+            for line in so_lines:
+                sku      = line.get("sku","")
+                sku_name = line.get("sku_name", items_data.get(sku,{}).get("name",""))
+                so_qty   = float(line.get("qty",0))
+                parent   = items_data.get(sku,{}).get("parent", sku)
+
+                # Get BOM fabrics
+                bom      = boms_data.get(parent, boms_data.get(sku,{}))
+                fab_items = [ln for ln in bom.get("lines",[])
+                             if items_data.get(ln.get("item_code",""),{}).get("item_type","") == "Semi Finished Goods (SFG)"]
+                grey_items = []
+                for fi in fab_items:
+                    sfg_bom = boms_data.get(fi.get("item_code",""),{})
+                    for gl in sfg_bom.get("lines",[]):
+                        if items_data.get(gl.get("item_code",""),{}).get("item_type","") == "Grey Fabric":
+                            grey_items.append({
+                                "pf_code": fi.get("item_code",""),
+                                "pf_name": fi.get("item_name",""),
+                                "grey_code": gl.get("item_code",""),
+                                "grey_name": gl.get("item_name",""),
+                                "grey_per_pc": float(gl.get("qty",0)),
+                                "pf_per_pc": float(fi.get("qty",0)),
+                                "grey_needed": round(float(gl.get("qty",0)) * float(fi.get("qty",0)) * so_qty, 1),
+                            })
+
+                # SKU header row
+                rd = running_days(sku)
+                rd_col = "#ef4444" if rd < 7 else "#d97706" if rd < 15 else "#059669"
+                st.markdown(f'''<div style="background:#1e293b;border-radius:8px;padding:8px 14px;margin:4px 0 2px 12px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span style="color:#c8a96e;font-weight:700;">{sku}</span>
+                        <span style="color:#94a3b8;font-size:12px;margin-left:8px;">{sku_name}</span>
+                    </div>
+                    <div style="display:flex;gap:16px;font-size:12px;">
+                        <span style="color:#fff;">SO Qty: <strong>{so_qty:.0f}</strong></span>
+                        <span style="color:{rd_col};">Running Days: <strong>{rd if rd<999 else "—"}</strong></span>
+                        <span style="color:#94a3b8;">Avg Sale: <strong>{avg_daily_sale(sku):.1f}/day</strong></span>
+                    </div>
+                </div>''', unsafe_allow_html=True)
+
+                # Process columns
+                proc_cells = []
+
+                # ── MRP ──────────────────────────────────────────────────────
+                mrp_mat = mrp_result.get(so_no, mrp_result) if isinstance(mrp_result, dict) else {}
+                mrp_done = any(
+                    so_no in str(v) for v in mrp_result.values()
+                ) if mrp_result else False
+                proc_cells.append(("📊 MRP",
+                    f'{"✅ Done" if mrp_result else "❌ Pending"}',
+                    "#d1fae5" if mrp_result else "#fee2e2"))
+
+                # ── Grey Purchase (PR/PO) ─────────────────────────────────
+                if "Grey" in show_cols:
+                    for gi in grey_items:
+                        gc = gi["grey_code"]
+                        gn = gi["grey_name"]
+                        g_needed = gi["grey_needed"]
+
+                        # Find POs for this grey linked to this SO
+                        grey_pos = [(po_no, po) for po_no, po in po_list.items()
+                                    if po.get("so_ref","") == so_no
+                                    and any(l.get("material_code","") == gc for l in po.get("lines",[]))]
+
+                        # Find PRs
+                        grey_prs = [(pr_no, pr) for pr_no, pr in pr_list.items()
+                                    if pr.get("so_ref","") == so_no
+                                    and any(l.get("material_code","") == gc for l in pr.get("lines",[]))]
+
+                        if grey_pos:
+                            for po_no, po in grey_pos:
+                                po_line = next((l for l in po.get("lines",[]) if l.get("material_code","") == gc), {})
+                                po_qty   = float(po_line.get("po_qty",0))
+                                po_del   = po.get("delivery_date","")
+                                po_delay = days_diff(po_del)
+                                po_status = po.get("status","")
+
+                                # Transit tracker
+                                t_data = next((t for t in tracker.values()
+                                               if t.get("po_no","") == po_no and t.get("material_code","") == gc), {})
+                                in_transit = max(0, float(t_data.get("dispatched_qty",po_qty)) - float(t_data.get("received_qty",0)))
+                                at_transport = float(t_data.get("transport_qty",0))
+                                at_factory   = float(t_data.get("factory_qty",0))
+                                at_printer   = float(t_data.get("printer_qty",0))
+                                bilty        = t_data.get("bilty_no","")
+
+                                html = f'''<div style="font-size:11px;line-height:1.8;">
+                                    <div><strong>{gc}</strong> — {gn}</div>
+                                    <div>PO: <strong>{po_no}</strong> | {po_status}</div>
+                                    <div>Ordered: <strong>{po_qty:.0f}m</strong> | Needed: <strong>{g_needed:.0f}m</strong></div>
+                                    <div>Delivery: <strong>{po_del or "—"}</strong> {delay_badge(po_delay)}</div>
+                                    <div>Bilty: <strong>{bilty or "—"}</strong></div>
+                                    <div>🚚 Transit: <strong>{in_transit:.0f}m</strong> | 📦 Transport: <strong>{at_transport:.0f}m</strong></div>
+                                    <div>🏭 Factory: <strong>{at_factory:.0f}m</strong> | 🖨️ Printer: <strong>{at_printer:.0f}m</strong></div>
+                                </div>'''
+                                bg = "#fef3c7" if po_delay is not None and po_delay < 7 else "#f0fdf4" if po_status in ["Confirmed","Received"] else "#f8fafc"
+                                proc_cells.append((f"🧵 Grey\n{po_no}", html, bg))
+                        elif grey_prs:
+                            for pr_no, pr in grey_prs:
+                                proc_cells.append((f"🧵 Grey PR\n{pr_no}",
+                                    f'<div style="font-size:11px;"><div><strong>{gc}</strong></div><div>PR: {pr_no}</div><div>Status: <strong>{pr.get("status","")}</strong></div><div>Needed: <strong>{g_needed:.0f}m</strong></div></div>',
+                                    "#fef9c3"))
+                        else:
+                            proc_cells.append(("🧵 Grey Purchase",
+                                f'<div style="font-size:11px;color:#ef4444;"><strong>{gc}</strong><br>Needed: {g_needed:.0f}m<br>❌ No PO/PR</div>',
+                                "#fee2e2"))
+
+                # ── JWO (Printing) ────────────────────────────────────────
+                if "Printing/JWO" in show_cols:
+                    for gi in grey_items:
+                        pf_code = gi["pf_code"]
+                        pf_needed = round(gi["pf_per_pc"] * so_qty, 1)
+
+                        so_jwos = [(jno, jwo) for jno, jwo in jwo_list.items()
+                                   if jwo.get("so_ref","") == so_no
+                                   and any(l.get("output_material","") == pf_code for l in jwo.get("lines",[]))]
+
+                        if so_jwos:
+                            for jno, jwo in so_jwos:
+                                jline = next((l for l in jwo.get("lines",[]) if l.get("output_material","") == pf_code), {})
+                                j_qty    = float(jline.get("output_qty",0))
+                                j_recv   = float(jline.get("received_qty",0))
+                                j_bal    = max(0, j_qty - j_recv)
+                                j_del    = jwo.get("expected_date","")
+                                j_delay  = days_diff(j_del)
+                                j_status = jwo.get("status","")
+
+                                html = f'''<div style="font-size:11px;line-height:1.8;">
+                                    <div><strong>{pf_code}</strong> — {gi["pf_name"]}</div>
+                                    <div>JWO: <strong>{jno}</strong> | {jwo.get("processor_name","")}</div>
+                                    <div>Ordered: <strong>{j_qty:.0f}m</strong> | Received: <strong>{j_recv:.0f}m</strong></div>
+                                    <div>Balance: <strong style="color:{"#ef4444" if j_bal>0 else "#059669"}">{j_bal:.0f}m</strong></div>
+                                    <div>Expected: <strong>{j_del or "—"}</strong> {delay_badge(j_delay)}</div>
+                                    <div>Status: <strong>{j_status}</strong></div>
+                                </div>'''
+                                bg = "#fef3c7" if j_delay is not None and j_delay < 7 else "#f0fdf4" if j_status in ["Received"] else "#f8fafc"
+                                proc_cells.append((f"🖨️ Printing\n{jno}", html, bg))
+                        else:
+                            proc_cells.append(("🖨️ Printing/JWO",
+                                f'<div style="font-size:11px;color:#94a3b8;"><strong>{pf_code}</strong><br>Needed: {pf_needed:.0f}m<br>— No JWO</div>',
+                                "#f8fafc"))
+
+                # ── GRN (Printed Fabric received) ─────────────────────────
+                if "GRN" in show_cols:
+                    for gi in grey_items:
+                        pf_code = gi["pf_code"]
+                        pf_needed = round(gi["pf_per_pc"] * so_qty, 1)
+
+                        # GRNs for this JWO
+                        so_grns = [(gno, grn) for gno, grn in grn_list.items()
+                                   if grn.get("grn_type","") == "JWO Receipt"
+                                   and any(l.get("output_material","") == pf_code for l in grn.get("lines",[])) ]
+
+                        total_recv = sum(float(l.get("accepted_qty",0))
+                                         for g_no, g in so_grns
+                                         for l in g.get("lines",[])
+                                         if l.get("output_material","") == pf_code)
+                        balance    = max(0, pf_needed - total_recv)
+
+                        if total_recv > 0:
+                            last_grn = so_grns[-1][1] if so_grns else {}
+                            html = f'''<div style="font-size:11px;line-height:1.8;">
+                                <div><strong>{pf_code}</strong></div>
+                                <div>Received: <strong style="color:#059669">{total_recv:.0f}m</strong></div>
+                                <div>Needed: <strong>{pf_needed:.0f}m</strong></div>
+                                <div>Balance: <strong style="color:{"#ef4444" if balance>0 else "#059669"}">{balance:.0f}m</strong></div>
+                                <div>Last GRN: <strong>{so_grns[-1][0] if so_grns else "—"}</strong></div>
+                                <div>Date: <strong>{last_grn.get("grn_date","—")}</strong></div>
+                            </div>'''
+                            proc_cells.append(("📥 GRN\nReceived", html, "#d1fae5" if balance == 0 else "#fef3c7"))
+                        else:
+                            proc_cells.append(("📥 GRN",
+                                f'<div style="font-size:11px;color:#ef4444;"><strong>{pf_code}</strong><br>Needed: {pf_needed:.0f}m<br>❌ Not received</div>',
+                                "#fee2e2"))
+
+                # ── Fabric Check ──────────────────────────────────────────
+                if "Fabric Check" in show_cols:
+                    for gi in grey_items:
+                        pf_code   = gi["pf_code"]
+                        pf_needed = round(gi["pf_per_pc"] * so_qty, 1)
+                        chk_key   = f"{pf_code}_checked"
+                        unc_keys  = [k for k,v in pf_unchecked.items() if v.get("fabric_code","") == pf_code]
+
+                        checked_qty   = float(pf_checked.get(chk_key,{}).get("qty",0))
+                        unchecked_qty = sum(float(pf_unchecked[k].get("qty",0)) for k in unc_keys)
+
+                        if checked_qty > 0 or unchecked_qty > 0:
+                            rej_qty = float(pf_checked.get(chk_key,{}).get("rejected_qty",0))
+                            html = f'''<div style="font-size:11px;line-height:1.8;">
+                                <div><strong>{pf_code}</strong></div>
+                                <div>✅ Checked: <strong style="color:#059669">{checked_qty:.0f}m</strong></div>
+                                <div>📦 Unchecked: <strong style="color:#d97706">{unchecked_qty:.0f}m</strong></div>
+                                <div>❌ Rejected: <strong style="color:#ef4444">{rej_qty:.0f}m</strong></div>
+                                <div>Needed: <strong>{pf_needed:.0f}m</strong></div>
+                            </div>'''
+                            bg = "#d1fae5" if checked_qty >= pf_needed else "#fef3c7" if unchecked_qty > 0 else "#fee2e2"
+                            proc_cells.append(("🔬 Fabric Check", html, bg))
+                        else:
+                            proc_cells.append(("🔬 Fabric Check",
+                                f'<div style="font-size:11px;color:#94a3b8;"><strong>{pf_code}</strong><br>Needed: {pf_needed:.0f}m<br>— Not received yet</div>',
+                                "#f8fafc"))
+
+                # ── Hard Reserve ──────────────────────────────────────────
+                if "Hard Reserve" in show_cols:
+                    for gi in grey_items:
+                        pf_code   = gi["pf_code"]
+                        pf_needed = round(gi["pf_per_pc"] * so_qty, 1)
+
+                        sku_res   = sum(float(r.get("qty",0)) for r in hard_res.values()
+                                        if r.get("fabric_code","") == pf_code
+                                        and r.get("so_no","") == so_no
+                                        and r.get("sku","") == sku
+                                        and r.get("status","") == "Active")
+                        so_total_res = sum(float(r.get("qty",0)) for r in hard_res.values()
+                                           if r.get("fabric_code","") == pf_code
+                                           and r.get("so_no","") == so_no
+                                           and r.get("status","") == "Active")
+                        balance = max(0, pf_needed - so_total_res)
+
+                        if so_total_res > 0:
+                            html = f'''<div style="font-size:11px;line-height:1.8;">
+                                <div><strong>{pf_code}</strong></div>
+                                <div>🔒 Reserved (SO): <strong style="color:#059669">{so_total_res:.0f}m</strong></div>
+                                <div>🔒 This SKU: <strong>{sku_res:.0f}m</strong></div>
+                                <div>Needed: <strong>{pf_needed:.0f}m</strong></div>
+                                <div>Balance: <strong style="color:{"#ef4444" if balance>0 else "#059669"}">{balance:.0f}m</strong></div>
+                            </div>'''
+                            proc_cells.append(("🔒 Hard Reserve", html, "#d1fae5" if balance == 0 else "#fef3c7"))
+                        else:
+                            proc_cells.append(("🔒 Hard Reserve",
+                                f'<div style="font-size:11px;color:#94a3b8;"><strong>{pf_code}</strong><br>Needed: {pf_needed:.0f}m<br>— Not reserved</div>',
+                                "#f8fafc"))
+
+                # ── Production JOs ────────────────────────────────────────
+                if "Production" in show_cols:
+                    # Find all JOs for this SO+SKU
+                    sku_jos = [(jno, jo) for jno, jo in prod_jos.items()
+                               if jo.get("so_no","") == so_no
+                               and any(l.get("sku","") == sku for l in jo.get("lines",[]))]
+
+                    if sku_jos:
+                        for jno, jo in sku_jos:
+                            jline   = next((l for l in jo.get("lines",[]) if l.get("sku","") == sku), {})
+                            plan_q  = float(jline.get("plan_qty",0))
+                            out_q   = float(jline.get("output_qty",0))
+                            wst_q   = float(jline.get("wastage",0))
+                            bom_f   = float(jline.get("bom_fabric",0))
+                            act_f   = float(jline.get("actual_fabric",0))
+                            diff_f  = round(act_f - bom_f, 2)
+                            jo_status = jo.get("status","")
+                            exp_dt  = jo.get("exp_date","")
+                            exp_delay = days_diff(exp_dt)
+
+                            html = f'''<div style="font-size:11px;line-height:1.8;">
+                                <div><strong>{jno}</strong> — {jo.get("process","")}</div>
+                                <div>{jo.get("vendor_name","") or jo.get("unit","Inhouse")}</div>
+                                <div>Plan: <strong>{plan_q:.0f}</strong> | Output: <strong style="color:{"#059669" if out_q>=plan_q else "#d97706"}">{out_q:.0f}</strong></div>
+                                <div>Expected: <strong>{exp_dt or "—"}</strong> {delay_badge(exp_delay)}</div>
+                                <div>Status: <strong>{jo_status}</strong></div>
+                                {"<div>Fabric: BOM " + str(bom_f) + " vs Actual " + str(act_f) + f" (<span style='color:{'#ef4444' if diff_f>0 else '#059669'}'>{diff_f:+.1f}</span>)</div>" if bom_f > 0 else ""}
+                            </div>'''
+                            bg = "#d1fae5" if jo_status in ["Completed","Closed"] else "#fef3c7" if jo_status in ["In Progress","Partially Completed"] else "#f8fafc"
+                            proc_cells.append((f"✂️ {jo.get('process','Prod')}\n{jno}", html, bg))
+                    else:
+                        proc_cells.append(("✂️ Production",
+                            '<div style="font-size:11px;color:#94a3b8;">— No JO yet</div>',
+                            "#f8fafc"))
+
+                # ── Render cells ──────────────────────────────────────────
+                n_cols = len(proc_cells)
+                if n_cols > 0:
+                    cols = st.columns(min(n_cols, 6))
+                    for ci, (cell_title, cell_html, cell_bg) in enumerate(proc_cells):
+                        with cols[ci % min(n_cols, 6)]:
+                            title_lines = cell_title.split("\n")
+                            st.markdown(f'''<div style="background:{cell_bg};border:1px solid #e2e5ef;border-radius:8px;padding:8px 10px;margin:2px 0;min-height:100px;">
+                                <div style="font-size:10px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e5ef;padding-bottom:4px;margin-bottom:6px;">
+                                    {title_lines[0]}<br>
+                                    {"<span style='color:#94a3b8;font-weight:400;'>" + title_lines[1] + "</span>" if len(title_lines) > 1 else ""}
+                                </div>
+                                {cell_html}
+                            </div>''', unsafe_allow_html=True)
+
+                st.markdown('<div style="margin-bottom:4px;"></div>', unsafe_allow_html=True)
+
+        else:
+            # ── SO Summary view ──────────────────────────────────────────────
+            summary_rows = []
+            for line in so_lines:
+                sku      = line.get("sku","")
+                so_qty   = float(line.get("qty",0))
+                parent   = items_data.get(sku,{}).get("parent", sku)
+
+                # Count completed processes
+                sku_jos = [(jno, jo) for jno, jo in prod_jos.items()
+                           if jo.get("so_no","") == so_no
+                           and any(l.get("sku","") == sku for l in jo.get("lines",[]))]
+                completed_procs = [jo.get("process","") for _, jo in sku_jos
+                                   if jo.get("status","") in ["Completed","Closed"]
+                                   or any(float(l.get("output_qty",0)) > 0
+                                          for l in jo.get("lines",[]) if l.get("sku","") == sku)]
+                total_output = sum(
+                    float(l.get("output_qty",0))
+                    for _, jo in sku_jos
+                    for l in jo.get("lines",[]) if l.get("sku","") == sku
+                )
+
+                rd = running_days(sku)
+                summary_rows.append({
+                    "SKU":           sku,
+                    "Name":          line.get("sku_name", items_data.get(sku,{}).get("name","")),
+                    "SO Qty":        so_qty,
+                    "Running Days":  rd if rd < 999 else "—",
+                    "Processes Done":f"{len(completed_procs)} ({', '.join(completed_procs) or 'None'})",
+                    "Production Out":f"{total_output:.0f} pcs",
+                    "Balance":       f"{max(0, so_qty - total_output):.0f} pcs",
+                })
+            if summary_rows:
+                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+        st.markdown('<hr style="margin:12px 0;border-color:#e2e5ef;">', unsafe_allow_html=True)
+
+    # ── Export to Excel ───────────────────────────────────────────────────────
+    st.markdown("---")
+    if st.button("📥 Export to Excel (Coming Soon)", key="mt_export", disabled=True):
+        pass
+    st.markdown('<div style="font-size:12px;color:#94a3b8;">Tip: Browser mein Ctrl+P se PDF bana sakte ho is report ka.</div>', unsafe_allow_html=True)
