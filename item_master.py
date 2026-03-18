@@ -453,6 +453,7 @@ def require_login():
 
 # ─── Page routing via session state ────────────────────────────────────────────────
 ALL_PAGES = [
+    ("HOME", "🏠 Home"),
     ("IM", "📊 Item Master Dashboard"),
     ("IM", "➕ Create Item"),
     ("IM", "📋 Item Master List"),
@@ -495,6 +496,7 @@ ALL_PAGES = [
     ("ADM", "⚙️ User Management"),
     ("ADM", "🔐 Role Permissions"),
 ]
+HOME_PAGES = [p for m, p in ALL_PAGES if m == "HOME"]
 IM_PAGES  = [p for m, p in ALL_PAGES if m == "IM"]
 SO_PAGES  = [p for m, p in ALL_PAGES if m == "SO"]
 MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
@@ -505,11 +507,15 @@ GRY_PAGES = [p for m, p in ALL_PAGES if m == "GRY"]
 ADM_PAGES = [p for m, p in ALL_PAGES if m == "ADM"]
 
 if "current_page" not in st.session_state:
-    st.session_state["current_page"] = "📊 Item Master Dashboard"
+    st.session_state["current_page"] = "🏠 Home"
 
 with st.sidebar:
     st.markdown('<div style="padding:16px 4px 8px;"><div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div><div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div></div>', unsafe_allow_html=True)
 
+    # Home button
+    if st.button("🏠 Home", key="btn_home", use_container_width=True):
+        st.session_state["current_page"] = "🏠 Home"
+        st.rerun()
     st.markdown("---")
 
     def _sidebar_section(module_id, label):
@@ -540,6 +546,7 @@ with st.sidebar:
 
 # Route to correct page
 _cp  = st.session_state["current_page"]
+nav_home = _cp if _cp in HOME_PAGES else None
 nav     = _cp if _cp in IM_PAGES  else None
 nav_so  = _cp if _cp in SO_PAGES  else None
 nav_mrp = _cp if _cp in MRP_PAGES else None
@@ -634,6 +641,103 @@ def badge(status):
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
+if nav_home == "🏠 Home":
+    # ── KPI Stats ──────────────────────────────────────────────────────────────
+    items_data = st.session_state.get("items", {})
+    so_list    = st.session_state.get("so_list", {})
+    po_list    = st.session_state.get("po_list", {})
+    jwo_list   = st.session_state.get("jwo_list", {})
+    tna_list   = st.session_state.get("tna_list", {})
+    tracker    = st.session_state.get("grey_po_tracker", {})
+
+    open_sos   = sum(1 for s in so_list.values() if s.get("status") not in ["Closed","Cancelled","Fully Received"])
+    open_pos   = sum(1 for p in po_list.values()  if p.get("status") not in ["Received","Closed","Cancelled"])
+    open_jwos  = sum(1 for j in jwo_list.values() if j.get("status") not in ["Received","Closed","Cancelled"])
+    delayed_tna= sum(1 for t in tna_list.values() for ln in t.get("lines",[]) if ln.get("status")=="Delayed")
+    grey_transit = sum(max(0, float(v.get("dispatched_qty",v.get("ordered_qty",0))) - float(v.get("received_qty",0))) for v in tracker.values())
+
+    st.markdown(f'''
+    <div style="padding:20px 0 10px;">
+        <div style="font-size:28px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div>
+        <div style="font-size:13px;color:#94a3b8;margin-top:4px;">Production Management System — Select a module to get started</div>
+    </div>''', unsafe_allow_html=True)
+
+    # Quick stats bar
+    st.markdown(f'''<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
+        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">📦 Items: <strong style="color:#c8a96e;">{len(items_data)}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">📋 Open SOs: <strong style="color:#0ea5e9;">{open_sos}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">📦 Open POs: <strong style="color:#059669;">{open_pos}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">🔧 Open JWOs: <strong style="color:#8b5cf6;">{open_jwos}</strong></div>
+        <div style="background:#1e293b;border-radius:8px;padding:8px 16px;font-size:12px;">🚚 Grey In Transit: <strong style="color:#d97706;">{grey_transit:.0f} mtr</strong></div>
+        {"<div style='background:#fee2e2;border-radius:8px;padding:8px 16px;font-size:12px;'>⚠️ TNA Delayed: <strong style=\"color:#ef4444;\">" + str(delayed_tna) + "</strong></div>" if delayed_tna > 0 else ""}
+    </div>''', unsafe_allow_html=True)
+
+    # Module tiles
+    MODULES = [
+        ("ITEM MASTER",   "📦", "Items, BOM,\nRouting, Merchants",   "📊 Item Master Dashboard",  "#0ea5e9", "#dbeafe"),
+        ("SALES",         "🛒", "Demands, Orders,\nTracking",         "📊 SO Dashboard",           "#059669", "#d1fae5"),
+        ("MRP",           "⚙️", "Requirement Planning,\nReservations","🏭 MRP Dashboard",          "#8b5cf6", "#ede9fe"),
+        ("TNA",           "📅", "Time & Action,\nMilestone Tracking", "📅 TNA Dashboard",          "#d97706", "#fef3c7"),
+        ("PURCHASE",      "🏭", "PR, PO, Job Work,\nGRN",            "🛒 Purchase Dashboard",     "#ec4899", "#fce7f3"),
+        ("GREY FABRIC",   "🧵", "Transit, QC,\nTransfer, Ledger",    "🧵 Grey Dashboard",         "#f59e0b", "#fef3c7"),
+        ("INVENTORY",     "📋", "Stock, Ledger,\nAdjustments",       "📦 Inventory",              "#14b8a6", "#ccfbf1"),
+        ("REPORTS",       "📊", "SO, MRP, Purchase,\nTNA Reports",   "📊 MRP Reports",            "#6366f1", "#e0e7ff"),
+    ]
+
+    cols = st.columns(4)
+    for idx, (name, icon, desc, target_page, color, bg) in enumerate(MODULES):
+        with cols[idx % 4]:
+            st.markdown(f'''
+            <div style="background:{bg};border:2px solid {color}20;border-radius:14px;
+                        padding:20px 16px;margin-bottom:16px;text-align:center;
+                        transition:all 0.2s;">
+                <div style="font-size:36px;margin-bottom:8px;">{icon}</div>
+                <div style="font-size:14px;font-weight:800;color:#1e293b;">{name}</div>
+                <div style="font-size:11px;color:#64748b;margin-top:4px;white-space:pre-line;">{desc}</div>
+            </div>''', unsafe_allow_html=True)
+            if st.button(f"Open {name}", key=f"tile_{name}", use_container_width=True):
+                st.session_state["current_page"] = target_page
+                st.rerun()
+
+    st.markdown("---")
+
+    # Recent activity / alerts
+    ac1, ac2 = st.columns(2)
+    with ac1:
+        st.markdown("#### 🚨 Alerts")
+        alerts = []
+        # Overdue TNA
+        for tna_no, tna in tna_list.items():
+            for ln in tna.get("lines",[]):
+                if ln.get("status") == "Delayed":
+                    alerts.append(f"⚠️ TNA Delayed: **{tna.get('style_name','')}** — {ln['activity']} ({ln['delay_days']}d late)")
+        # Grey in transit overdue
+        for k, t in tracker.items():
+            if t.get("status") == "In Transit" and t.get("expected_arrival","") < str(date.today()):
+                alerts.append(f"🚚 Grey Overdue: **{t.get('material_code','')}** — Expected {t.get('expected_arrival','')}")
+        # Pending POs
+        for po_no, po in po_list.items():
+            if po.get("status") == "Sent to Supplier":
+                alerts.append(f"📦 PO Pending Confirm: **{po_no}** — {po.get('supplier_name','')}")
+        if alerts:
+            for a in alerts[:6]:
+                st.markdown(f'<div style="background:#fef2f2;border-left:3px solid #ef4444;padding:8px 12px;margin:4px 0;border-radius:0 6px 6px 0;font-size:13px;">{a}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="ok-box">✅ Koi alert nahi — sab theek hai!</div>', unsafe_allow_html=True)
+
+    with ac2:
+        st.markdown("#### 📋 Recent Documents")
+        recent = []
+        for po_no, po in list(po_list.items())[-5:]:
+            recent.append(("PO", po_no, po.get("supplier_name",""), po.get("status",""), po.get("po_date","")))
+        for so_no, so in list(so_list.items())[-3:]:
+            recent.append(("SO", so_no, so.get("buyer",""), so.get("status",""), so.get("so_date","")))
+        recent.sort(key=lambda x: x[4], reverse=True)
+        for doc_type, doc_no, party, status, doc_date in recent[:6]:
+            color = {"PO":"#0ea5e9","SO":"#059669","JWO":"#8b5cf6"}.get(doc_type,"#64748b")
+            st.markdown(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px;"><span><span style="color:{color};font-weight:700;">{doc_type}</span> {doc_no} — {party}</span><span style="color:#94a3b8;">{status}</span></div>', unsafe_allow_html=True)
+
+
 if nav == "📊 Item Master Dashboard":
     st.markdown('<h1>Item Master & BOM Dashboard</h1>', unsafe_allow_html=True)
     
