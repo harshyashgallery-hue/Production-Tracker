@@ -5681,7 +5681,8 @@ elif nav_pur == "📦 Purchase Orders":
                                         "created_at": datetime.now().isoformat(),
                                     }
                             st.session_state["po_lines"] = []; st.session_state["pr_to_po"] = ""
-                            log_activity("PO", po_no, "Created", f"Supplier: {suppliers.get(supp_code,{{}}).get('name',supp_code)} | Total: ₹{total:,.2f} | Status: {btn_status}")
+                            _supp_name = suppliers.get(supp_code, {}).get('name', supp_code)
+                            log_activity("PO", po_no, "Created", f"Supplier: {_supp_name} | Total: ₹{total:,.2f} | Status: {btn_status}")
                             save_data(); st.success(f"✅ {po_no} saved!"); st.rerun()
 
     with po_tab1:
@@ -5906,7 +5907,8 @@ elif nav_pur == "🔧 Job Work Orders":
                 }
                 if sel_jw_pr: SS["pr_list"][sel_jw_pr]["status"] = "JWO Created"
                 st.session_state["jwo_lines"] = []; st.session_state["pr_to_jwo"] = ""
-                log_activity("JWO", jwo_no, "Created", f"Processor: {suppliers.get(proc_code,{{}}).get('name',proc_code)} | Total: ₹{jw_total:,.2f}")
+                _proc_name = suppliers.get(proc_code, {}).get('name', proc_code)
+                log_activity("JWO", jwo_no, "Created", f"Processor: {_proc_name} | Total: ₹{jw_total:,.2f}")
                 save_data(); st.success(f"✅ {jwo_no} created! Input materials issued."); st.rerun()
 
     with jw_tab1:
