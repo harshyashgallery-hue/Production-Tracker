@@ -210,6 +210,9 @@ DEFAULT_DATA = {
     "pf_check_entries": {},
     "pf_hard_reservations": {},
     "pf_check_counter": 1,
+    "prod_jo_list": {},
+    "prod_jo_counter": 1,
+    "prod_output_list": {},
     "grey_qc_counter": 1,
     "grey_transfer_counter": 1,
     "grey_return_counter": 1,
@@ -491,6 +494,11 @@ ALL_PAGES = [
     ("PUR", "📊 Purchase Reports"),
     ("INV", "📦 Inventory"),
     ("INV", "📋 Stock Ledger"),
+    ("PRD", "🏭 Production Dashboard"),
+    ("PRD", "✂️ Ready to Process"),
+    ("PRD", "➕ Create Job Order"),
+    ("PRD", "📋 Job Order List"),
+    ("PRD", "📊 Production Reports"),
     ("PFC", "🔬 Check Dashboard"),
     ("PFC", "📥 Receive Fabric"),
     ("PFC", "✅ Fabric Check"),
@@ -514,6 +522,7 @@ MRP_PAGES = [p for m, p in ALL_PAGES if m == "MRP"]
 TNA_PAGES = [p for m, p in ALL_PAGES if m == "TNA"]
 PUR_PAGES = [p for m, p in ALL_PAGES if m == "PUR"]
 INV_PAGES = [p for m, p in ALL_PAGES if m == "INV"]
+PRD_PAGES = [p for m, p in ALL_PAGES if m == "PRD"]
 PFC_PAGES = [p for m, p in ALL_PAGES if m == "PFC"]
 GRY_PAGES = [p for m, p in ALL_PAGES if m == "GRY"]
 ADM_PAGES = [p for m, p in ALL_PAGES if m == "ADM"]
@@ -546,6 +555,7 @@ with st.sidebar:
     _sidebar_section("TNA", "TNA")
     _sidebar_section("PUR", "PURCHASE")
     _sidebar_section("INV", "INVENTORY")
+    _sidebar_section("PRD", "PRODUCTION")
     _sidebar_section("PFC", "FABRIC CHECK")
     _sidebar_section("GRY", "GREY FABRIC")
     if get_current_role() == "Admin":
@@ -566,6 +576,7 @@ nav_mrp = _cp if _cp in MRP_PAGES else None
 nav_tna = _cp if _cp in TNA_PAGES else None
 nav_pur = _cp if _cp in PUR_PAGES else None
 nav_inv = _cp if _cp in INV_PAGES else None
+nav_prd = _cp if _cp in PRD_PAGES else None
 nav_pfc = _cp if _cp in PFC_PAGES else None
 nav_gry = _cp if _cp in GRY_PAGES else None
 nav_adm = _cp if _cp in ADM_PAGES else None
@@ -756,6 +767,17 @@ if nav_home == "🏠 Home":
                 ("↩️ Return/Rework", "↩️ Return / Rework"),
                 ("📤 Transfer",      "📤 Grey Transfer"),
                 ("📋 Ledger",        "📋 Grey Ledger"),
+            ]
+        },
+        {
+            "name": "PRODUCTION", "icon": "✂️", "color": "#dc2626", "bg": "#fee2e2",
+            "desc": "Cutting, Stitching,\nFinishing, Job Orders",
+            "pages": [
+                ("🏭 Dashboard",    "🏭 Production Dashboard"),
+                ("✂️ Ready List",  "✂️ Ready to Process"),
+                ("➕ Create JO",   "➕ Create Job Order"),
+                ("📋 JO List",     "📋 Job Order List"),
+                ("📊 Reports",     "📊 Production Reports"),
             ]
         },
         {
@@ -8633,3 +8655,709 @@ elif nav_pfc == "🔒 Hard Reserve":
                       "Passed":v["passed"],"Rejected":v["rejected"]}
                      for k,v in checker_summary.items()]
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRODUCTION MODULE — Routing Based Job Order System
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PRD_PROCESSES   = ["Cutting", "Stitching", "Finishing", "Embroidery", "Dyeing",
+                   "Kaja Button", "Packing", "Quality Check", "Other"]
+PRD_JO_STATUS   = ["Created", "Material Issued", "In Progress",
+                   "Partially Completed", "Completed", "Closed", "Cancelled"]
+PRD_EXEC_TYPE   = ["Inhouse", "Outsource"]
+
+def next_jo_no():
+    n = SS.get("prod_jo_counter", 1)
+    SS["prod_jo_counter"] = n + 1
+    return f"PJO-{n:04d}"
+
+def get_routing_for_sku(sku):
+    """Return routing list for a SKU from routing master"""
+    items_data  = st.session_state.get("items", {})
+    routings    = st.session_state.get("routings", {})
+    parent      = items_data.get(sku, {}).get("parent", sku)
+    return routings.get(parent, routings.get(sku, {}).get("processes", [])) or []
+
+def get_next_process(sku, completed_processes):
+    """Return next process based on routing"""
+    routing = get_routing_for_sku(sku)
+    if not routing:
+        # Default sequence
+        routing = ["Cutting", "Stitching", "Finishing", "Packing"]
+    for proc in routing:
+        pname = proc if isinstance(proc, str) else proc.get("process", proc.get("name",""))
+        if pname not in completed_processes:
+            return pname
+    return None
+
+def get_sku_process_status(sku, so_no):
+    """Returns dict of completed processes and current stage for a SKU+SO"""
+    jo_list = SS.get("prod_jo_list", {})
+    completed = {}
+    for jo_no, jo in jo_list.items():
+        if jo.get("so_no") == so_no and sku in [l.get("sku") for l in jo.get("lines", [])]:
+            proc   = jo.get("process", "")
+            status = jo.get("status", "")
+            if status in ["Completed", "Closed"]:
+                completed[proc] = jo_no
+    return completed
+
+def get_ready_to_process(target_process=None):
+    """
+    Returns list of {so_no, sku, process, qty, fabric_allocated}
+    that are ready for their next process
+    """
+    hard_res   = SS.get("pf_hard_reservations", {})
+    pf_checked = SS.get("pf_checked", {})
+    so_list    = SS.get("so_list", {})
+    items_data = st.session_state.get("items", {})
+    jo_list    = SS.get("prod_jo_list", {})
+    ready      = []
+
+    # Build set of (so_no, sku) that have active hard reservation
+    allocated = set()
+    alloc_qty = {}
+    for hr in hard_res.values():
+        if hr.get("status") == "Active":
+            key = (hr.get("so_no",""), hr.get("sku",""))
+            allocated.add(key)
+            alloc_qty[key] = alloc_qty.get(key, 0) + float(hr.get("qty", 0))
+
+    for so_no, so in so_list.items():
+        if so.get("status") in ["Closed","Cancelled","Fully Received"]:
+            continue
+        for line in so.get("lines", []):
+            sku      = line.get("sku", "")
+            so_qty   = float(line.get("qty", 0))
+            key      = (so_no, sku)
+
+            # Check fabric allocation
+            is_allocated = key in allocated
+            if not is_allocated:
+                continue
+
+            fab_alloc = alloc_qty.get(key, 0)
+
+            # Get completed processes for this SKU+SO
+            completed = get_sku_process_status(sku, so_no)
+            next_proc = get_next_process(sku, list(completed.keys()))
+
+            if not next_proc:
+                continue  # all processes done
+
+            # Filter by target process
+            if target_process and next_proc != target_process:
+                continue
+
+            # Check if a JO already exists and is in progress for this process
+            in_progress_jo = next(
+                (jo_no for jo_no, jo in jo_list.items()
+                 if jo.get("so_no") == so_no and jo.get("process") == next_proc
+                 and sku in [l.get("sku") for l in jo.get("lines", [])]
+                 and jo.get("status") not in ["Completed","Closed","Cancelled"]),
+                None
+            )
+
+            ready.append({
+                "so_no":       so_no,
+                "sku":         sku,
+                "sku_name":    line.get("sku_name", items_data.get(sku,{}).get("name","")),
+                "buyer":       so.get("buyer",""),
+                "delivery":    so.get("delivery_date",""),
+                "so_qty":      so_qty,
+                "fab_alloc":   fab_alloc,
+                "next_process":next_proc,
+                "completed":   list(completed.keys()),
+                "in_progress_jo": in_progress_jo,
+                "running_days":running_days(sku),
+            })
+
+    return sorted(ready, key=lambda x: (x["next_process"], x["running_days"]))
+
+
+# ── PRODUCTION DASHBOARD ──────────────────────────────────────────────────────
+if nav_prd == "🏭 Production Dashboard":
+    st.markdown('<h1>Production Dashboard</h1>', unsafe_allow_html=True)
+
+    jo_list    = SS.get("prod_jo_list", {})
+    hard_res   = SS.get("pf_hard_reservations", {})
+    items_data = st.session_state.get("items", {})
+
+    # KPIs
+    open_jos   = sum(1 for j in jo_list.values() if j.get("status") not in ["Completed","Closed","Cancelled"])
+    ready_list = get_ready_to_process()
+    ready_cut  = sum(1 for r in ready_list if r["next_process"] == "Cutting")
+    in_cutting = sum(1 for j in jo_list.values() if j.get("process")=="Cutting" and j.get("status")=="In Progress")
+    in_stitch  = sum(1 for j in jo_list.values() if j.get("process")=="Stitching" and j.get("status") not in ["Completed","Closed","Cancelled"])
+
+    c1,c2,c3,c4,c5 = st.columns(5)
+    for col,val,lbl,cls in [
+        (c1, len(ready_list), "Ready to Process", "amber" if ready_list else ""),
+        (c2, ready_cut,       "Ready to Cut",      "amber" if ready_cut else ""),
+        (c3, open_jos,        "Open Job Orders",   ""),
+        (c4, in_cutting,      "In Cutting",        ""),
+        (c5, in_stitch,       "In Stitching",      ""),
+    ]:
+        with col:
+            st.markdown(f'<div class="metric-box {cls}"><div class="metric-value">{val}</div><div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Process pipeline view
+    st.markdown("#### 🔄 Production Pipeline")
+    proc_counts = {}
+    for j in jo_list.values():
+        if j.get("status") not in ["Completed","Closed","Cancelled"]:
+            p = j.get("process","")
+            proc_counts[p] = proc_counts.get(p,0) + 1
+
+    if proc_counts:
+        p_cols = st.columns(len(proc_counts))
+        for i, (proc, cnt) in enumerate(proc_counts.items()):
+            with p_cols[i]:
+                st.markdown(f'''<div style="background:#f8fafc;border:2px solid #0ea5e9;border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:800;color:#0ea5e9;">{cnt}</div>
+                    <div style="font-size:12px;color:#64748b;">{proc}</div>
+                </div>''', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="info-box">Koi active production nahi hai.</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Open JOs table
+    st.markdown("#### 📋 Open Job Orders")
+    if jo_list:
+        open_rows = [{"JO #":k,"Process":v.get("process",""),"SO":v.get("so_no",""),
+                       "Exec":v.get("exec_type",""),"Vendor/Dept":v.get("vendor_name","Inhouse"),
+                       "Lines":len(v.get("lines",[])),
+                       "Status":v.get("status",""),"Date":v.get("jo_date","")}
+                      for k,v in jo_list.items()
+                      if v.get("status") not in ["Completed","Closed","Cancelled"]]
+        if open_rows:
+            st.dataframe(pd.DataFrame(open_rows), use_container_width=True, hide_index=True)
+        else:
+            st.markdown('<div class="ok-box">Koi open JO nahi!</div>', unsafe_allow_html=True)
+
+
+# ── READY TO PROCESS ──────────────────────────────────────────────────────────
+elif nav_prd == "✂️ Ready to Process":
+    st.markdown('<h1>Ready to Process</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">Fabric allocated SKUs — next process ke liye ready. System routing ke basis pe batata hai konsa process next hai.</div>', unsafe_allow_html=True)
+
+    # Filters
+    rf1, rf2, rf3 = st.columns(3)
+    with rf1: f_proc = st.selectbox("Process Filter", ["All"] + PRD_PROCESSES, key="rtp_proc")
+    with rf2: f_so   = st.text_input("🔍 SO #", key="rtp_so")
+    with rf3: f_sort = st.selectbox("Sort By", ["Running Days","Process","Delivery Date"], key="rtp_sort")
+
+    ready_list = get_ready_to_process(None if f_proc=="All" else f_proc)
+
+    if f_so:
+        ready_list = [r for r in ready_list if f_so.lower() in r["so_no"].lower()]
+    if f_sort == "Running Days":
+        ready_list.sort(key=lambda x: x["running_days"])
+    elif f_sort == "Delivery Date":
+        ready_list.sort(key=lambda x: x["delivery"])
+
+    if not ready_list:
+        st.markdown('<div class="warn-box">Koi SKU ready to process nahi hai. Pehle Hard Reserve karo (Fabric Check → Hard Reserve).</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f"**{len(ready_list)} SKUs ready** for processing")
+        for r in ready_list:
+            rd = r["running_days"]
+            if rd < 7:    badge, bc = "🔴 Critical", "#fee2e2"
+            elif rd < 15: badge, bc = "🟡 Urgent",   "#fef3c7"
+            else:         badge, bc = "🟢 Normal",   "#f0fdf4"
+
+            with st.container():
+                rc1, rc2, rc3 = st.columns([4,3,1])
+                with rc1:
+                    st.markdown(f'''<div style="background:{bc};border-radius:8px;padding:10px 14px;font-size:12px;">
+                        <div style="font-weight:700;font-size:13px;">{r["sku"]} — {r["sku_name"]}</div>
+                        <div style="margin-top:4px;display:flex;gap:14px;flex-wrap:wrap;">
+                            <span>SO: <strong>{r["so_no"]}</strong></span>
+                            <span>Buyer: <strong>{r["buyer"]}</strong></span>
+                            <span>Delivery: <strong>{r["delivery"]}</strong></span>
+                            <span style="color:#ef4444;">{badge}</span>
+                        </div>
+                        <div style="margin-top:4px;display:flex;gap:14px;flex-wrap:wrap;">
+                            <span>SO Qty: <strong>{r["so_qty"]:.0f}</strong></span>
+                            <span>Fabric Alloc: <strong>{r["fab_alloc"]:.0f} mtr</strong></span>
+                            <span>Completed: <strong>{", ".join(r["completed"]) or "None"}</strong></span>
+                        </div>
+                    </div>''', unsafe_allow_html=True)
+                with rc2:
+                    st.markdown(f'''<div style="padding:10px;text-align:center;">
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">NEXT PROCESS</div>
+                        <div style="font-size:18px;font-weight:800;color:#0ea5e9;">✂️ {r["next_process"]}</div>
+                        {"<div style='color:#d97706;font-size:11px;margin-top:4px;'>JO In Progress: " + r["in_progress_jo"] + "</div>" if r["in_progress_jo"] else ""}
+                    </div>''', unsafe_allow_html=True)
+                with rc3:
+                    if not r["in_progress_jo"]:
+                        if st.button("➕ Create JO", key=f"create_jo_{r['so_no']}_{r['sku']}", use_container_width=True):
+                            st.session_state["prd_prefill"] = {
+                                "so_no": r["so_no"], "process": r["next_process"]
+                            }
+                            st.session_state["current_page"] = "➕ Create Job Order"
+                            st.rerun()
+                    else:
+                        if st.button("📋 View JO", key=f"view_jo_{r['in_progress_jo']}", use_container_width=True):
+                            st.session_state["selected_pjo"] = r["in_progress_jo"]
+                            st.session_state["current_page"] = "📋 Job Order List"
+                            st.rerun()
+                st.markdown('<hr style="margin:4px 0;">', unsafe_allow_html=True)
+
+
+# ── CREATE JOB ORDER ──────────────────────────────────────────────────────────
+elif nav_prd == "➕ Create Job Order":
+    st.markdown('<h1>Create Production Job Order</h1>', unsafe_allow_html=True)
+
+    so_list    = SS.get("so_list", {})
+    items_data = st.session_state.get("items", {})
+    boms_data  = st.session_state.get("boms", {})
+    hard_res   = SS.get("pf_hard_reservations", {})
+    suppliers  = SS.get("suppliers", {})
+    pf_checked = SS.get("pf_checked", {})
+    prefill    = st.session_state.pop("prd_prefill", {})
+
+    jc1, jc2 = st.columns(2)
+    with jc1:
+        jo_date   = st.date_input("JO Date *", value=date.today(), key="pjo_date")
+        jo_so     = st.selectbox("SO # *",
+            [""] + [k for k,v in so_list.items() if v.get("status") not in ["Closed","Cancelled","Fully Received"]],
+            index=0, key="pjo_so",
+            format_func=lambda x: f"{x} — {so_list.get(x,{}).get('buyer','')} | {so_list.get(x,{}).get('delivery_date','')}" if x else "Select SO"
+        )
+        # Pre-fill SO if coming from Ready to Process
+        if prefill.get("so_no") and not st.session_state.get("pjo_so_set"):
+            st.session_state["pjo_so"] = prefill["so_no"]
+            st.session_state["pjo_so_set"] = True
+
+    with jc2:
+        proc_default = prefill.get("process","Cutting")
+        proc_idx     = PRD_PROCESSES.index(proc_default) if proc_default in PRD_PROCESSES else 0
+        jo_process   = st.selectbox("Process *", PRD_PROCESSES, index=proc_idx, key="pjo_process")
+        jo_exec      = st.radio("Execution *", PRD_EXEC_TYPE, horizontal=True, key="pjo_exec")
+
+    if jo_exec == "Outsource":
+        vc1, vc2 = st.columns(2)
+        with vc1:
+            vendor_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
+            jo_vendor   = st.selectbox("Vendor *", vendor_opts, key="pjo_vendor")
+        with vc2:
+            jo_unit   = st.text_input("Unit / Factory", key="pjo_unit")
+    else:
+        jo_vendor = ""
+        jo_unit   = st.text_input("Department", placeholder="e.g. Cutting Floor", key="pjo_unit_ih")
+
+    jo_remarks = st.text_input("Remarks", key="pjo_remarks")
+
+    st.markdown("---")
+
+    # Auto-fetch lines based on SO + Process
+    if jo_so and jo_process:
+        ready_items = get_ready_to_process(jo_process)
+        so_ready    = [r for r in ready_items if r["so_no"] == jo_so]
+
+        if not so_ready:
+            st.markdown(f'<div class="warn-box">SO {jo_so} mein koi SKU {jo_process} ke liye ready nahi hai. Pehle fabric allocate karo aur previous processes complete karo.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f"#### 📋 Lines — {jo_so} | Process: {jo_process}")
+            st.markdown(f'<div class="info-box" style="font-size:12px;">✅ {len(so_ready)} SKU(s) {jo_process} ke liye ready hain. Qty adjust karo agar partial karna ho.</div>', unsafe_allow_html=True)
+
+            if "pjo_lines" not in st.session_state:
+                st.session_state["pjo_lines"] = []
+
+            # Build lines table
+            jo_lines_data = []
+            so_data = so_list.get(jo_so, {})
+            for r in so_ready:
+                sku = r["sku"]
+                # Get BOM material requirement
+                parent   = items_data.get(sku, {}).get("parent", sku)
+                bom      = boms_data.get(parent, boms_data.get(sku, {}))
+                mat_req  = []
+                for ln in bom.get("lines", []):
+                    mat_type = items_data.get(ln.get("item_code",""),{}).get("item_type","")
+                    if jo_process == "Cutting" and mat_type in ["Semi Finished Goods (SFG)"]:
+                        mat_req.append({
+                            "code": ln.get("item_code",""),
+                            "name": ln.get("item_name",""),
+                            "qty_per": float(ln.get("qty",0)),
+                        })
+                    elif jo_process == "Stitching" and mat_type in ["Accessories"]:
+                        mat_req.append({
+                            "code": ln.get("item_code",""),
+                            "name": ln.get("item_name",""),
+                            "qty_per": float(ln.get("qty",0)),
+                        })
+
+                jo_lines_data.append({
+                    "sku":      sku,
+                    "sku_name": r["sku_name"],
+                    "so_qty":   r["so_qty"],
+                    "mat_req":  mat_req,
+                    "fab_alloc":r["fab_alloc"],
+                })
+
+            # Editable qty table
+            line_rows = []
+            for i, ld in enumerate(jo_lines_data):
+                lc1,lc2,lc3,lc4 = st.columns([2,1,1,2])
+                with lc1:
+                    st.markdown(f'<div style="padding-top:32px;font-size:13px;font-weight:600;">{ld["sku"]} — {ld["sku_name"]}</div>', unsafe_allow_html=True)
+                with lc2:
+                    st.markdown(f'<div style="padding-top:28px;font-size:12px;color:#64748b;">SO: {ld["so_qty"]:.0f} pcs</div>', unsafe_allow_html=True)
+                with lc3:
+                    plan_qty = st.number_input("Plan Qty", min_value=0.0,
+                        max_value=float(ld["so_qty"]), value=float(ld["so_qty"]),
+                        step=1.0, key=f"pjo_qty_{i}")
+                with lc4:
+                    # Material requirement display
+                    for m in ld["mat_req"]:
+                        total_mat = round(m["qty_per"] * plan_qty, 2)
+                        st.markdown(f'<div style="padding-top:4px;font-size:11px;color:#64748b;">📦 {m["code"]}: {m["qty_per"]} × {plan_qty:.0f} = <strong>{total_mat} mtr</strong></div>', unsafe_allow_html=True)
+
+                line_rows.append({
+                    "sku":      ld["sku"],
+                    "sku_name": ld["sku_name"],
+                    "so_qty":   ld["so_qty"],
+                    "plan_qty": plan_qty,
+                    "mat_req":  ld["mat_req"],
+                    "fab_alloc":ld["fab_alloc"],
+                })
+
+            # Material Issue section
+            if jo_process == "Cutting" and any(r["mat_req"] for r in line_rows):
+                st.markdown("---")
+                st.markdown("#### 📦 Fabric Issue")
+                st.markdown('<div class="info-box" style="font-size:12px;">BOM ke basis pe fabric requirement calculate ho gayi. Checked stock se issue hoga.</div>', unsafe_allow_html=True)
+
+                issue_lines = []
+                for lr in line_rows:
+                    for m in lr["mat_req"]:
+                        fab_key   = f"{m['code']}_checked"
+                        fab_avail = max(0, float(pf_checked.get(fab_key,{}).get("qty",0)) - float(pf_checked.get(fab_key,{}).get("hard_reserved",0)))
+                        req_qty   = round(m["qty_per"] * lr["plan_qty"], 2)
+                        mi1,mi2,mi3,mi4 = st.columns([2,1,1,1])
+                        with mi1: st.markdown(f'<div style="padding-top:30px;font-size:12px;">{m["code"]} — {m["name"]}</div>', unsafe_allow_html=True)
+                        with mi2: st.markdown(f'<div style="padding-top:26px;font-size:12px;">Required: <strong>{req_qty} mtr</strong></div>', unsafe_allow_html=True)
+                        with mi3: st.markdown(f'<div style="padding-top:26px;font-size:12px;color:{"#059669" if fab_avail >= req_qty else "#ef4444"};">Available: <strong>{fab_avail} mtr</strong></div>', unsafe_allow_html=True)
+                        with mi4:
+                            issue_qty = st.number_input("Issue Qty", min_value=0.0,
+                                max_value=fab_avail, value=min(req_qty, fab_avail),
+                                step=0.5, key=f"issue_{m['code']}_{lr['sku']}")
+                        issue_lines.append({
+                            "material_code": m["code"],
+                            "material_name": m["name"],
+                            "required_qty":  req_qty,
+                            "issue_qty":     issue_qty,
+                            "sku":           lr["sku"],
+                        })
+
+            # Save JO
+            st.markdown("---")
+            if st.button("💾 Save Job Order", key="save_pjo", use_container_width=False):
+                jo_no = next_jo_no()
+                vendor_name = jo_vendor.split(" – ",1)[1] if " – " in jo_vendor else jo_vendor
+
+                # Build full lines
+                final_lines = []
+                for lr in line_rows:
+                    if float(lr["plan_qty"]) > 0:
+                        final_lines.append({
+                            "sku":       lr["sku"],
+                            "sku_name":  lr["sku_name"],
+                            "so_qty":    lr["so_qty"],
+                            "plan_qty":  lr["plan_qty"],
+                            "output_qty":0,
+                            "wastage":   0,
+                        })
+
+                if not final_lines:
+                    st.error("Koi lines nahi hain!")
+                else:
+                    # Issue fabric from checked stock
+                    issued = []
+                    if jo_process == "Cutting":
+                        for il in issue_lines if 'issue_lines' in dir() else []:
+                            if il["issue_qty"] > 0:
+                                fab_key = f"{il['material_code']}_checked"
+                                if fab_key in SS.get("pf_checked",{}):
+                                    prev_res = float(SS["pf_checked"][fab_key].get("hard_reserved",0))
+                                    SS["pf_checked"][fab_key]["hard_reserved"] = max(0, prev_res - il["issue_qty"])
+                                # Deduct from item stock
+                                if il["material_code"] in st.session_state["items"]:
+                                    cur = float(st.session_state["items"][il["material_code"]].get("stock",0))
+                                    st.session_state["items"][il["material_code"]]["stock"] = max(0, round(cur - il["issue_qty"], 3))
+                                issued.append(il)
+
+                    SS["prod_jo_list"][jo_no] = {
+                        "jo_no":       jo_no,
+                        "jo_date":     str(jo_date),
+                        "process":     jo_process,
+                        "exec_type":   jo_exec,
+                        "vendor_name": vendor_name,
+                        "unit":        jo_unit if jo_exec == "Inhouse" else jo_unit,
+                        "so_no":       jo_so,
+                        "buyer":       so_data.get("buyer",""),
+                        "delivery":    so_data.get("delivery_date",""),
+                        "lines":       final_lines,
+                        "issued_materials": issued if 'issued' in dir() else [],
+                        "status":      "Material Issued" if (issued if 'issued' in dir() else []) else "Created",
+                        "remarks":     jo_remarks,
+                        "created_at":  datetime.now().isoformat(),
+                    }
+
+                    log_activity("PJO", jo_no, "Created",
+                        f"Process: {jo_process} | SO: {jo_so} | Lines: {len(final_lines)} | Exec: {jo_exec}")
+                    save_data()
+                    st.session_state["selected_pjo"] = jo_no
+                    st.session_state.pop("pjo_so_set", None)
+                    st.success(f"✅ {jo_no} created!")
+                    st.session_state["current_page"] = "📋 Job Order List"
+                    st.rerun()
+
+
+# ── JOB ORDER LIST ────────────────────────────────────────────────────────────
+elif nav_prd == "📋 Job Order List":
+    st.markdown('<h1>Production Job Orders</h1>', unsafe_allow_html=True)
+
+    jo_list    = SS.get("prod_jo_list", {})
+    items_data = st.session_state.get("items", {})
+
+    jl1,jl2,jl3 = st.columns(3)
+    with jl1: jf_proc = st.selectbox("Process", ["All"]+PRD_PROCESSES, key="jl_proc")
+    with jl2: jf_sts  = st.selectbox("Status", ["All"]+PRD_JO_STATUS, key="jl_sts")
+    with jl3: jf_srch = st.text_input("🔍 JO # / SO #", key="jl_srch")
+
+    # Detail view
+    if st.session_state.get("selected_pjo") and st.session_state["selected_pjo"] in jo_list:
+        jo_no = st.session_state["selected_pjo"]
+        jo    = jo_list[jo_no]
+
+        bc1,bc2 = st.columns([1,5])
+        with bc1:
+            if st.button("← Back", key="pjo_back"):
+                st.session_state["selected_pjo"] = None; st.rerun()
+        with bc2:
+            st.markdown(f'<h2 style="margin:0;">{jo_no} — {jo.get("process","")} | {jo.get("so_no","")}</h2>', unsafe_allow_html=True)
+
+        # Header cards
+        hc1,hc2,hc3 = st.columns(3)
+        with hc1:
+            st.markdown(f'''<div class="card card-left">
+                <div class="sec-label">Job Details</div>
+                <div class="info-row"><span class="k">Process</span><span class="v">{jo.get("process","")}</span></div>
+                <div class="info-row"><span class="k">SO #</span><span class="v">{jo.get("so_no","")}</span></div>
+                <div class="info-row"><span class="k">Buyer</span><span class="v">{jo.get("buyer","")}</span></div>
+                <div class="info-row"><span class="k">Delivery</span><span class="v">{jo.get("delivery","")}</span></div>
+                <div class="info-row"><span class="k">Date</span><span class="v">{jo.get("jo_date","")}</span></div>
+            </div>''', unsafe_allow_html=True)
+        with hc2:
+            st.markdown(f'''<div class="card card-left-blue">
+                <div class="sec-label">Execution</div>
+                <div class="info-row"><span class="k">Type</span><span class="v">{jo.get("exec_type","")}</span></div>
+                <div class="info-row"><span class="k">Vendor / Dept</span><span class="v">{jo.get("vendor_name","") or jo.get("unit","Inhouse")}</span></div>
+                <div class="info-row"><span class="k">Status</span><span class="v">{jo.get("status","")}</span></div>
+                <div class="info-row"><span class="k">Total Lines</span><span class="v">{len(jo.get("lines",[]))}</span></div>
+            </div>''', unsafe_allow_html=True)
+        with hc3:
+            total_plan = sum(float(l.get("plan_qty",0)) for l in jo.get("lines",[]))
+            total_out  = sum(float(l.get("output_qty",0)) for l in jo.get("lines",[]))
+            total_wst  = sum(float(l.get("wastage",0)) for l in jo.get("lines",[]))
+            st.markdown(f'''<div class="card card-left-green">
+                <div class="sec-label">Production</div>
+                <div class="info-row"><span class="k">Planned</span><span class="v">{total_plan:.0f} pcs</span></div>
+                <div class="info-row"><span class="k">Output</span><span class="v">{total_out:.0f} pcs</span></div>
+                <div class="info-row"><span class="k">Wastage</span><span class="v">{total_wst:.0f} pcs</span></div>
+                <div class="info-row"><span class="k">Efficiency</span><span class="v">{round(total_out/total_plan*100,1) if total_plan else 0}%</span></div>
+            </div>''', unsafe_allow_html=True)
+
+        # Lines + Output entry
+        st.markdown("---")
+        jot1, jot2, jot3 = st.tabs(["📋 Lines", "✅ Output Entry", "📦 Materials"])
+
+        with jot1:
+            if jo.get("lines"):
+                df_lines = pd.DataFrame([{
+                    "SKU": l["sku"], "Name": l["sku_name"],
+                    "Planned": l["plan_qty"], "Output": l.get("output_qty",0),
+                    "Wastage": l.get("wastage",0),
+                    "BOM vs Actual": f"{l.get('bom_fabric',0):.1f} vs {l.get('actual_fabric',0):.1f} mtr",
+                } for l in jo["lines"]])
+                st.dataframe(df_lines, use_container_width=True, hide_index=True)
+
+        with jot2:
+            st.markdown("#### ✅ Enter Output")
+            if jo.get("status") in ["Completed","Closed"]:
+                st.markdown('<div class="ok-box">Job Order completed!</div>', unsafe_allow_html=True)
+            else:
+                for i, line in enumerate(jo.get("lines",[])):
+                    oc1,oc2,oc3,oc4 = st.columns([2,1,1,1])
+                    with oc1: st.markdown(f'<div style="padding-top:28px;font-size:13px;font-weight:600;">{line["sku"]} — {line["sku_name"]}</div>', unsafe_allow_html=True)
+                    with oc2: st.markdown(f'<div style="padding-top:26px;font-size:12px;">Planned: <strong>{line["plan_qty"]:.0f}</strong></div>', unsafe_allow_html=True)
+                    with oc3:
+                        out_qty = st.number_input("Output Qty", min_value=0.0,
+                            max_value=float(line["plan_qty"])*1.1,
+                            value=float(line.get("output_qty",0)),
+                            step=1.0, key=f"out_{jo_no}_{i}")
+                    with oc4:
+                        wastage = st.number_input("Wastage", min_value=0.0,
+                            step=0.5, value=float(line.get("wastage",0)),
+                            key=f"wst_{jo_no}_{i}")
+
+                jo_status_new = st.selectbox("Update Status", PRD_JO_STATUS,
+                    index=PRD_JO_STATUS.index(jo.get("status","Created")),
+                    key=f"pjo_sts_{jo_no}")
+
+                if st.button("💾 Save Output", key=f"save_out_{jo_no}"):
+                    for i, line in enumerate(jo["lines"]):
+                        out_q = float(st.session_state.get(f"out_{jo_no}_{i}", 0))
+                        wst_q = float(st.session_state.get(f"wst_{jo_no}_{i}", 0))
+                        SS["prod_jo_list"][jo_no]["lines"][i]["output_qty"] = out_q
+                        SS["prod_jo_list"][jo_no]["lines"][i]["wastage"]    = wst_q
+                        # If completed — add to item stock (stitched/finished goods)
+                        if jo_status_new == "Completed" and jo.get("process") != "Cutting":
+                            sku = line["sku"]
+                            if sku in st.session_state["items"]:
+                                cur = float(st.session_state["items"][sku].get("stock",0))
+                                st.session_state["items"][sku]["stock"] = round(cur + out_q, 3)
+
+                    SS["prod_jo_list"][jo_no]["status"] = jo_status_new
+                    log_activity("PJO", jo_no, "Status Changed",
+                        f"{jo.get('status','')} → {jo_status_new} | Output: {sum(float(st.session_state.get(f'out_{jo_no}_{ii}',0)) for ii in range(len(jo['lines']))):.0f} pcs")
+                    save_data()
+                    st.success(f"✅ Output saved! Status: {jo_status_new}")
+                    st.rerun()
+
+        with jot3:
+            issued = jo.get("issued_materials",[])
+            if issued:
+                st.markdown("#### 📦 Issued Materials")
+                im_rows = [{"Material":m["material_code"],"Name":m["material_name"],
+                             "Required":m["required_qty"],"Issued":m["issue_qty"],
+                             "SKU":m["sku"]} for m in issued]
+                st.dataframe(pd.DataFrame(im_rows), use_container_width=True, hide_index=True)
+            else:
+                st.markdown('<div class="info-box">Koi material issue nahi hua.</div>', unsafe_allow_html=True)
+
+        # Print JO
+        st.markdown("---")
+        show_print_button("PJO", jo_no, jo, f"print_pjo_{jo_no}")
+        st.markdown("---")
+        st.markdown("#### 📋 Activity Log")
+        show_activity_log("PJO", jo_no)
+
+    else:
+        # List view
+        for jo_no, jo in reversed(list(jo_list.items())):
+            if jf_proc != "All" and jo.get("process") != jf_proc: continue
+            if jf_sts  != "All" and jo.get("status") != jf_sts:   continue
+            if jf_srch and jf_srch.lower() not in jo_no.lower() and jf_srch.lower() not in jo.get("so_no","").lower(): continue
+
+            total_plan = sum(float(l.get("plan_qty",0)) for l in jo.get("lines",[]))
+            total_out  = sum(float(l.get("output_qty",0)) for l in jo.get("lines",[]))
+            eff        = round(total_out/total_plan*100,1) if total_plan else 0
+
+            r1,r2,r3,r4,r5,r6,r7 = st.columns([1.2,1,1.5,1,1,1,1])
+            with r1: st.markdown(f'<div style="padding-top:8px;font-weight:700;">{jo_no}</div>', unsafe_allow_html=True)
+            with r2: st.markdown(f'<div style="padding-top:8px;">{jo.get("process","")}</div>', unsafe_allow_html=True)
+            with r3: st.markdown(f'<div style="padding-top:8px;">{jo.get("so_no","")} | {jo.get("buyer","")}</div>', unsafe_allow_html=True)
+            with r4: st.markdown(f'<div style="padding-top:8px;">{jo.get("exec_type","")}</div>', unsafe_allow_html=True)
+            with r5: st.markdown(f'<div style="padding-top:8px;">{total_plan:.0f}/{total_out:.0f} pcs</div>', unsafe_allow_html=True)
+            with r6: st.markdown(f'<div style="padding-top:8px;color:{"#059669" if eff>=90 else "#d97706" if eff>=70 else "#ef4444"};">{eff}%</div>', unsafe_allow_html=True)
+            with r7:
+                if st.button("Open", key=f"open_pjo_{jo_no}", use_container_width=True):
+                    st.session_state["selected_pjo"] = jo_no; st.rerun()
+            st.markdown('<hr style="margin:3px 0;">', unsafe_allow_html=True)
+
+
+# ── PRODUCTION REPORTS ────────────────────────────────────────────────────────
+elif nav_prd == "📊 Production Reports":
+    st.markdown('<h1>Production Reports</h1>', unsafe_allow_html=True)
+
+    jo_list = SS.get("prod_jo_list", {})
+    rep_sel = st.selectbox("Report", [
+        "1. Process-wise Summary",
+        "2. SO-wise Production Status",
+        "3. SKU-wise Output",
+        "4. Vendor-wise Job Report",
+        "5. Efficiency & Wastage",
+    ], key="prd_rep")
+
+    rep_no = rep_sel.split(".")[0].strip()
+
+    if rep_no == "1":
+        proc_summary = {}
+        for jo in jo_list.values():
+            p = jo.get("process","")
+            if p not in proc_summary:
+                proc_summary[p] = {"jos":0,"planned":0,"output":0,"completed":0}
+            proc_summary[p]["jos"]      += 1
+            proc_summary[p]["planned"]  += sum(float(l.get("plan_qty",0)) for l in jo.get("lines",[]))
+            proc_summary[p]["output"]   += sum(float(l.get("output_qty",0)) for l in jo.get("lines",[]))
+            proc_summary[p]["completed"]+= 1 if jo.get("status") in ["Completed","Closed"] else 0
+        if proc_summary:
+            rows = [{"Process":k,"Job Orders":v["jos"],"Planned":v["planned"],
+                      "Output":v["output"],"Completed JOs":v["completed"],
+                      "Efficiency %":round(v["output"]/v["planned"]*100,1) if v["planned"] else 0}
+                     for k,v in proc_summary.items()]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep_no == "2":
+        so_summary = {}
+        for jo in jo_list.values():
+            sn = jo.get("so_no","")
+            if sn not in so_summary: so_summary[sn] = {"processes":{}}
+            p = jo.get("process","")
+            so_summary[sn]["processes"][p] = jo.get("status","")
+        rows = [{"SO #":sn,"Cutting":d["processes"].get("Cutting","—"),
+                  "Stitching":d["processes"].get("Stitching","—"),
+                  "Finishing":d["processes"].get("Finishing","—")}
+                 for sn,d in so_summary.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep_no == "3":
+        sku_summary = {}
+        for jo in jo_list.values():
+            for ln in jo.get("lines",[]):
+                s = ln["sku"]
+                if s not in sku_summary: sku_summary[s] = {"name":ln["sku_name"],"planned":0,"output":0,"wastage":0}
+                sku_summary[s]["planned"]  += float(ln.get("plan_qty",0))
+                sku_summary[s]["output"]   += float(ln.get("output_qty",0))
+                sku_summary[s]["wastage"]  += float(ln.get("wastage",0))
+        rows = [{"SKU":k,"Name":v["name"],"Planned":v["planned"],"Output":v["output"],
+                  "Wastage":v["wastage"],"Eff%":round(v["output"]/v["planned"]*100,1) if v["planned"] else 0}
+                 for k,v in sku_summary.items()]
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    elif rep_no == "4":
+        vend_summary = {}
+        for jo in jo_list.values():
+            if jo.get("exec_type") == "Outsource":
+                v = jo.get("vendor_name","Unknown")
+                if v not in vend_summary: vend_summary[v] = {"jos":0,"planned":0,"output":0}
+                vend_summary[v]["jos"]     += 1
+                vend_summary[v]["planned"] += sum(float(l.get("plan_qty",0)) for l in jo.get("lines",[]))
+                vend_summary[v]["output"]  += sum(float(l.get("output_qty",0)) for l in jo.get("lines",[]))
+        if vend_summary:
+            rows = [{"Vendor":k,"JOs":v["jos"],"Planned":v["planned"],"Output":v["output"]}
+                     for k,v in vend_summary.items()]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("Koi outsource JO nahi.")
+
+    elif rep_no == "5":
+        rows = []
+        for jo_no, jo in jo_list.items():
+            for ln in jo.get("lines",[]):
+                plan = float(ln.get("plan_qty",0))
+                out  = float(ln.get("output_qty",0))
+                wst  = float(ln.get("wastage",0))
+                if plan > 0:
+                    rows.append({"JO #":jo_no,"Process":jo.get("process",""),
+                                  "SKU":ln["sku"],"Planned":plan,"Output":out,
+                                  "Wastage":wst,"Eff%":round(out/plan*100,1)})
+        if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
