@@ -282,10 +282,14 @@ def load_data():
             for key, val in DEFAULT_DATA.items():
                 if key not in st.session_state:
                     st.session_state[key] = val
-    except Exception as e:
+    except Exception:
         for key, val in DEFAULT_DATA.items():
             if key not in st.session_state:
                 st.session_state[key] = val
+    # Auto-migration: add new DEFAULT_DATA keys if missing
+    for key, val in DEFAULT_DATA.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
 
 def save_data():
     """Save all data to Google Sheets, fallback to local file"""
@@ -325,8 +329,17 @@ def load_pkg_lines():
 load_data()
 load_pkg_lines()
 
-ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)", 
-              "Accessories", "Packing Materials", "Fuel & Lubricants"]
+ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)",
+              "Grey Fabric", "Accessories", "Packing Materials", "Fuel & Lubricants"]
+MATERIAL_GROUPS = [
+    "— General —",
+    "Grey Fabric", "Dyed Fabric", "Printed Fabric",
+    "Knit Fabric", "Woven Fabric", "Lining",
+    "Button", "Zipper", "Thread", "Label", "Tag", "Elastic", "Lace", "Hook & Eye",
+    "Poly Bag", "Box", "Hanger", "Tissue", "Sticker",
+    "Dye & Chemical", "Fuel", "Lubricant",
+    "Other"
+]
 SEASONS = ["SS25", "AW25", "SS26", "AW26", "Resort 2025", "Holiday 2025"]
 UNITS = ["Meter", "KG", "Gram", "Piece", "Set", "Box", "Roll", "Litre", "Dozen"]
 SIZES_ALL = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "Free Size"]
@@ -600,6 +613,18 @@ elif nav == "➕ Create Item":
             item_name = st.text_input("Item Name / Style Name *", placeholder="e.g. Floral Printed Kurta Set")
             item_type = st.selectbox("Item Category *", ITEM_TYPES)
             st.session_state["_tmp_item_type"] = item_type
+
+            # Grey Fabric hint
+            if item_type == "Grey Fabric":
+                st.markdown('<div class="ok-box" style="font-size:12px;">✅ Grey Fabric selected — Transit tracking, QC, Location-wise stock, Return/Rework flow automatically available hoga.</div>', unsafe_allow_html=True)
+
+            # Material Group — sub-category (especially for RM)
+            if item_type in ["Raw Material (RM)", "Accessories", "Packing Materials", "Semi Finished Goods (SFG)"]:
+                material_group = st.selectbox("Material Group / Sub-Category",
+                    [g for g in MATERIAL_GROUPS if item_type == "Raw Material (RM)" or g == "— General —" or True],
+                    key="create_mat_group")
+            else:
+                material_group = "— General —"
             
             # Parent item
             parent_items = {k: v["name"] for k, v in st.session_state["items"].items() if v.get("item_type") == item_type}
@@ -824,7 +849,25 @@ elif nav == "📋 Item Master List":
     if not st.session_state["items"]:
         st.markdown('<div class="warn-box">No items created yet. Go to "Create Item" to add items.</div>', unsafe_allow_html=True)
     else:
-        # ── If edit mode ──────────────────────────────────────────────────────
+        # ── Grey Fabric Quick Convert ──────────────────────────────────────────
+        rm_items = {k:v for k,v in st.session_state["items"].items()
+                    if v.get("item_type") == "Raw Material (RM)" and not v.get("parent")}
+        if rm_items:
+            with st.expander("🧵 Grey Fabric mein convert karo (Raw Material items)"):
+                st.markdown('<div class="info-box">Jo Raw Material items Grey Fabric hain unhe select karo aur type change karo — Grey Fabric module mein track hone lagenge.</div>', unsafe_allow_html=True)
+                selected_to_convert = []
+                for code, item in rm_items.items():
+                    if st.checkbox(f"{code} — {item.get('name','')}", key=f"conv_{code}"):
+                        selected_to_convert.append(code)
+                if selected_to_convert:
+                    if st.button(f"✅ {len(selected_to_convert)} items ko Grey Fabric type mein convert karo"):
+                        for code in selected_to_convert:
+                            st.session_state["items"][code]["item_type"] = "Grey Fabric"
+                        save_data()
+                        st.success(f"✅ {len(selected_to_convert)} items converted to Grey Fabric!")
+                        st.rerun()
+
+
         if st.session_state["edit_item_code"] and st.session_state["edit_item_code"] in st.session_state["items"]:
             ec   = st.session_state["edit_item_code"]
             item = st.session_state["items"][ec]
@@ -5125,8 +5168,10 @@ elif nav_pur == "📦 Purchase Orders":
                             }
                             if sel_pr: SS["pr_list"][sel_pr]["status"] = "PO Created"
                             # Grey Fabric tracking
+                            if "grey_po_tracker" not in SS: SS["grey_po_tracker"] = {}
                             for gl in st.session_state["po_lines"]:
-                                if gl.get("material_type","") == "Grey Fabric":
+                                item_type_check = st.session_state.get("items",{}).get(gl["material_code"],{}).get("item_type","")
+                                if gl.get("material_type","") == "Grey Fabric" or item_type_check == "Grey Fabric":
                                     SS["grey_po_tracker"][po_no + "_" + gl["material_code"]] = {
                                         "po_no": po_no, "material_code": gl["material_code"],
                                         "material_name": gl["material_name"],
@@ -5882,7 +5927,7 @@ if nav_inv == "📦 Inventory":
 
     # Filters
     if1,if2,if3 = st.columns(3)
-    with if1: if_type   = st.selectbox("Item Type", ["All","Finished Goods (FG)","Semi Finished Goods (SFG)","Raw Material (RM)","Accessories","Packing Materials"], key="inv_type")
+    with if1: if_type   = st.selectbox("Item Type", ["All","Finished Goods (FG)","Semi Finished Goods (SFG)","Raw Material (RM)","Grey Fabric","Accessories","Packing Materials"], key="inv_type")
     with if2: if_stock  = st.selectbox("Stock Filter", ["All","Zero Stock","Low Stock (<10)","In Stock"], key="inv_stk")
     with if3: if_search = st.text_input("🔍 Search", key="inv_srch")
 
