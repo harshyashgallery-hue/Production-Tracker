@@ -8987,23 +8987,9 @@ elif nav_prd == "➕ Create Job Order":
             # Show process rate (editable)
             st.markdown(f'<div class="ok-box" style="font-size:12px;">✅ {len(so_ready)} SKU(s) {jo_process} ke liye ready hain.</div>', unsafe_allow_html=True)
 
-            # Process Rate — prominently displayed
-            st.markdown(f'''<div style="background:#fef3c7;border:2px solid #d97706;border-radius:10px;padding:12px 16px;margin:8px 0;">
-                <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:8px;">
-                    💰 {jo_process} Process Rate (BOM se auto-filled)
-                    {"— Vendor: " + bom_proc_vendor if bom_proc_vendor else ""}
-                </div>
-            </div>''', unsafe_allow_html=True)
-            pr1, pr2 = st.columns(2)
-            with pr1:
-                jo_proc_rate = st.number_input(
-                    f"Rate (₹/{bom_proc_unit}) *",
-                    min_value=0.0, value=float(bom_proc_rate),
-                    step=1.0, key="pjo_proc_rate",
-                    help="BOM se auto-fill — edit kar sakte ho"
-                )
-            with pr2:
-                jo_proc_unit = st.text_input("Rate Unit", value=bom_proc_unit, key="pjo_proc_unit")
+            # No global rate - per SKU rate will be set in lines below
+            jo_proc_rate = bom_proc_rate  # default, overridden per SKU
+            jo_proc_unit = bom_proc_unit
 
             if "pjo_lines" not in st.session_state:
                 st.session_state["pjo_lines"] = []
@@ -9040,42 +9026,50 @@ elif nav_prd == "➕ Create Job Order":
                     "fab_alloc":r["fab_alloc"],
                 })
 
-            # Editable qty table
+            # Lines table — per SKU: Plan Qty + Process Rate
+            st.markdown(f'''<div style="display:grid;grid-template-columns:2.5fr 1fr 1fr 1fr 1fr;gap:8px;padding:6px 10px;background:#f1f5f9;border-radius:6px;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">
+                <div>SKU / Style</div><div>SO Qty</div><div>Plan Qty</div>
+                <div>Rate (₹/{bom_proc_unit})</div><div>Amount</div>
+            </div>''', unsafe_allow_html=True)
+
             line_rows = []
             total_proc_amount = 0
             for i, ld in enumerate(jo_lines_data):
-                lc1,lc2,lc3,lc4 = st.columns([2.5,1,1,2])
+                lc1,lc2,lc3,lc4,lc5 = st.columns([2.5,1,1,1,1])
                 with lc1:
-                    st.markdown(f'<div style="padding-top:32px;font-size:13px;font-weight:600;">{ld["sku"]} — {ld["sku_name"]}</div>', unsafe_allow_html=True)
+                    fab_info = " | ".join([f"{m['code']}: {m['qty_per']}×" for m in ld["mat_req"]])
+                    st.markdown(f'''<div style="padding-top:8px;font-size:13px;font-weight:600;">{ld["sku"]}</div>
+                        <div style="font-size:11px;color:#64748b;">{ld["sku_name"]}</div>
+                        <div style="font-size:11px;color:#94a3b8;">📦 {fab_info} pcs</div>''',
+                        unsafe_allow_html=True)
                 with lc2:
-                    st.markdown(f'<div style="padding-top:28px;font-size:12px;color:#64748b;">SO: {ld["so_qty"]:.0f} pcs</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="padding-top:24px;font-size:13px;font-weight:600;">{ld["so_qty"]:.0f}</div>', unsafe_allow_html=True)
                 with lc3:
-                    plan_qty = st.number_input("Plan Qty", min_value=0.0,
+                    plan_qty = st.number_input("Qty", min_value=0.0,
                         max_value=float(ld["so_qty"]), value=float(ld["so_qty"]),
-                        step=1.0, key=f"pjo_qty_{i}")
+                        step=1.0, key=f"pjo_qty_{i}", label_visibility="collapsed")
                 with lc4:
-                    # Process cost for this line
-                    proc_rate_now = float(st.session_state.get("pjo_proc_rate", bom_proc_rate))
-                    line_proc_amt = round(plan_qty * proc_rate_now, 2)
-                    total_proc_amount += line_proc_amt
-                    st.markdown(f'<div style="padding-top:6px;font-size:11px;color:#64748b;">', unsafe_allow_html=True)
-                    for m in ld["mat_req"]:
-                        total_mat = round(m["qty_per"] * plan_qty, 2)
-                        st.markdown(f'<div style="font-size:11px;color:#64748b;">📦 {m["code"]}: {m["qty_per"]} × {plan_qty:.0f} = <strong>{total_mat} mtr</strong></div>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="font-size:12px;color:#059669;margin-top:2px;">💰 Process: {plan_qty:.0f} × ₹{proc_rate_now:.0f} = <strong>₹{line_proc_amt:,.2f}</strong></div>', unsafe_allow_html=True)
+                    sku_rate = st.number_input("Rate", min_value=0.0,
+                        value=float(bom_proc_rate), step=1.0,
+                        key=f"pjo_rate_{i}", label_visibility="collapsed")
+                with lc5:
+                    line_amt = round(float(plan_qty) * float(sku_rate), 2)
+                    total_proc_amount += line_amt
+                    st.markdown(f'<div style="padding-top:24px;font-size:13px;font-weight:600;color:#059669;">₹{line_amt:,.0f}</div>', unsafe_allow_html=True)
 
                 line_rows.append({
-                    "sku":        ld["sku"],
-                    "sku_name":   ld["sku_name"],
-                    "so_qty":     ld["so_qty"],
-                    "plan_qty":   plan_qty,
-                    "proc_rate":  float(st.session_state.get("pjo_proc_rate", bom_proc_rate)),
-                    "proc_amt":   line_proc_amt,
-                    "mat_req":    ld["mat_req"],
-                    "fab_alloc":  ld["fab_alloc"],
+                    "sku":       ld["sku"],
+                    "sku_name":  ld["sku_name"],
+                    "so_qty":    ld["so_qty"],
+                    "plan_qty":  float(plan_qty),
+                    "proc_rate": float(sku_rate),
+                    "proc_amt":  line_amt,
+                    "mat_req":   ld["mat_req"],
+                    "fab_alloc": ld["fab_alloc"],
                 })
+                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
 
-            st.markdown(f'<div class="ok-box" style="font-size:13px;">💰 Total Process Amount: <strong>₹{total_proc_amount:,.2f}</strong></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="text-align:right;font-size:14px;font-weight:700;color:#059669;padding:6px 10px;">💰 Total {jo_process} Amount: ₹{total_proc_amount:,.2f}</div>', unsafe_allow_html=True)
 
             # Material Issue section
             if jo_process == "Cutting" and any(r["mat_req"] for r in line_rows):
@@ -9114,44 +9108,39 @@ elif nav_prd == "➕ Create Job Order":
                         mat_rate  = float(items_data.get(m["code"],{}).get("price", 0))
 
                         mat_sku_key = f"{m['code']}_{lr['sku']}"
-                        mi1,mi2,mi3,mi4,mi5 = st.columns([2.5,1,1,1,1])
-                        with mi1:
-                            st.markdown(f'''<div style="padding-top:8px;font-size:12px;">
-                                <strong>{m["code"]} — {m["name"]}</strong><br>
-                                <span style="color:#64748b;font-size:11px;">For SKU: {lr["sku"]} | SO: {jo_so}</span>
-                            </div>''', unsafe_allow_html=True)
-                        with mi2:
-                            st.markdown(f'<div style="padding-top:24px;font-size:12px;">Required:<br><strong>{req_qty} mtr</strong></div>', unsafe_allow_html=True)
-                        with mi3:
+                        fi1,fi2,fi3,fi4 = st.columns([3,1,1,1])
+                        with fi1:
                             color = "#059669" if fab_avail >= req_qty else "#ef4444"
-                            st.markdown(f'<div style="padding-top:24px;font-size:12px;color:{color};">Available:<br><strong>{fab_avail} mtr</strong></div>', unsafe_allow_html=True)
-                        with mi4:
-                            issue_qty = st.number_input("Issue Qty (mtr)",
+                            st.markdown(f'''<div style="padding:6px 0;font-size:12px;">
+                                <strong>{m["code"]} — {m["name"]}</strong>
+                                <span style="color:#64748b;font-size:11px;"> | SKU: {lr["sku"]}</span><br>
+                                Required: <strong>{req_qty} mtr</strong> &nbsp;|&nbsp;
+                                <span style="color:{color};">Available: <strong>{fab_avail:.1f} mtr</strong></span>
+                            </div>''', unsafe_allow_html=True)
+                        with fi2:
+                            st.markdown(f'<div style="padding-top:4px;font-size:11px;color:#64748b;">Issue Qty (mtr)</div>', unsafe_allow_html=True)
+                        with fi3:
+                            issue_qty = st.number_input("qty",
                                 min_value=0.0,
                                 max_value=float(issue_max),
                                 value=float(min(req_qty, fab_avail)),
                                 step=0.5,
-                                key=f"issue_{m['code']}_{lr['sku']}")
-                        with mi5:
-                            issue_rate = st.number_input("Rate (₹/mtr)",
-                                min_value=0.0,
-                                value=float(mat_rate),
-                                step=1.0,
-                                key=f"issue_rate_{m['code']}_{lr['sku']}")
+                                key=f"issue_{m['code']}_{lr['sku']}",
+                                label_visibility="collapsed")
+                        with fi4:
+                            st.markdown(f'<div style="padding-top:10px;font-size:12px;color:{"#059669" if float(issue_qty if issue_qty else min(req_qty,fab_avail)) >= req_qty else "#d97706"};">{"✅ Full" if float(issue_qty if issue_qty else min(req_qty,fab_avail)) >= req_qty else "⚠️ Partial"}</div>', unsafe_allow_html=True)
 
                         issue_lines.append({
                             "material_code": m["code"],
                             "material_name": m["name"],
                             "required_qty":  req_qty,
-                            "issue_qty":     float(issue_qty),
-                            "rate":          float(issue_rate),
-                            "amount":        round(float(issue_qty) * float(issue_rate), 2),
+                            "issue_qty":     float(st.session_state.get(f"issue_{m['code']}_{lr['sku']}", min(req_qty, fab_avail))),
                             "sku":           lr["sku"],
                         })
 
                 if issue_lines:
-                    total_issue_val = sum(il["amount"] for il in issue_lines)
-                    st.markdown(f'<div class="ok-box" style="font-size:12px;">Total Fabric Value: <strong>₹{total_issue_val:,.2f}</strong></div>', unsafe_allow_html=True)
+                    total_issue_qty = sum(il.get("issue_qty",0) for il in issue_lines)
+                    st.markdown(f'<div class="info-box" style="font-size:12px;">Total Fabric to Issue: <strong>{total_issue_qty:.1f} mtr</strong></div>', unsafe_allow_html=True)
 
             # Save JO
             st.markdown("---")
@@ -9168,6 +9157,9 @@ elif nav_prd == "➕ Create Job Order":
                             "sku_name":  lr["sku_name"],
                             "so_qty":    lr["so_qty"],
                             "plan_qty":  lr["plan_qty"],
+                            "proc_rate": float(lr.get("proc_rate",0)),
+                            "proc_amt":  float(lr.get("proc_amt",0)),
+                            "proc_unit": st.session_state.get("pjo_proc_unit","per piece"),
                             "output_qty":0,
                             "wastage":   0,
                         })
@@ -9197,7 +9189,7 @@ elif nav_prd == "➕ Create Job Order":
                         "process":          jo_process,
                         "proc_rate":        float(st.session_state.get("pjo_proc_rate", 0)),
                         "proc_unit":        st.session_state.get("pjo_proc_unit","per piece"),
-                        "total_proc_amount":sum(lr.get("proc_amt",0) for lr in line_rows),
+                        "total_proc_amount":sum(float(lr.get("proc_amt",0)) for lr in line_rows),
                         "exec_type":        jo_exec,
                         "vendor_name":      vendor_name,
                         "unit":             jo_unit if jo_exec == "Inhouse" else jo_unit,
@@ -9468,3 +9460,4 @@ elif nav_prd == "📊 Production Reports":
                                   "SKU":ln["sku"],"Planned":plan,"Output":out,
                                   "Wastage":wst,"Eff%":round(out/plan*100,1)})
         if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    
