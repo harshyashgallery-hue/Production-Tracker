@@ -8342,119 +8342,235 @@ elif nav_pfc == "✅ Fabric Check":
 elif nav_pfc == "🔒 Hard Reserve":
     st.markdown('<h1>Hard Reservation — Checked Fabric</h1>', unsafe_allow_html=True)
     st.markdown('''<div class="info-box">
-        <strong>Hard Reserve</strong> — Checked fabric ko specific SO/SKU ke against physically reserve karo.<br>
-        ✅ Check pass hone ke BAAD hi hard reserve possible hai.<br>
-        🔵 Soft Reserve: Planning ke liye (MRP se auto) &nbsp;|&nbsp; 🔴 Hard Reserve: Production ke liye confirm
+        <strong>Checked fabric</strong> ko SO/SKU ke against reserve karo.<br>
+        System automatically <strong>running days, sale status, SO urgency</strong> ke basis pe SKU-wise priority dikhata hai —
+        aap decide karo konse SKU ko pehle allocate karo.
     </div>''', unsafe_allow_html=True)
 
     pf_checked   = SS.get("pf_checked", {})
     so_list      = SS.get("so_list", {})
     hard_res     = SS.get("pf_hard_reservations", {})
     items_data   = st.session_state.get("items", {})
+    boms_data    = st.session_state.get("boms", {})
+    mrp_result   = SS.get("mrp_result", {})
 
-    hr_tab1, hr_tab2 = st.tabs(["🔒 Create Reservation", "📋 Reservations List"])
+    hr_tab1, hr_tab2 = st.tabs(["🎯 Smart Allocation", "📋 Reservations List"])
 
     with hr_tab1:
         if not pf_checked:
-            st.markdown('<div class="warn-box">Koi checked fabric nahi hai. Pehle fabric check karo.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="warn-box">Koi checked fabric nahi hai.</div>', unsafe_allow_html=True)
         else:
-            hc1, hc2, hc3 = st.columns(3)
-            with hc1:
-                # Show checked fabrics with available qty
-                chk_opts = {k: v for k, v in pf_checked.items()
-                             if float(v.get("qty",0)) - float(v.get("hard_reserved",0)) > 0}
-                sel_fabric = st.selectbox("Fabric *", [""] + list(chk_opts.keys()),
-                                           format_func=lambda x: f"{chk_opts[x]['fabric_code']} – {chk_opts[x]['fabric_name']} | Available: {float(chk_opts[x].get('qty',0))-float(chk_opts[x].get('hard_reserved',0)):.0f} mtr" if x else "Select",
-                                           key="hr_fabric")
-                if sel_fabric:
-                    av = float(pf_checked[sel_fabric].get("qty",0)) - float(pf_checked[sel_fabric].get("hard_reserved",0))
-                    st.markdown(f'<div class="ok-box" style="font-size:12px;">Available: <strong>{av:.0f} mtr</strong></div>', unsafe_allow_html=True)
-            with hc2:
-                open_sos = {k:v for k,v in so_list.items() if v.get("status") not in ["Closed","Cancelled","Fully Received"]}
-                sel_so_hr = st.selectbox("SO *", [""] + list(open_sos.keys()),
-                                          format_func=lambda x: f"{x} – {open_sos.get(x,{}).get('buyer','')} | {open_sos.get(x,{}).get('delivery_date','')}" if x else "Select",
-                                          key="hr_so")
-                sel_sku_hr = ""
-                if sel_so_hr:
-                    so_lines = open_sos[sel_so_hr].get("lines",[])
-                    sku_opts = [""] + [f"{l.get('sku','')} – {l.get('sku_name','')}" for l in so_lines]
-                    sel_sku_hr = st.selectbox("SKU (optional)", sku_opts, key="hr_sku")
-            with hc3:
-                av_max = float(pf_checked.get(sel_fabric,{}).get("qty",0)) - float(pf_checked.get(sel_fabric,{}).get("hard_reserved",0)) if sel_fabric else 0
-                hr_qty = st.number_input("Reserve Qty (mtr) *", min_value=0.0,
-                                          max_value=av_max, value=av_max,
-                                          step=0.5, key="hr_qty")
-                hr_remarks = st.text_area("Remarks", height=60, key="hr_remarks")
+            # Step 1: Select fabric
+            chk_opts = {k:v for k,v in pf_checked.items()
+                        if float(v.get("qty",0)) - float(v.get("hard_reserved",0)) > 0}
 
-            if st.button("🔒 Hard Reserve", use_container_width=False) and sel_fabric and sel_so_hr and hr_qty > 0:
-                hr_no = f"HR-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                if "pf_hard_reservations" not in SS: SS["pf_hard_reservations"] = {}
-                SS["pf_hard_reservations"][hr_no] = {
-                    "hr_no":       hr_no,
-                    "date":        str(date.today()),
-                    "fabric_key":  sel_fabric,
-                    "fabric_code": pf_checked[sel_fabric].get("fabric_code",""),
-                    "fabric_name": pf_checked[sel_fabric].get("fabric_name",""),
-                    "so_no":       sel_so_hr,
-                    "sku":         sel_sku_hr.split(" – ")[0] if " – " in sel_sku_hr else sel_sku_hr,
-                    "qty":         hr_qty,
-                    "status":      "Active",
-                    "remarks":     hr_remarks,
-                }
-                # Update hard reserved qty in pf_checked
-                prev_hr = float(SS["pf_checked"][sel_fabric].get("hard_reserved",0))
-                SS["pf_checked"][sel_fabric]["hard_reserved"] = round(prev_hr + hr_qty, 3)
-                # Also update items reserved field
-                fab_code = pf_checked[sel_fabric].get("fabric_code","")
-                if fab_code in st.session_state["items"]:
-                    prev_res = float(st.session_state["items"][fab_code].get("reserved",0))
-                    st.session_state["items"][fab_code]["reserved"] = round(prev_res + hr_qty, 3)
-                save_data()
-                st.success(f"✅ {hr_qty} mtr hard reserved for {sel_so_hr}!")
-                st.rerun()
+            sel_fabric = st.selectbox("Fabric select karo *", [""] + list(chk_opts.keys()),
+                format_func=lambda x: f"{chk_opts[x]['fabric_code']} – {chk_opts[x]['fabric_name']} | Available: {float(chk_opts[x].get('qty',0))-float(chk_opts[x].get('hard_reserved',0)):.0f} mtr" if x else "Select fabric",
+                key="hr_fabric")
+
+            if sel_fabric:
+                fab_data    = pf_checked[sel_fabric]
+                fab_code    = fab_data.get("fabric_code","")
+                fab_name    = fab_data.get("fabric_name","")
+                total_avail = float(fab_data.get("qty",0)) - float(fab_data.get("hard_reserved",0))
+
+                st.markdown(f'''<div class="card card-left" style="padding:12px 16px;margin-bottom:12px;">
+                    <div style="font-size:15px;font-weight:700;">{fab_code} — {fab_name}</div>
+                    <div style="display:flex;gap:24px;margin-top:6px;font-size:13px;">
+                        <div>✅ Checked: <strong>{float(fab_data.get("qty",0)):.0f} mtr</strong></div>
+                        <div>🔒 Reserved: <strong>{float(fab_data.get("hard_reserved",0)):.0f} mtr</strong></div>
+                        <div style="color:#059669;">📦 Available: <strong>{total_avail:.0f} mtr</strong></div>
+                    </div>
+                </div>''', unsafe_allow_html=True)
+
+                # Find all SKUs that need this fabric (via BOM)
+                linked_fgs = []
+                for fg_code, bom in boms_data.items():
+                    for ln in bom.get("lines",[]):
+                        if ln.get("item_code","") == fab_code:
+                            linked_fgs.append(fg_code)
+
+                # Find open SO lines for linked FGs
+                sku_demands = {}
+                for so_no, so in so_list.items():
+                    if so.get("status") in ["Closed","Cancelled","Fully Received"]:
+                        continue
+                    for line in so.get("lines",[]):
+                        sku    = line.get("sku","")
+                        parent = items_data.get(sku,{}).get("parent", sku)
+                        if parent in linked_fgs or sku in linked_fgs:
+                            # Get BOM qty needed for this fabric
+                            bom_lines = boms_data.get(parent, boms_data.get(sku,{})).get("lines",[])
+                            fab_per_piece = next((float(l.get("qty",0)) for l in bom_lines if l.get("item_code")==fab_code), 0)
+                            so_qty      = float(line.get("qty",0))
+                            fabric_req  = round(fab_per_piece * so_qty, 2)
+
+                            # Check existing hard reservation for this SKU
+                            already_res = sum(
+                                float(r.get("qty",0)) for r in hard_res.values()
+                                if r.get("fabric_code","") == fab_code
+                                and r.get("sku","") == sku
+                                and r.get("status","") == "Active"
+                            )
+                            pending_res = max(0, fabric_req - already_res)
+
+                            key = f"{sku}_{so_no}"
+                            sku_demands[key] = {
+                                "sku":         sku,
+                                "sku_name":    line.get("sku_name", items_data.get(sku,{}).get("name","")),
+                                "parent":      parent,
+                                "so_no":       so_no,
+                                "buyer":       so.get("buyer",""),
+                                "delivery":    so.get("delivery_date",""),
+                                "so_qty":      so_qty,
+                                "fabric_req":  fabric_req,
+                                "already_res": already_res,
+                                "pending_res": pending_res,
+                                "running_days":running_days(sku),
+                                "avg_sale":    avg_daily_sale(sku),
+                            }
+
+                if not sku_demands:
+                    st.markdown('<div class="warn-box">Is fabric se linked koi open SO nahi hai.</div>', unsafe_allow_html=True)
+                else:
+                    # Sort by priority: running days (asc), then delivery date
+                    sorted_demands = sorted(sku_demands.values(),
+                        key=lambda x: (x["running_days"] if x["running_days"] < 999 else 999, x["delivery"]))
+
+                    remaining = total_avail
+                    st.markdown("#### 🎯 SKU-wise Allocation — Priority Order")
+                    st.markdown(f'<div class="info-box" style="font-size:12px;">Total Available: <strong>{total_avail:.0f} mtr</strong> | Sorted by running days (low = urgent). Har SKU ke liye kitna allocate karna hai decide karo.</div>', unsafe_allow_html=True)
+
+                    alloc_configs = []
+                    for idx, d in enumerate(sorted_demands):
+                        if d["pending_res"] <= 0:
+                            continue
+
+                        # Priority badge
+                        rd = d["running_days"]
+                        if rd < 7:    pri, pri_color = "🔴 Critical", "#ef4444"
+                        elif rd < 15: pri, pri_color = "🟡 Urgent",   "#d97706"
+                        else:         pri, pri_color = "🟢 Normal",   "#059669"
+
+                        can_give = min(d["pending_res"], remaining)
+
+                        with st.container():
+                            st.markdown(f'''<div style="background:#f8fafc;border:1px solid #e2e5ef;border-radius:10px;padding:12px 16px;margin:6px 0;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                                    <div>
+                                        <span style="font-weight:700;font-size:14px;">{d["sku"]}</span>
+                                        <span style="color:#64748b;font-size:13px;"> — {d["sku_name"]}</span>
+                                        <span style="background:#1e293b;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;margin-left:6px;">{d["buyer"]}</span>
+                                    </div>
+                                    <div style="font-size:12px;color:{pri_color};font-weight:700;">{pri}</div>
+                                </div>
+                                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px;font-size:12px;">
+                                    <div><span style="color:#94a3b8;">SO#</span><br><strong>{d["so_no"]}</strong></div>
+                                    <div><span style="color:#94a3b8;">SO Qty</span><br><strong>{d["so_qty"]:.0f} pcs</strong></div>
+                                    <div><span style="color:#94a3b8;">Fabric Needed</span><br><strong>{d["fabric_req"]:.1f} mtr</strong></div>
+                                    <div><span style="color:#94a3b8;">Already Reserved</span><br><strong style="color:#059669;">{d["already_res"]:.1f} mtr</strong></div>
+                                    <div><span style="color:#94a3b8;">Still Pending</span><br><strong style="color:#ef4444;">{d["pending_res"]:.1f} mtr</strong></div>
+                                </div>
+                                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px;font-size:12px;">
+                                    <div><span style="color:#94a3b8;">Delivery</span><br><strong>{d["delivery"]}</strong></div>
+                                    <div><span style="color:#94a3b8;">Running Days</span><br><strong style="color:{pri_color};">{rd if rd < 999 else "—"}</strong></div>
+                                    <div><span style="color:#94a3b8;">Avg Daily Sale</span><br><strong>{d["avg_sale"]:.1f} pcs/day</strong></div>
+                                </div>
+                            </div>''', unsafe_allow_html=True)
+
+                            ac1, ac2 = st.columns([3,1])
+                            with ac1:
+                                alloc_qty = st.number_input(
+                                    f"Allocate to {d['sku']} (max {can_give:.1f} mtr)",
+                                    min_value=0.0,
+                                    max_value=float(can_give),
+                                    value=float(can_give) if remaining > 0 else 0.0,
+                                    step=0.5,
+                                    key=f"alloc_{sel_fabric}_{idx}"
+                                )
+                            with ac2:
+                                st.markdown(f'<div style="padding-top:28px;font-size:12px;color:#64748b;">Remaining after: <strong>{max(0,remaining-alloc_qty):.0f} mtr</strong></div>', unsafe_allow_html=True)
+
+                            remaining = max(0, remaining - alloc_qty)
+                            alloc_configs.append({
+                                **d,
+                                "alloc_qty": alloc_qty,
+                            })
+
+                    # Summary + Confirm
+                    to_reserve = [a for a in alloc_configs if a["alloc_qty"] > 0]
+                    if to_reserve:
+                        st.markdown("---")
+                        st.markdown("#### ✅ Reservation Summary")
+                        total_allocating = sum(a["alloc_qty"] for a in to_reserve)
+                        st.markdown(f'<div class="info-box">Total Allocating: <strong>{total_allocating:.0f} mtr</strong> | Remaining Unallocated: <strong>{total_avail - total_allocating:.0f} mtr</strong></div>', unsafe_allow_html=True)
+                        for a in to_reserve:
+                            st.markdown(f'<div style="padding:4px 0;font-size:13px;">→ <strong>{a["sku"]}</strong> ({a["so_no"]}) — <strong style="color:#059669;">{a["alloc_qty"]:.1f} mtr</strong></div>', unsafe_allow_html=True)
+
+                        if st.button("🔒 Confirm Hard Reservations", use_container_width=False):
+                            if "pf_hard_reservations" not in SS: SS["pf_hard_reservations"] = {}
+                            for a in to_reserve:
+                                if a["alloc_qty"] <= 0:
+                                    continue
+                                hr_no = f"HR-{datetime.now().strftime('%Y%m%d%H%M%S')}-{a['sku']}"
+                                SS["pf_hard_reservations"][hr_no] = {
+                                    "hr_no":       hr_no,
+                                    "date":        str(date.today()),
+                                    "fabric_key":  sel_fabric,
+                                    "fabric_code": fab_code,
+                                    "fabric_name": fab_name,
+                                    "so_no":       a["so_no"],
+                                    "sku":         a["sku"],
+                                    "qty":         a["alloc_qty"],
+                                    "status":      "Active",
+                                    "remarks":     f"Smart allocation — Running days: {a['running_days']}",
+                                }
+                            # Update hard reserved total
+                            prev_hr = float(SS["pf_checked"][sel_fabric].get("hard_reserved",0))
+                            SS["pf_checked"][sel_fabric]["hard_reserved"] = round(prev_hr + total_allocating, 3)
+                            # Update item reserved field
+                            if fab_code in st.session_state["items"]:
+                                prev_res = float(st.session_state["items"][fab_code].get("reserved",0))
+                                st.session_state["items"][fab_code]["reserved"] = round(prev_res + total_allocating, 3)
+                            save_data()
+                            st.success(f"✅ {len(to_reserve)} reservations created! Total: {total_allocating:.0f} mtr allocated.")
+                            st.rerun()
 
     with hr_tab2:
         if not hard_res:
             st.markdown('<div class="warn-box">Koi hard reservation nahi hai.</div>', unsafe_allow_html=True)
         else:
-            hr_rows = []
+            # Group by fabric
+            fab_groups = {}
             for hr_no, hr in hard_res.items():
-                hr_rows.append({
-                    "HR #":         hr_no,
-                    "Date":         hr.get("date",""),
-                    "Fabric":       hr.get("fabric_code",""),
-                    "Fabric Name":  hr.get("fabric_name",""),
-                    "SO #":         hr.get("so_no",""),
-                    "SKU":          hr.get("sku","—"),
-                    "Reserved Qty": hr.get("qty",0),
-                    "Status":       hr.get("status",""),
-                })
-            st.dataframe(pd.DataFrame(hr_rows), use_container_width=True, hide_index=True)
+                fc = hr.get("fabric_code","")
+                if fc not in fab_groups: fab_groups[fc] = []
+                fab_groups[fc].append(hr)
 
-            # Release reservation
-            st.markdown("---")
-            st.markdown("#### 🔓 Release Reservation")
-            rel_hr = st.selectbox("Release karo", [""] + list(hard_res.keys()),
-                                   format_func=lambda x: f"{x} – {hard_res[x].get('fabric_code','')} | SO:{hard_res[x].get('so_no','')} | {hard_res[x].get('qty',0)} mtr" if x else "Select",
-                                   key="rel_hr_sel")
-            if rel_hr and st.button("🔓 Release", key="rel_hr_btn"):
-                hr = hard_res[rel_hr]
-                fab_key  = hr.get("fabric_key","")
-                rel_qty  = float(hr.get("qty",0))
-                fab_code = hr.get("fabric_code","")
-                if fab_key in SS.get("pf_checked",{}):
-                    SS["pf_checked"][fab_key]["hard_reserved"] = max(0, float(SS["pf_checked"][fab_key].get("hard_reserved",0)) - rel_qty)
-                if fab_code in st.session_state["items"]:
-                    prev = float(st.session_state["items"][fab_code].get("reserved",0))
-                    st.session_state["items"][fab_code]["reserved"] = max(0, prev - rel_qty)
-                SS["pf_hard_reservations"][rel_hr]["status"] = "Released"
-                save_data()
-                st.success(f"✅ {rel_hr} released!")
-                st.rerun()
+            for fab_code, hrs in fab_groups.items():
+                total_res = sum(float(h.get("qty",0)) for h in hrs if h.get("status")=="Active")
+                with st.expander(f"🔒 {fab_code} — Total Reserved: {total_res:.0f} mtr"):
+                    hr_rows = [{"HR #":h["hr_no"],"Date":h.get("date",""),
+                                 "SO":h.get("so_no",""),"SKU":h.get("sku","—"),
+                                 "Reserved (mtr)":h.get("qty",0),"Status":h.get("status","")}
+                                for h in hrs]
+                    st.dataframe(pd.DataFrame(hr_rows), use_container_width=True, hide_index=True)
 
+                    # Release per HR
+                    rel_hr_opts = [h["hr_no"] for h in hrs if h.get("status")=="Active"]
+                    if rel_hr_opts:
+                        rel_sel = st.selectbox("Release karo", [""] + rel_hr_opts, key=f"rel_{fab_code}")
+                        if rel_sel and st.button(f"🔓 Release {rel_sel}", key=f"rel_btn_{rel_sel}"):
+                            rel_qty = float(SS["pf_hard_reservations"][rel_sel].get("qty",0))
+                            SS["pf_hard_reservations"][rel_sel]["status"] = "Released"
+                            fab_key = SS["pf_hard_reservations"][rel_sel].get("fabric_key","")
+                            if fab_key in SS.get("pf_checked",{}):
+                                SS["pf_checked"][fab_key]["hard_reserved"] = max(0, float(SS["pf_checked"][fab_key].get("hard_reserved",0)) - rel_qty)
+                            if fab_code in st.session_state["items"]:
+                                prev = float(st.session_state["items"][fab_code].get("reserved",0))
+                                st.session_state["items"][fab_code]["reserved"] = max(0, prev - rel_qty)
+                            save_data(); st.success(f"Released!"); st.rerun()
 
-# ── CHECK REPORTS ─────────────────────────────────────────────────────────────
-elif nav_pfc == "📊 Check Reports":
     st.markdown('<h1>Fabric Check Reports</h1>', unsafe_allow_html=True)
 
     check_entries = SS.get("pf_check_entries", {})
