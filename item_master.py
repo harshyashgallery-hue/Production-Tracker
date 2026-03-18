@@ -379,10 +379,6 @@ def load_pkg_lines():
 load_data()
 load_pkg_lines()
 
-# ── LOGIN GATE ────────────────────────────────────────────────────────────────
-if not require_login():
-    st.stop()
-
 ITEM_TYPES = ["Finished Goods (FG)", "Semi Finished Goods (SFG)", "Raw Material (RM)",
               "Grey Fabric", "Accessories", "Packing Materials", "Fuel & Lubricants"]
 MATERIAL_GROUPS = [
@@ -414,21 +410,11 @@ def get_current_role():
            st.session_state.get("users", {}).get(user, {}).get("role", "Viewer")
 
 def can(action):
-    """Check if current user can perform action: edit/delete/approve/create"""
-    role = get_current_role()
-    if not role: return False
-    role_data = st.session_state.get("roles", {}).get(role, {})
-    # Admin always can do everything
-    if role == "Admin": return True
-    return role_data.get(f"can_{action}", False)
+    """Always allowed — login system disabled"""
+    return True
 
 def can_access_page(page_name):
-    role = get_current_role()
-    if not role: return False
-    if role == "Admin": return True
-    role_data = st.session_state.get("roles", {}).get(role, {})
-    pages = role_data.get("pages", [])
-    return pages == "ALL" or page_name in pages
+    return True
 
 def require_login():
     """Show login form if not logged in. Returns True if logged in."""
@@ -522,20 +508,6 @@ if "current_page" not in st.session_state:
 
 with st.sidebar:
     st.markdown('<div style="padding:16px 4px 8px;"><div style="font-size:22px;font-weight:800;color:#c8a96e;">🧵 Garment ERP</div><div style="font-size:10px;color:#888;letter-spacing:2px;text-transform:uppercase;margin-top:2px;">Production Management System</div></div>', unsafe_allow_html=True)
-
-    # User info + logout
-    _uname = st.session_state.get("_user_name","")
-    _urole = st.session_state.get("_user_role","")
-    _role_colors = {"Admin":"#c8a96e","Manager":"#0ea5e9","Operator":"#059669","Viewer":"#94a3b8"}
-    _rc = _role_colors.get(_urole,"#94a3b8")
-    st.markdown(f'''<div style="display:flex;justify-content:space-between;align-items:center;background:#1e293b;border-radius:8px;padding:8px 12px;margin-bottom:6px;">
-        <div><div style="font-size:13px;font-weight:700;color:#fff;">👤 {_uname}</div>
-        <div style="font-size:10px;font-weight:700;color:{_rc};">{_urole}</div></div>
-    </div>''', unsafe_allow_html=True)
-    if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
-        for k in ["_logged_in_user","_user_name","_user_role"]:
-            st.session_state.pop(k, None)
-        st.rerun()
 
     st.markdown("---")
 
