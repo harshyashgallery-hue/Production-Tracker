@@ -9083,19 +9083,24 @@ elif nav_prd == "➕ Create Job Order":
                 parent   = items_data.get(sku, {}).get("parent", sku)
                 bom      = boms_data.get(parent, boms_data.get(sku, {}))
                 mat_req  = []
+                # Process → which BOM item types to issue
+                PROCESS_MAT_TYPES = {
+                    "Cutting":   ["Semi Finished Goods (SFG)"],
+                    "Stitching": ["Accessories", "Raw Material (RM)", "Packing Materials"],
+                    "Finishing": ["Accessories", "Packing Materials"],
+                    "Embroidery":["Accessories"],
+                    "Packing":   ["Packing Materials", "Accessories"],
+                }
+                issue_types = PROCESS_MAT_TYPES.get(jo_process, ["Accessories", "Raw Material (RM)"])
                 for ln in bom.get("lines", []):
                     mat_type = items_data.get(ln.get("item_code",""),{}).get("item_type","")
-                    if jo_process == "Cutting" and mat_type in ["Semi Finished Goods (SFG)"]:
+                    if mat_type in issue_types:
                         mat_req.append({
-                            "code": ln.get("item_code",""),
-                            "name": ln.get("item_name",""),
+                            "code":    ln.get("item_code",""),
+                            "name":    ln.get("item_name",""),
                             "qty_per": float(ln.get("qty",0)),
-                        })
-                    elif jo_process == "Stitching" and mat_type in ["Accessories"]:
-                        mat_req.append({
-                            "code": ln.get("item_code",""),
-                            "name": ln.get("item_name",""),
-                            "qty_per": float(ln.get("qty",0)),
+                            "unit":    ln.get("unit","Piece"),
+                            "mat_type":mat_type,
                         })
 
                 jo_lines_data.append({
@@ -9152,53 +9157,54 @@ elif nav_prd == "➕ Create Job Order":
             st.markdown(f'<div style="text-align:right;font-size:14px;font-weight:700;color:#059669;padding:6px 10px;">💰 Total {jo_process} Amount: ₹{total_proc_amount:,.2f}</div>', unsafe_allow_html=True)
 
             # Material Issue section
-            if jo_process == "Cutting" and any(r["mat_req"] for r in line_rows):
+            if any(r["mat_req"] for r in line_rows):
                 st.markdown("---")
-                st.markdown("#### 📦 Fabric Issue")
-                st.markdown('<div class="info-box" style="font-size:12px;">BOM ke basis pe fabric requirement calculate ho gayi. Rate BOM process cost se auto-fill hua hai — edit kar sakte ho.</div>', unsafe_allow_html=True)
+                proc_issue_label = {"Cutting":"Fabric","Stitching":"Accessories / Materials","Finishing":"Materials","Packing":"Packing Materials"}.get(jo_process,"Materials")
+                st.markdown(f"#### 📦 {proc_issue_label} Issue")
+                st.markdown(f'<div class="info-box" style="font-size:12px;">BOM ke basis pe <strong>{proc_issue_label}</strong> requirement calculate ho gayi. Har material ki issue qty confirm karo.</div>', unsafe_allow_html=True)
 
                 issue_lines = []
                 # Group by material to avoid duplicates
                 seen_mat_sku = set()
                 for lr in line_rows:
                     for m in lr["mat_req"]:
-                        fab_key      = f"{m['code']}_checked"
-                        chk_qty      = float(pf_checked.get(fab_key,{}).get("qty",0))
-                        # Hard reserved for OTHER SOs (not current SO)
-                        other_so_res = sum(
-                            float(r.get("qty",0))
-                            for r in SS.get("pf_hard_reservations",{}).values()
-                            if r.get("fabric_code","") == m["code"]
-                            and r.get("status","") == "Active"
-                            and r.get("so_no","") != jo_so  # exclude current SO
-                        )
-                        # Hard reserved for THIS SO (this is available to issue)
-                        this_so_res  = sum(
-                            float(r.get("qty",0))
-                            for r in SS.get("pf_hard_reservations",{}).values()
-                            if r.get("fabric_code","") == m["code"]
-                            and r.get("status","") == "Active"
-                            and r.get("so_no","") == jo_so
-                        )
-                        # Available = checked qty - other SOs reserved (this SO's reserved IS available)
-                        fab_avail = float(max(0, chk_qty - other_so_res))
+                        mat_type_m   = m.get("mat_type","")
+                        item_stock   = float(st.session_state.get("items",{}).get(m["code"],{}).get("stock",0))
+                        item_reserved= float(st.session_state.get("items",{}).get(m["code"],{}).get("reserved",0))
+
+                        if mat_type_m == "Semi Finished Goods (SFG)":
+                            # Printed fabric — use pf_checked stock considering SO reservations
+                            fab_key      = f"{m['code']}_checked"
+                            chk_qty      = float(pf_checked.get(fab_key,{}).get("qty",0))
+                            other_so_res = sum(
+                                float(r.get("qty",0))
+                                for r in SS.get("pf_hard_reservations",{}).values()
+                                if r.get("fabric_code","") == m["code"]
+                                and r.get("status","") == "Active"
+                                and r.get("so_no","") != jo_so
+                            )
+                            fab_avail = float(max(0, chk_qty - other_so_res))
+                        else:
+                            # Accessories / RM — use item stock directly
+                            fab_avail = float(max(0, item_stock - item_reserved))
                         req_qty   = float(round(m["qty_per"] * float(lr["plan_qty"]), 2))
                         issue_max = float(max(fab_avail, req_qty))  # allow at least req_qty
                         # Get rate from item master
                         mat_rate  = float(items_data.get(m["code"],{}).get("price", 0))
 
                         mat_sku_key = f"{m['code']}_{lr['sku']}"
+                        unit_lbl = m.get("unit","Piece")
                         fi1,fi2,fi3,fi4 = st.columns([3,1,1,1])
                         with fi1:
                             color = "#059669" if fab_avail >= req_qty else "#ef4444"
                             st.markdown(f'''<div style="padding:6px 0;font-size:12px;">
                                 <strong>{m["code"]} — {m["name"]}</strong>
-                                <span style="color:#64748b;font-size:11px;"> | SKU: {lr["sku"]}</span><br>
-                                Required: <strong>{req_qty} mtr</strong> &nbsp;|&nbsp;
-                                <span style="color:{color};">Available: <strong>{fab_avail:.1f} mtr</strong></span>
+                                <span style="color:#64748b;font-size:11px;"> | {m.get("mat_type","")} | SKU: {lr["sku"]}</span><br>
+                                Required: <strong>{req_qty} {unit_lbl}</strong> &nbsp;|&nbsp;
+                                <span style="color:{color};">Stock: <strong>{fab_avail:.1f} {unit_lbl}</strong></span>
                             </div>''', unsafe_allow_html=True)
                         with fi2:
-                            st.markdown(f'<div style="padding-top:4px;font-size:11px;color:#64748b;">Issue Qty (mtr)</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div style="padding-top:4px;font-size:11px;color:#64748b;">Issue Qty ({unit_lbl})</div>', unsafe_allow_html=True)
                         with fi3:
                             issue_qty = st.number_input("qty",
                                 min_value=0.0,
@@ -9249,18 +9255,35 @@ elif nav_prd == "➕ Create Job Order":
                 else:
                     # Issue fabric from checked stock
                     issued = []
-                    if jo_process == "Cutting":
-                        for il in issue_lines if 'issue_lines' in dir() else []:
-                            if il["issue_qty"] > 0:
-                                fab_key = f"{il['material_code']}_checked"
+                    for il in issue_lines if 'issue_lines' in dir() else []:
+                        if il["issue_qty"] > 0:
+                            mat_code = il["material_code"]
+                            mat_type_il = items_data.get(mat_code,{}).get("item_type","")
+                            if mat_type_il == "Semi Finished Goods (SFG)":
+                                # Printed fabric — deduct from pf_checked hard reserve
+                                fab_key = f"{mat_code}_checked"
                                 if fab_key in SS.get("pf_checked",{}):
                                     prev_res = float(SS["pf_checked"][fab_key].get("hard_reserved",0))
                                     SS["pf_checked"][fab_key]["hard_reserved"] = max(0, prev_res - il["issue_qty"])
-                                # Deduct from item stock
-                                if il["material_code"] in st.session_state["items"]:
-                                    cur = float(st.session_state["items"][il["material_code"]].get("stock",0))
-                                    st.session_state["items"][il["material_code"]]["stock"] = max(0, round(cur - il["issue_qty"], 3))
-                                issued.append(il)
+                                    prev_qty = float(SS["pf_checked"][fab_key].get("qty",0))
+                                    SS["pf_checked"][fab_key]["qty"] = max(0, prev_qty - il["issue_qty"])
+                            # Deduct from item stock for all types
+                            if mat_code in st.session_state["items"]:
+                                cur = float(st.session_state["items"][mat_code].get("stock",0))
+                                st.session_state["items"][mat_code]["stock"] = max(0, round(cur - il["issue_qty"], 3))
+                            # Add to stock ledger
+                            if "stock_ledger" not in SS: SS["stock_ledger"] = []
+                            SS["stock_ledger"].append({
+                                "date": str(date.today()), "doc_no": "PENDING",
+                                "doc_type": f"PRD-ISSUE-{jo_process}",
+                                "material_code": mat_code,
+                                "material_name": il["material_name"],
+                                "txn_type": "OUT", "qty": il["issue_qty"],
+                                "unit": items_data.get(mat_code,{}).get("unit",""),
+                                "stock_after": float(st.session_state["items"].get(mat_code,{}).get("stock",0)),
+                                "remarks": f"Issued for {jo_process} JO | SKU: {il['sku']}",
+                            })
+                            issued.append(il)
 
                     SS["prod_jo_list"][jo_no] = {
                         "jo_no":            jo_no,
