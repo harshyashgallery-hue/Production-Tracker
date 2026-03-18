@@ -5369,8 +5369,10 @@ elif nav_pur == "📦 Purchase Orders":
                             # Grey Fabric tracking
                             if "grey_po_tracker" not in SS: SS["grey_po_tracker"] = {}
                             for gl in st.session_state["po_lines"]:
+                                # ONLY check item_type from Item Master — not material_type from PR line
+                                # This prevents Thread/Button etc. from appearing in Grey Dashboard
                                 item_type_check = st.session_state.get("items",{}).get(gl["material_code"],{}).get("item_type","")
-                                if gl.get("material_type","") == "Grey Fabric" or item_type_check == "Grey Fabric":
+                                if item_type_check == "Grey Fabric":
                                     SS["grey_po_tracker"][po_no + "_" + gl["material_code"]] = {
                                         "po_no": po_no, "material_code": gl["material_code"],
                                         "material_name": gl["material_name"],
