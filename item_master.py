@@ -203,6 +203,7 @@ DEFAULT_DATA = {
     "grey_transfer_list": {},
     "grey_return_list": {},
     "grey_rework_list": {},
+    "grey_issue_docs": {},
     "grey_qc_counter": 1,
     "grey_transfer_counter": 1,
     "grey_return_counter": 1,
@@ -4470,6 +4471,123 @@ def make_print_html(doc_type, doc_no, data):
         </div>
         </body></html>"""
 
+    elif doc_type == "GREY_RECEIPT":
+        # Grey Fabric Receipt Note — when grey arrives at transport/factory
+        rows = ""
+        for i, ln in enumerate(data.get("lines", []), 1):
+            rows += f"""<tr>
+                <td>{i}</td>
+                <td><strong>{ln.get('material_code','')}</strong><br>{ln.get('material_name','')}</td>
+                <td style="text-align:right;">{ln.get('po_qty',0)}</td>
+                <td style="text-align:right;"><strong>{ln.get('received_qty',0)}</strong></td>
+                <td style="text-align:right;">{ln.get('pending_qty',0)}</td>
+                <td>{ln.get('unit','Meter')}</td>
+                <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                <td><span class="badge {'badge-green' if ln.get('qc_status','')=='Pass' else 'badge-grey'}">{ln.get('qc_status','Pending')}</span></td>
+                <td>{ln.get('remarks','')}</td>
+            </tr>"""
+        total_recv = sum(l.get('received_qty',0) for l in data.get('lines',[]))
+        total_val  = sum(l.get('received_qty',0)*l.get('rate',0) for l in data.get('lines',[]))
+
+        html = f"""<!DOCTYPE html><html><head><title>{doc_no}</title>{css}</head><body>
+        <div class="header">
+            <div><div class="company-name">{company}</div><div style="font-size:12px;color:#666;">Stores / Inward Department</div></div>
+            <div style="text-align:right;"><div class="doc-title">GREY FABRIC RECEIPT NOTE</div><div class="doc-no">{doc_no}</div><div class="doc-no">Date: {data.get('receipt_date','')}</div></div>
+        </div>
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="label">Supplier / Vendor</div>
+                <div class="value" style="font-size:15px;">{data.get('supplier_name','—')}</div>
+                <div class="info-row"><span class="k">PO Number</span><span class="v">{data.get('po_no','—')}</span></div>
+                <div class="info-row"><span class="k">Bilty No.</span><span class="v">{data.get('bilty_no','—')}</span></div>
+                <div class="info-row"><span class="k">Transporter</span><span class="v">{data.get('transporter','—')}</span></div>
+                <div class="info-row"><span class="k">Vehicle No.</span><span class="v">{data.get('vehicle_no','—')}</span></div>
+                <div class="info-row"><span class="k">Dispatch Date</span><span class="v">{data.get('dispatch_date','—')}</span></div>
+            </div>
+            <div class="info-box">
+                <div class="label">Receipt Details</div>
+                <div class="info-row"><span class="k">Receipt No.</span><span class="v">{doc_no}</span></div>
+                <div class="info-row"><span class="k">Receipt Date</span><span class="v">{data.get('receipt_date','')}</span></div>
+                <div class="info-row"><span class="k">Received At</span><span class="v">{data.get('received_at','—')}</span></div>
+                <div class="info-row"><span class="k">Received By</span><span class="v">{data.get('received_by','—')}</span></div>
+                <div class="info-row"><span class="k">SO Reference</span><span class="v">{data.get('so_ref','—')}</span></div>
+                <div class="info-row"><span class="k">Challan No.</span><span class="v">{data.get('challan_no','—')}</span></div>
+            </div>
+        </div>
+        <table>
+            <thead><tr><th>#</th><th>Material</th><th>PO Qty</th><th>Recv Qty</th><th>Pending</th><th>Unit</th><th>Rate</th><th>QC</th><th>Remarks</th></tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+        <div class="totals"><table>
+            <tr><td>Total Received</td><td><strong>{total_recv} mtr</strong></td></tr>
+            <tr class="grand-total"><td><strong>Total Value</strong></td><td><strong>₹{total_val:,.2f}</strong></td></tr>
+        </table></div>
+        {"<div class='info-box' style='margin-top:12px;'><strong>Remarks:</strong> " + data.get('remarks','') + "</div>" if data.get('remarks') else ""}
+        <div class="footer">
+            <div class="sign-box"><div class="sign-line">Driver / Transporter</div></div>
+            <div class="sign-box"><div class="sign-line">Received By (Stores)</div></div>
+            <div class="sign-box"><div class="sign-line">Checked By (QC)</div></div>
+        </div>
+        </body></html>"""
+
+    elif doc_type == "GREY_ISSUE":
+        # Material Issue Slip / Gate Pass — when grey is issued to printer
+        rows = ""
+        for i, ln in enumerate(data.get("lines", []), 1):
+            rows += f"""<tr>
+                <td>{i}</td>
+                <td><strong>{ln.get('material_code','')}</strong><br>{ln.get('material_name','')}</td>
+                <td>{ln.get('from_location','')}</td>
+                <td style="text-align:right;">{ln.get('available_qty',0)}</td>
+                <td style="text-align:right;"><strong>{ln.get('issued_qty',0)}</strong></td>
+                <td>{ln.get('unit','Meter')}</td>
+                <td style="text-align:right;">₹{ln.get('rate',0):,.2f}</td>
+                <td style="text-align:right;">₹{ln.get('issued_qty',0)*ln.get('rate',0):,.2f}</td>
+                <td>{ln.get('remarks','')}</td>
+            </tr>"""
+        total_issued = sum(l.get('issued_qty',0) for l in data.get('lines',[]))
+        total_val    = sum(l.get('issued_qty',0)*l.get('rate',0) for l in data.get('lines',[]))
+
+        html = f"""<!DOCTYPE html><html><head><title>{doc_no}</title>{css}</head><body>
+        <div class="header">
+            <div><div class="company-name">{company}</div><div style="font-size:12px;color:#666;">Stores / Issue Department</div></div>
+            <div style="text-align:right;"><div class="doc-title">MATERIAL ISSUE SLIP / GATE PASS</div><div class="doc-no">{doc_no}</div><div class="doc-no">Date: {data.get('issue_date','')}</div></div>
+        </div>
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="label">Issued To</div>
+                <div class="value" style="font-size:15px;">{data.get('issued_to','—')}</div>
+                <div class="info-row"><span class="k">Vendor / Printer Code</span><span class="v">{data.get('vendor_code','—')}</span></div>
+                <div class="info-row"><span class="k">Vehicle No.</span><span class="v">{data.get('vehicle_no','—')}</span></div>
+                <div class="info-row"><span class="k">Driver Name</span><span class="v">{data.get('driver','—')}</span></div>
+                <div class="info-row"><span class="k">Challan No.</span><span class="v">{data.get('challan_no','—')}</span></div>
+            </div>
+            <div class="info-box">
+                <div class="label">Issue Details</div>
+                <div class="info-row"><span class="k">Issue Slip No.</span><span class="v">{doc_no}</span></div>
+                <div class="info-row"><span class="k">Issue Date</span><span class="v">{data.get('issue_date','')}</span></div>
+                <div class="info-row"><span class="k">From Location</span><span class="v">{data.get('from_location','—')}</span></div>
+                <div class="info-row"><span class="k">JWO Reference</span><span class="v">{data.get('jwo_ref','—')}</span></div>
+                <div class="info-row"><span class="k">PO Reference</span><span class="v">{data.get('po_ref','—')}</span></div>
+                <div class="info-row"><span class="k">SO Reference</span><span class="v">{data.get('so_ref','—')}</span></div>
+            </div>
+        </div>
+        <table>
+            <thead><tr><th>#</th><th>Material</th><th>From Location</th><th>Available Qty</th><th>Issued Qty</th><th>Unit</th><th>Rate</th><th>Amount</th><th>Remarks</th></tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+        <div class="totals"><table>
+            <tr><td>Total Issued</td><td><strong>{total_issued} mtr</strong></td></tr>
+            <tr class="grand-total"><td><strong>Total Value</strong></td><td><strong>₹{total_val:,.2f}</strong></td></tr>
+        </table></div>
+        {"<div class='info-box' style='margin-top:12px;'><strong>Remarks:</strong> " + data.get('remarks','') + "</div>" if data.get('remarks') else ""}
+        <div class="footer">
+            <div class="sign-box"><div class="sign-line">Issued By (Stores)</div></div>
+            <div class="sign-box"><div class="sign-line">Authorized By</div></div>
+            <div class="sign-box"><div class="sign-line">Received By (Vendor/Driver)</div></div>
+        </div>
+        </body></html>"""
+
     return html
 
 def show_print_button(doc_type, doc_no, data, btn_key):
@@ -6278,24 +6396,76 @@ elif nav_gry == "🚚 Transit Tracker":
                     # Show context-aware action buttons based on current status
                     if current_status == "In Transit":
                         st.markdown('<div class="info-box" style="font-size:12px;">Grey In Transit hai — jab transport location pe pahunche tab "✅ Received at Transport Location" click karo.</div>', unsafe_allow_html=True)
-                        recv_q = st.number_input(
-                            f"📦 Qty Received at Transport Location (mtr)",
-                            min_value=0.0,
-                            max_value=float(t.get("ordered_qty",0)) * 1.1,
-                            value=float(t.get("ordered_qty",0)),
-                            step=0.5, key=f"recv_trans_{key}"
-                        )
-                        recv_date = st.date_input("Receipt Date", value=date.today(), key=f"recv_dt_{key}")
-                        recv_rem  = st.text_input("Remarks (optional)", key=f"recv_rem_{key}")
+
+                        rc1, rc2 = st.columns(2)
+                        with rc1:
+                            st.number_input("📦 Qty Received (mtr)", min_value=0.0,
+                                max_value=float(t.get("ordered_qty",0)) * 1.1,
+                                value=float(t.get("ordered_qty",0)),
+                                step=0.5, key=f"recv_trans_{key}")
+                            st.date_input("Receipt Date", value=date.today(), key=f"recv_dt_{key}")
+                            st.text_input("Received At (Location)", value="Transport Location",
+                                          key=f"recv_at_{key}", placeholder="e.g. Shree Ram Transport, Jaipur")
+                            st.text_input("Received By", key=f"recv_by_{key}", placeholder="Name of person")
+                        with rc2:
+                            st.text_input("Vendor Challan No.", key=f"recv_challan_{key}",
+                                          placeholder="Supplier ka challan number")
+                            st.text_input("Remarks (optional)", key=f"recv_rem_{key}")
+
                         if st.button("✅ Received at Transport Location", key=f"btn_recv_trans_{key}", use_container_width=True):
+                            _recv_q       = float(st.session_state.get(f"recv_trans_{key}", t.get("ordered_qty",0)))
+                            _recv_rem     = st.session_state.get(f"recv_rem_{key}", "")
+                            _recv_at      = st.session_state.get(f"recv_at_{key}", "Transport Location")
+                            _recv_by      = st.session_state.get(f"recv_by_{key}", "")
+                            _recv_challan = st.session_state.get(f"recv_challan_{key}", "")
+                            _recv_dt      = str(st.session_state.get(f"recv_dt_{key}", date.today()))
+
+                            # Generate Receipt No.
+                            _recv_no = f"GRN-GREY-{t.get('po_no','')}-{datetime.now().strftime('%d%m%H%M')}"
+
                             SS["grey_po_tracker"][key].update({
-                                "status": "At Transport Location",
-                                "transport_qty": recv_q,
-                                "received_qty": recv_q,
+                                "status":        "At Transport Location",
+                                "transport_qty": _recv_q,
+                                "received_qty":  _recv_q,
+                                "last_receipt_no":   _recv_no,
+                                "last_receipt_date": _recv_dt,
+                                "last_recv_at":      _recv_at,
+                                "last_recv_by":      _recv_by,
+                                "last_challan":      _recv_challan,
                             })
-                            add_grey_ledger(key, "RECEIVED", recv_q, "In Transit", "Transport Location",
-                                           f"RECV-{t.get('po_no')}", f"Received at transport. {recv_rem}")
-                            save_data(); st.success(f"✅ {recv_q} mtr transport location pe receive hua!"); st.rerun()
+                            add_grey_ledger(key, "RECEIVED", _recv_q, "In Transit", _recv_at,
+                                           _recv_no, f"Received at {_recv_at}. Challan:{_recv_challan}. By:{_recv_by}. {_recv_rem}")
+                            save_data()
+                            st.success(f"✅ {_recv_q} mtr receive hua! Receipt No: {_recv_no}")
+                            st.rerun()
+
+                        # Print Receipt if already received
+                        if t.get("last_receipt_no"):
+                            st.markdown("---")
+                            _receipt_data = {
+                                "po_no":          t.get("po_no",""),
+                                "receipt_date":   t.get("last_receipt_date",""),
+                                "supplier_name":  t.get("supplier",""),
+                                "bilty_no":       t.get("bilty_no",""),
+                                "transporter":    t.get("transporter",""),
+                                "vehicle_no":     t.get("vehicle_no",""),
+                                "dispatch_date":  t.get("dispatch_date",""),
+                                "received_at":    t.get("last_recv_at",""),
+                                "received_by":    t.get("last_recv_by",""),
+                                "challan_no":     t.get("last_challan",""),
+                                "so_ref":         t.get("so_ref",""),
+                                "lines": [{
+                                    "material_code": t.get("material_code",""),
+                                    "material_name": t.get("material_name",""),
+                                    "po_qty":        t.get("ordered_qty",0),
+                                    "received_qty":  t.get("received_qty",0),
+                                    "pending_qty":   max(0, t.get("ordered_qty",0)-t.get("received_qty",0)),
+                                    "unit":          t.get("unit","Meter"),
+                                    "rate":          0,
+                                    "qc_status":     "Pending",
+                                }],
+                            }
+                            show_print_button("GREY_RECEIPT", t.get("last_receipt_no",""), _receipt_data, f"print_grey_recv_{key}")
 
                     elif current_status == "At Transport Location":
                         avail = float(t.get("transport_qty", 0))
@@ -6359,28 +6529,77 @@ elif nav_gry == "🚚 Transit Tracker":
                             suppliers = SS.get("suppliers", {})
                             printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
                             sel_pr_direct = st.selectbox("Printer / Vendor *", printer_opts, key=f"direct_printer_{key}")
-                            send_rem = st.text_input("Challan / Remarks", key=f"send_rem_{key}")
+
+                            # Standard issue fields
+                            if1, if2 = st.columns(2)
+                            with if1:
+                                iss_challan = st.text_input("Issue Challan No. *", key=f"iss_challan_{key}", placeholder="e.g. IC/2024/001")
+                                iss_vehicle = st.text_input("Vehicle No.", key=f"iss_veh_{key}")
+                            with if2:
+                                iss_driver  = st.text_input("Driver Name", key=f"iss_driver_{key}")
+                                send_rem    = st.text_input("Remarks", key=f"send_rem_{key}")
 
                             if st.button("🖨️ Issue to Printer", key=f"btn_direct_print_{key}", use_container_width=True):
                                 if not sel_pr_direct:
                                     st.error("Printer select karo!")
                                 else:
+                                    _issue_no = f"MIS-{t.get('po_no','')}-{datetime.now().strftime('%d%m%H%M')}"
+                                    _challan  = st.session_state.get(f"iss_challan_{key}","")
+                                    _vehicle  = st.session_state.get(f"iss_veh_{key}","")
+                                    _driver   = st.session_state.get(f"iss_driver_{key}","")
+                                    _jwo_ref  = sel_jwo_direct.split(" | ")[0] if sel_jwo_direct and sel_jwo_direct != "— No JWO (free issue) —" else "—"
+                                    _printer_name = sel_pr_direct.split(" – ",1)[1] if " – " in sel_pr_direct else sel_pr_direct
+                                    _printer_code = sel_pr_direct.split(" – ")[0] if " – " in sel_pr_direct else sel_pr_direct
+
                                     SS["grey_po_tracker"][key].update({
-                                        "status": "Sent to Printer",
+                                        "status":      "Sent to Printer",
                                         "printer_qty": float(t.get("printer_qty",0)) + send_qty,
                                         "transport_qty": max(0, avail - send_qty),
+                                        f"issue_{_issue_no}": {
+                                            "issue_no": _issue_no, "qty": send_qty,
+                                            "to": _printer_name, "jwo": _jwo_ref,
+                                            "challan": _challan, "vehicle": _vehicle,
+                                            "date": str(date.today()),
+                                        }
                                     })
-                                    # Update JWO input issued qty if JWO selected
                                     if sel_jwo_direct and sel_jwo_direct != "— No JWO (free issue) —":
-                                        jwo_key = sel_jwo_direct.split(" | ")[0]
-                                        for li, ln in enumerate(SS["jwo_list"][jwo_key]["lines"]):
+                                        jwo_key_sel = sel_jwo_direct.split(" | ")[0]
+                                        for li, ln in enumerate(SS["jwo_list"][jwo_key_sel]["lines"]):
                                             if ln.get("input_material","") == mat_code:
-                                                SS["jwo_list"][jwo_key]["lines"][li]["grey_issued_from_transport"] = send_qty
-                                        SS["jwo_list"][jwo_key]["status"] = "Issued to Processor"
-                                    add_grey_ledger(key, "OUT", send_qty, "Transport Location",
-                                                   sel_pr_direct.split(" – ",1)[1] if " – " in sel_pr_direct else sel_pr_direct,
-                                                   f"TRF-{t.get('po_no')}", f"Direct to printer. JWO:{sel_jwo_direct.split(' | ')[0]}. {send_rem}")
-                                    save_data(); st.success(f"✅ {send_qty} mtr printer ko issue kiya!"); st.rerun()
+                                                SS["jwo_list"][jwo_key_sel]["lines"][li]["grey_issued_from_transport"] = send_qty
+                                        SS["jwo_list"][jwo_key_sel]["status"] = "Issued to Processor"
+                                    add_grey_ledger(key, "OUT", send_qty, "Transport Location", _printer_name,
+                                                   _issue_no, f"Issue Slip {_challan}. JWO:{_jwo_ref}. Vehicle:{_vehicle}")
+
+                                    # Store issue data for printing
+                                    if "grey_issue_docs" not in SS: SS["grey_issue_docs"] = {}
+                                    SS["grey_issue_docs"][_issue_no] = {
+                                        "issue_date":    str(date.today()),
+                                        "issued_to":     _printer_name,
+                                        "vendor_code":   _printer_code,
+                                        "vehicle_no":    _vehicle,
+                                        "driver":        _driver,
+                                        "challan_no":    _challan,
+                                        "jwo_ref":       _jwo_ref,
+                                        "po_ref":        t.get("po_no",""),
+                                        "so_ref":        t.get("so_ref",""),
+                                        "from_location": "Transport Location",
+                                        "remarks":       send_rem,
+                                        "lines": [{
+                                            "material_code": t.get("material_code",""),
+                                            "material_name": t.get("material_name",""),
+                                            "from_location": "Transport Location",
+                                            "available_qty": avail,
+                                            "issued_qty":    send_qty,
+                                            "unit":          t.get("unit","Meter"),
+                                            "rate":          0,
+                                        }],
+                                    }
+                                    save_data()
+                                    st.success(f"✅ {send_qty} mtr issued! Issue No: {_issue_no}")
+                                    # Show print button
+                                    show_print_button("GREY_ISSUE", _issue_no, SS["grey_issue_docs"][_issue_no], f"print_issue_{_issue_no}")
+                                    st.rerun()
 
                     elif current_status == "At Factory":
                         avail = float(t.get("factory_qty", 0))
@@ -6416,11 +6635,25 @@ elif nav_gry == "🚚 Transit Tracker":
                                                     step=0.5, key=f"fac_send_{key}")
                         suppliers = SS.get("suppliers",{})
                         printer_opts = [""] + [f"{k} – {v['name']}" for k,v in suppliers.items()]
-                        sel_printer_fac = st.selectbox("Printer / Vendor", printer_opts, key=f"fac_printer_{key}")
-                        send_rem_fac = st.text_input("Challan / Remarks", key=f"fac_send_rem_{key}")
+                        sel_printer_fac = st.selectbox("Printer / Vendor *", printer_opts, key=f"fac_printer_{key}")
+                        fi1, fi2 = st.columns(2)
+                        with fi1:
+                            fac_challan = st.text_input("Issue Challan No. *", key=f"fac_challan_{key}", placeholder="e.g. IC/2024/001")
+                            fac_vehicle = st.text_input("Vehicle No.", key=f"fac_veh_{key}")
+                        with fi2:
+                            fac_driver  = st.text_input("Driver Name", key=f"fac_driver_{key}")
+                            send_rem_fac = st.text_input("Remarks", key=f"fac_send_rem_{key}")
 
                         if st.button("🖨️ Issue to Printer", key=f"btn_fac_print_{key}", use_container_width=True):
                             mat = t.get("material_code","")
+                            _issue_no_fac = f"MIS-{t.get('po_no','')}-{datetime.now().strftime('%d%m%H%M')}"
+                            _challan_fac  = st.session_state.get(f"fac_challan_{key}","")
+                            _vehicle_fac  = st.session_state.get(f"fac_veh_{key}","")
+                            _driver_fac   = st.session_state.get(f"fac_driver_{key}","")
+                            _printer_name_fac = sel_printer_fac.split(" – ",1)[1] if " – " in sel_printer_fac else sel_printer_fac
+                            _printer_code_fac = sel_printer_fac.split(" – ")[0] if " – " in sel_printer_fac else sel_printer_fac
+                            _jwo_ref_fac = sel_jwo_fac.split(" | ")[0] if sel_jwo_fac and sel_jwo_fac != "— No JWO (free issue) —" else "—"
+
                             SS["grey_po_tracker"][key].update({
                                 "status": "Sent to Printer",
                                 "printer_qty": float(t.get("printer_qty",0)) + send_qty,
@@ -6429,17 +6662,32 @@ elif nav_gry == "🚚 Transit Tracker":
                             if mat in st.session_state["items"]:
                                 cur = float(st.session_state["items"][mat].get("stock",0))
                                 st.session_state["items"][mat]["stock"] = max(0, round(cur - send_qty, 3))
-                            # Update JWO
                             if sel_jwo_fac and sel_jwo_fac != "— No JWO (free issue) —":
-                                jwo_key = sel_jwo_fac.split(" | ")[0]
-                                for li, ln in enumerate(SS["jwo_list"][jwo_key]["lines"]):
+                                jwo_key_fac = sel_jwo_fac.split(" | ")[0]
+                                for li, ln in enumerate(SS["jwo_list"][jwo_key_fac]["lines"]):
                                     if ln.get("input_material","") == mat_code:
-                                        SS["jwo_list"][jwo_key]["lines"][li]["grey_issued_from_factory"] = send_qty
-                                SS["jwo_list"][jwo_key]["status"] = "Issued to Processor"
-                            add_grey_ledger(key, "OUT", send_qty, "Factory",
-                                           sel_printer_fac.split(" – ",1)[1] if " – " in sel_printer_fac else "Printer",
-                                           f"TRF-{t.get('po_no')}", f"JWO:{sel_jwo_fac.split(' | ')[0] if sel_jwo_fac else '—'}. {send_rem_fac}")
-                            save_data(); st.success(f"✅ {send_qty} mtr printer ko issue kiya!"); st.rerun()
+                                        SS["jwo_list"][jwo_key_fac]["lines"][li]["grey_issued_from_factory"] = send_qty
+                                SS["jwo_list"][jwo_key_fac]["status"] = "Issued to Processor"
+                            add_grey_ledger(key, "OUT", send_qty, "Factory", _printer_name_fac,
+                                           _issue_no_fac, f"Issue Slip {_challan_fac}. JWO:{_jwo_ref_fac}. Vehicle:{_vehicle_fac}")
+                            if "grey_issue_docs" not in SS: SS["grey_issue_docs"] = {}
+                            SS["grey_issue_docs"][_issue_no_fac] = {
+                                "issue_date": str(date.today()), "issued_to": _printer_name_fac,
+                                "vendor_code": _printer_code_fac, "vehicle_no": _vehicle_fac,
+                                "driver": _driver_fac, "challan_no": _challan_fac,
+                                "jwo_ref": _jwo_ref_fac, "po_ref": t.get("po_no",""),
+                                "so_ref": t.get("so_ref",""), "from_location": "Factory",
+                                "remarks": send_rem_fac,
+                                "lines": [{
+                                    "material_code": mat, "material_name": t.get("material_name",""),
+                                    "from_location": "Factory", "available_qty": avail,
+                                    "issued_qty": send_qty, "unit": t.get("unit","Meter"), "rate": 0,
+                                }],
+                            }
+                            save_data()
+                            st.success(f"✅ {send_qty} mtr printer ko issue kiya! Issue No: {_issue_no_fac}")
+                            show_print_button("GREY_ISSUE", _issue_no_fac, SS["grey_issue_docs"][_issue_no_fac], f"print_fac_issue_{_issue_no_fac}")
+                            st.rerun()
 
                     elif current_status in ["Sent to Printer","At Printer"]:
                         st.markdown(f'<div class="info-box" style="font-size:12px;">Grey printer ke paas hai ({t.get("printer_qty",0)} mtr). Printed fabric receive hone pe GRN karo ya QC karo.</div>', unsafe_allow_html=True)
