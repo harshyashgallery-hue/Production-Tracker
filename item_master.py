@@ -410,19 +410,23 @@ def get_current_user():
 def get_current_role():
     user = get_current_user()
     if not user: return None
-    return SS.get("users", {}).get(user, {}).get("role", "Viewer")
+    return st.session_state.get("roles", {}).get(user, {}).get("role") or \
+           st.session_state.get("users", {}).get(user, {}).get("role", "Viewer")
 
 def can(action):
     """Check if current user can perform action: edit/delete/approve/create"""
     role = get_current_role()
     if not role: return False
-    role_data = SS.get("roles", {}).get(role, {})
+    role_data = st.session_state.get("roles", {}).get(role, {})
+    # Admin always can do everything
+    if role == "Admin": return True
     return role_data.get(f"can_{action}", False)
 
 def can_access_page(page_name):
     role = get_current_role()
     if not role: return False
-    role_data = SS.get("roles", {}).get(role, {})
+    if role == "Admin": return True
+    role_data = st.session_state.get("roles", {}).get(role, {})
     pages = role_data.get("pages", [])
     return pages == "ALL" or page_name in pages
 
@@ -448,7 +452,7 @@ def require_login():
             submitted = st.form_submit_button("Login →", use_container_width=True)
 
         if submitted:
-            users = SS.get("users", {})
+            users = st.session_state.get("users", {})
             user_data = users.get(username.strip())
             if user_data and user_data.get("password") == password and user_data.get("active", True):
                 st.session_state["_logged_in_user"] = username.strip()
