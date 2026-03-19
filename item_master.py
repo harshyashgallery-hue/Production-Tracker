@@ -952,6 +952,15 @@ elif nav == "➕ Create Item":
             item_name = st.text_input("Item Name / Style Name *", placeholder="e.g. Floral Printed Kurta Set")
             item_type = st.selectbox("Item Category *", ITEM_TYPES)
             st.session_state["_tmp_item_type"] = item_type
+            # UOM — default based on item type
+            _uom_defaults = {
+                "Finished Goods (FG)": "Piece", "Semi Finished Goods (SFG)": "Meter",
+                "Raw Material (RM)": "Meter", "Grey Fabric": "Meter",
+                "Accessories": "Piece", "Packing Materials": "Piece", "Fuel & Lubricants": "Litre"
+            }
+            _uom_default_val = _uom_defaults.get(item_type, "Piece")
+            item_uom = st.selectbox("UOM (Unit of Measure) *", UNITS,
+                index=UNITS.index(_uom_default_val) if _uom_default_val in UNITS else 0)
 
             # Grey Fabric hint
             if item_type == "Grey Fabric":
@@ -1137,6 +1146,7 @@ elif nav == "➕ Create Item":
                     "code": item_code,
                     "name": item_name,
                     "item_type": item_type,
+                    "uom": item_uom,
                     "merchant": merchant,
                     "hsn": hsn,
                     "season": season,
@@ -1175,6 +1185,12 @@ elif nav == "➕ Create Item":
                 
                 st.success(f"✅ Item '{item_name}' saved! {len(sizes)} size variants created.")
                 st.balloons()
+                # Clear buyer packaging lines so next item starts fresh
+                for _b in st.session_state.get("buyers", []):
+                    _pk = f"pkg_lines_{_b}"
+                    if _pk in st.session_state:
+                        st.session_state[_pk] = []
+                st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ITEM MASTER LIST
@@ -1469,45 +1485,87 @@ elif nav == "🔩 BOM Management":
             # SECTION 2 - PROCESS COST LINES
             # ================================================================
             st.markdown("#### ⚙️ Process Cost Lines")
-            st.caption("Har process ki alag rate daalein — jaise Cutting ₹2/piece, Stitching ₹15/piece")
+            st.caption("Routing se processes auto-load hote hain — sirf Rate, Vendor aur Remark daalo")
 
-            with st.expander("➕ Add Process Cost Line", expanded=len(st.session_state[proc_key]) == 0):
+            # Auto-load processes from routing if proc_lines is empty
+            _item_routing = st.session_state.get("routings", {}).get(target_item, [])
+            _existing_proc_names = [p.get("process","") for p in st.session_state[proc_key]]
+
+            if _item_routing and not st.session_state[proc_key]:
+                # First time: auto-populate from routing
+                for _rp in _item_routing:
+                    _proc_nm = _rp if isinstance(_rp, str) else _rp.get("process", str(_rp))
+                    st.session_state[proc_key].append({
+                        "line_type": "Process",
+                        "process":   _proc_nm,
+                        "qty":       1.0,
+                        "unit":      "Per Piece",
+                        "rate":      0.0,
+                        "amount":    0.0,
+                        "vendor":    "",
+                        "remarks":   "",
+                    })
+
+            proc_lines = st.session_state[proc_key]
+
+            # Show process lines as editable table
+            if proc_lines:
+                st.markdown("**Process Lines** — Rate aur Vendor edit karein:")
+                for _pi, _pl in enumerate(proc_lines):
+                    _pc1, _pc2, _pc3, _pc4, _pc5 = st.columns([2, 1.5, 1.5, 2, 2])
+                    with _pc1:
+                        st.markdown(f'<div style="padding-top:28px;font-weight:600;font-size:13px;">⚙️ {_pl.get("process","")}</div>', unsafe_allow_html=True)
+                    with _pc2:
+                        _new_unit = st.selectbox("Unit", ["Per Piece","Per Meter","Per KG","Per Set","Lump Sum"],
+                            index=["Per Piece","Per Meter","Per KG","Per Set","Lump Sum"].index(_pl.get("unit","Per Piece")) if _pl.get("unit","Per Piece") in ["Per Piece","Per Meter","Per KG","Per Set","Lump Sum"] else 0,
+                            key=f"proc_unit_{target_item}_{_pi}")
+                    with _pc3:
+                        _new_rate = st.number_input("Rate (₹)", min_value=0.0, step=0.5,
+                            value=float(_pl.get("rate", 0.0)), key=f"proc_rate_{target_item}_{_pi}")
+                    with _pc4:
+                        _new_vendor = st.text_input("Vendor/Job Worker", value=_pl.get("vendor",""),
+                            key=f"proc_vendor_{target_item}_{_pi}")
+                    with _pc5:
+                        _new_remark = st.text_input("Remark", value=_pl.get("remarks",""),
+                            key=f"proc_remark_{target_item}_{_pi}")
+                    # Update line
+                    st.session_state[proc_key][_pi].update({
+                        "unit": _new_unit, "rate": _new_rate,
+                        "amount": round(float(_pl.get("qty",1)) * _new_rate, 2),
+                        "vendor": _new_vendor, "remarks": _new_remark,
+                    })
+                    st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
+            # Option to add extra process not in routing
+            with st.expander("➕ Add Extra Process Line (routing mein nahi hai)"):
                 p1, p2, p3 = st.columns(3)
                 with p1:
                     proc_name = st.selectbox("Process *", [""] + st.session_state["processes"], key="new_proc_name")
-                    proc_qty  = st.number_input("Qty / Pieces", min_value=0.0, value=1.0, step=1.0, key="new_proc_qty")
+                    proc_qty  = st.number_input("Qty", min_value=0.0, value=1.0, step=1.0, key="new_proc_qty")
                 with p2:
                     proc_unit = st.selectbox("Unit", ["Per Piece","Per Meter","Per KG","Per Set","Lump Sum"], key="new_proc_unit")
                     proc_rate = st.number_input("Rate (₹)", min_value=0.0, step=0.5, key="new_proc_rate")
                 with p3:
-                    proc_vendor  = st.text_input("Vendor / Job Worker", key="new_proc_vendor", placeholder="e.g. Sharma Cutting Unit")
+                    proc_vendor  = st.text_input("Vendor / Job Worker", key="new_proc_vendor")
                     proc_remarks = st.text_input("Remarks", key="new_proc_remarks")
-
                 if st.button("➕ Add Process Line"):
                     if proc_name:
                         st.session_state[proc_key].append({
-                            "line_type": "Process",
-                            "process":   proc_name,
-                            "qty":       proc_qty,
-                            "unit":      proc_unit,
-                            "rate":      proc_rate,
-                            "amount":    round(proc_qty * proc_rate, 2),
-                            "vendor":    proc_vendor,
-                            "remarks":   proc_remarks,
+                            "line_type": "Process", "process": proc_name,
+                            "qty": proc_qty, "unit": proc_unit, "rate": proc_rate,
+                            "amount": round(proc_qty * proc_rate, 2),
+                            "vendor": proc_vendor, "remarks": proc_remarks,
                         })
                         st.rerun()
 
-            proc_lines = st.session_state[proc_key]
             if proc_lines:
-                df_proc = pd.DataFrame(proc_lines)
-                sp = [x for x in ["process","qty","unit","rate","amount","vendor","remarks"] if x in df_proc.columns]
-                st.dataframe(df_proc[sp].rename(columns={
-                    "process":"Process","qty":"Qty","unit":"Unit",
-                    "rate":"Rate(₹)","amount":"Amount(₹)","vendor":"Vendor","remarks":"Remarks"
-                }), use_container_width=True, hide_index=True)
-                del_proc = st.number_input("Delete process line # (1-based, 0=none)", min_value=0, max_value=len(proc_lines), step=1, key="del_proc")
-                if st.button("🗑 Delete Process Line") and del_proc > 0:
-                    st.session_state[proc_key].pop(del_proc - 1); st.rerun()
+                _del_col1, _del_col2 = st.columns([3,1])
+                with _del_col1:
+                    del_proc = st.number_input("Delete process line # (1-based, 0=none)", min_value=0, max_value=len(proc_lines), step=1, key="del_proc")
+                with _del_col2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("🗑 Delete Line") and del_proc > 0:
+                        st.session_state[proc_key].pop(del_proc - 1); st.rerun()
 
             proc_total = sum(l.get("amount", 0) for l in proc_lines)
             st.markdown(f'<div class="card" style="text-align:right;padding:10px 16px;">Process Cost Total: <strong style="color:#c8a96e;">₹{proc_total:,.2f}</strong></div>', unsafe_allow_html=True)
@@ -1586,6 +1644,7 @@ elif nav == "🔩 BOM Management":
                     }
                     save_data()
                     st.success("✅ BOM saved as Draft!")
+                    st.rerun()
 
             with col2:
                 if st.button("✅ Certify BOM (Admin Only)", use_container_width=True):
@@ -1963,6 +2022,10 @@ elif nav_so == "📋 Demand Management":
                 st.session_state[dem_lines_key] = []
                 # Increment counter properly
                 SS["demand_counter"] = int(dem_no.split("-")[1]) + 1
+                # Clear demand form fields
+                for _dk in ["dem_date", "dem_delivery", "dem_remarks"]:
+                    if _dk in st.session_state:
+                        del st.session_state[_dk]
                 save_data()
                 st.success(f"✅ Demand {dem_no} created successfully!")
                 st.rerun()
@@ -2356,6 +2419,12 @@ elif nav_so == "➕ Create Sales Order":
         SS["so_counter"] += 1
         st.session_state["new_so_lines"] = []
         st.session_state["_last_demand_loaded"] = ""
+        # Clear SO form fields so next SO starts fresh
+        for _so_key in ["_so_date","_so_src","_so_wh","_so_buyer","_so_del","_so_disp",
+                         "_so_team","_so_ref","_so_ref_txt","_so_refdate","_so_pay",
+                         "_so_merchant","_so_remarks","_so_disc","_so_ship","_so_other","_so_priority"]:
+            if _so_key in st.session_state:
+                del st.session_state[_so_key]
         save_data()
         st.success(f"✅ {so_no} saved as {status}!")
         st.rerun()
@@ -5717,25 +5786,40 @@ elif nav_pur == "📦 Purchase Orders":
 
         if st.session_state["po_lines"]:
             st.markdown("#### PO Lines")
-            edit_po = pd.DataFrame([{
-                "Material": ln["material_code"], "Name": ln["material_name"],
-                "PO Qty": ln["po_qty"], "Unit": ln["unit"],
-                "Rate (₹)": ln["rate"], "GST %": ln["gst_pct"], "Amount (₹)": ln["amount"],
-            } for ln in st.session_state["po_lines"]])
-            edited_po = st.data_editor(edit_po, use_container_width=True, hide_index=False,
-                column_config={
-                    "Material": st.column_config.TextColumn(disabled=True),
-                    "Name":     st.column_config.TextColumn(disabled=True),
-                    "PO Qty":   st.column_config.NumberColumn(min_value=0, step=1),
-                    "Rate (₹)": st.column_config.NumberColumn(min_value=0.0, step=0.5),
-                    "GST %":    st.column_config.SelectboxColumn(options=GST_RATES),
-                }, key="po_editor")
-            for i, row in edited_po.iterrows():
-                if i < len(st.session_state["po_lines"]):
-                    qty = float(row["PO Qty"]); rate = float(row["Rate (₹)"]); gst = int(row["GST %"]) if row["GST %"] else 12
-                    st.session_state["po_lines"][i].update({"po_qty":qty,"rate":rate,"gst_pct":gst,"amount":round(qty*rate,2)})
+            st.caption("Rate, Qty edit karo — aur unwanted lines delete karo (🗑 button se)")
+            for _poi, _pol in enumerate(st.session_state["po_lines"]):
+                _pla, _plb, _plc, _pld, _ple, _plf = st.columns([2.5, 1.2, 1.2, 1.0, 1.0, 0.4])
+                with _pla:
+                    st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>{_pol["material_code"]}</strong><br><span style="color:#64748b;font-size:11px;">{_pol["material_name"]} | {_pol.get("material_type","")}</span></div>', unsafe_allow_html=True)
+                with _plb:
+                    _new_po_qty = st.number_input("PO Qty", min_value=0.0, step=1.0,
+                        value=float(_pol.get("po_qty", _pol.get("required_qty", 0))),
+                        key=f"pol_qty_{_poi}")
+                with _plc:
+                    _new_po_rate = st.number_input("Rate (₹)", min_value=0.0, step=0.5,
+                        value=float(_pol.get("rate", 0.0)), key=f"pol_rate_{_poi}")
+                with _pld:
+                    _gst_opts = GST_RATES
+                    _cur_gst = _pol.get("gst_pct", 12)
+                    _new_po_gst = st.selectbox("GST%", _gst_opts,
+                        index=_gst_opts.index(_cur_gst) if _cur_gst in _gst_opts else 2,
+                        key=f"pol_gst_{_poi}")
+                with _ple:
+                    _amt = round(_new_po_qty * _new_po_rate, 2)
+                    st.markdown(f'<div style="padding-top:28px;font-size:13px;font-weight:600;color:#c8a96e;">₹{_amt:,.0f}</div>', unsafe_allow_html=True)
+                with _plf:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("🗑", key=f"pol_del_{_poi}"):
+                        st.session_state["po_lines"].pop(_poi); st.rerun()
+                # Update line values
+                st.session_state["po_lines"][_poi].update({
+                    "po_qty": _new_po_qty, "rate": _new_po_rate,
+                    "gst_pct": _new_po_gst, "amount": round(_new_po_qty * _new_po_rate, 2)
+                })
+                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+
             subtotal = sum(ln["amount"] for ln in st.session_state["po_lines"])
-            gst_amt  = sum(ln["amount"]*ln["gst_pct"]/100 for ln in st.session_state["po_lines"])
+            gst_amt  = sum(ln["amount"]*ln.get("gst_pct",12)/100 for ln in st.session_state["po_lines"])
             total    = subtotal + gst_amt
             st.markdown(f'<div class="card card-left" style="text-align:right;padding:12px 20px;">Subtotal: ₹{subtotal:,.2f} | GST: ₹{gst_amt:,.2f} | <strong style="color:#c8a96e;font-size:16px;">Total: ₹{total:,.2f}</strong></div>', unsafe_allow_html=True)
             sc1,sc2,sc3 = st.columns(3)
@@ -5783,6 +5867,10 @@ elif nav_pur == "📦 Purchase Orders":
                                         "created_at": datetime.now().isoformat(),
                                     }
                             st.session_state["po_lines"] = []; st.session_state["pr_to_po"] = ""
+                            # Clear PO header form fields
+                            for _pk in ["po_supp","po_date","po_del","po_pr_ref","po_so","po_curr","po_pay","po_rem"]:
+                                if _pk in st.session_state:
+                                    del st.session_state[_pk]
                             _supp_name = suppliers.get(supp_code, {}).get('name', supp_code)
                             log_activity("PO", po_no, "Created", f"Supplier: {_supp_name} | Total: ₹{total:,.2f} | Status: {btn_status}")
                             save_data(); st.success(f"✅ {po_no} saved!"); st.rerun()
@@ -5961,19 +6049,72 @@ elif nav_pur == "🔧 Job Work Orders":
 
         if st.session_state["jwo_lines"]:
             st.markdown("#### JWO Lines")
+            st.caption("Qty, Rate, Input material — sab edit karo. 🗑 se line delete karo.")
             for idx,ln in enumerate(st.session_state["jwo_lines"]):
-                lc1,lc2,lc3,lc4 = st.columns([2.5,2.5,1.5,0.5])
-                with lc1: st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>OUT: {ln["output_material"]}</strong> — {ln["output_name"]}<br>{ln["output_qty"]} {ln["output_unit"]} @ ₹{ln["rate"]}/unit</div>', unsafe_allow_html=True)
-                with lc2:
-                    if ln.get("input_material"):
-                        in_stock = float(st.session_state["items"].get(ln["input_material"],{}).get("stock",0))
-                        color = "#059669" if in_stock >= ln["input_qty"] else "#ef4444"
-                        st.markdown(f'<div style="padding-top:8px;font-size:13px;"><strong>IN: {ln["input_material"]}</strong> — {ln["input_name"]}<br>{ln["input_qty"]} {ln["input_unit"]} | Stock: <strong style="color:{color};">{in_stock}</strong></div>', unsafe_allow_html=True)
-                with lc3: st.markdown(f'<div style="padding-top:8px;font-size:13px;">JW Amt: ₹{ln["output_qty"]*ln["rate"]:,.2f}</div>', unsafe_allow_html=True)
-                with lc4:
-                    if st.button("🗑", key=f"del_jw_{idx}"):
-                        st.session_state["jwo_lines"].pop(idx); st.rerun()
-                st.markdown('<hr style="margin:2px 0;">', unsafe_allow_html=True)
+                with st.container():
+                    st.markdown(f'<div style="background:#f8fafc;border:1px solid #e2e5ef;border-radius:8px;padding:10px 14px;margin:4px 0;">', unsafe_allow_html=True)
+                    _jc1, _jc2 = st.columns(2)
+                    with _jc1:
+                        st.markdown("**📦 Output (jo receive hoga)**")
+                        _out_code = ln.get("output_material","")
+                        _out_name = ln.get("output_name","")
+                        st.markdown(f'<span style="font-weight:600;color:#1c1c2e;">{_out_code}</span> — {_out_name}', unsafe_allow_html=True)
+                        _new_out_qty = st.number_input("Output Qty", min_value=0.0, step=1.0,
+                            value=float(ln.get("output_qty", 0.0)), key=f"jwo_oqty_{idx}")
+                        _new_out_unit = st.selectbox("Output Unit", UNITS,
+                            index=UNITS.index(ln.get("output_unit","Meter")) if ln.get("output_unit","Meter") in UNITS else 0,
+                            key=f"jwo_ounit_{idx}")
+                        _new_rate = st.number_input("Job Work Rate (₹/unit)", min_value=0.0, step=0.5,
+                            value=float(ln.get("rate", 0.0)), key=f"jwo_rate_{idx}")
+                        _jw_amt = round(_new_out_qty * _new_rate, 2)
+                        st.markdown(f'**JW Amount: ₹{_jw_amt:,.2f}**')
+                    with _jc2:
+                        st.markdown("**🔄 Input (jo issue karna hai)**")
+                        _in_code = ln.get("input_material","")
+                        _in_name = ln.get("input_name","")
+                        # Auto-suggest input from BOM if empty
+                        _bom_for_out = st.session_state.get("boms",{}).get(_out_code,{})
+                        _bom_mat_lines = [b for b in _bom_for_out.get("lines",[]) if b.get("line_type") != "Process"]
+                        _auto_in_code = _bom_mat_lines[0].get("item_code","") if _bom_mat_lines and not _in_code else _in_code
+                        _auto_in_qty_per = float(_bom_mat_lines[0].get("qty", 0)) if _bom_mat_lines else 0.0
+
+                        _items_data = st.session_state.get("items",{})
+                        _in_opts = [""] + list(_items_data.keys())
+                        _new_in_mat = st.selectbox("Input Material",  _in_opts,
+                            format_func=lambda x: f"{x} – {_items_data.get(x,{}).get('name','')}" if x else "Select",
+                            index=_in_opts.index(_auto_in_code) if _auto_in_code in _in_opts else 0,
+                            key=f"jwo_imat_{idx}")
+                        _auto_qty = round(_auto_in_qty_per * _new_out_qty, 3) if _auto_in_qty_per and not ln.get("input_qty") else float(ln.get("input_qty", 0.0))
+                        _new_in_qty = st.number_input("Input Qty to Issue", min_value=0.0, step=1.0,
+                            value=_auto_qty, key=f"jwo_iqty_{idx}")
+                        _new_in_unit = st.selectbox("Input Unit", UNITS,
+                            index=UNITS.index(ln.get("input_unit","Meter")) if ln.get("input_unit","Meter") in UNITS else 0,
+                            key=f"jwo_iunit_{idx}")
+                        # Show stock status
+                        _in_actual_code = _new_in_mat.split(" – ")[0] if " – " in _new_in_mat else _new_in_mat
+                        if _in_actual_code:
+                            _in_stk = float(_items_data.get(_in_actual_code,{}).get("stock",0))
+                            _stk_color = "#059669" if _in_stk >= _new_in_qty else "#ef4444"
+                            _stk_label = "✅ Stock OK" if _in_stk >= _new_in_qty else "⚠️ Stock Low"
+                            st.markdown(f'<div style="margin-top:8px;padding:6px 10px;background:#f1f5f9;border-radius:6px;font-size:12px;">Current Stock: <strong style="color:{_stk_color};">{_in_stk} {_new_in_unit}</strong> | Need: {_new_in_qty} | <strong style="color:{_stk_color};">{_stk_label}</strong></div>', unsafe_allow_html=True)
+
+                    # Delete button
+                    _del_col, _ = st.columns([1,4])
+                    with _del_col:
+                        if st.button(f"🗑 Delete Line {idx+1}", key=f"del_jw_{idx}"):
+                            st.session_state["jwo_lines"].pop(idx); st.rerun()
+
+                    # Update line
+                    _in_code_final = _new_in_mat.split(" – ")[0] if " – " in _new_in_mat else _new_in_mat
+                    st.session_state["jwo_lines"][idx].update({
+                        "output_qty": _new_out_qty, "output_unit": _new_out_unit,
+                        "rate": _new_rate,
+                        "input_material": _in_code_final,
+                        "input_name": _items_data.get(_in_code_final,{}).get("name",_in_code_final) if _in_code_final else "",
+                        "input_qty": _new_in_qty, "input_unit": _new_in_unit,
+                    })
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown("")
 
             jw_total = sum(ln["output_qty"]*ln["rate"] for ln in st.session_state["jwo_lines"])
             st.markdown(f'<div class="card card-left" style="text-align:right;padding:10px 20px;"><strong style="color:#c8a96e;">Job Work Total: ₹{jw_total:,.2f}</strong></div>', unsafe_allow_html=True)
@@ -6009,6 +6150,10 @@ elif nav_pur == "🔧 Job Work Orders":
                 }
                 if sel_jw_pr: SS["pr_list"][sel_jw_pr]["status"] = "JWO Created"
                 st.session_state["jwo_lines"] = []; st.session_state["pr_to_jwo"] = ""
+                # Clear JWO header form fields
+                for _jk in ["jwo_proc","jwo_date","jwo_del","jwo_pr_ref","jwo_so","jwo_rem"]:
+                    if _jk in st.session_state:
+                        del st.session_state[_jk]
                 _proc_name = suppliers.get(proc_code, {}).get('name', proc_code)
                 log_activity("JWO", jwo_no, "Created", f"Processor: {_proc_name} | Total: ₹{jw_total:,.2f}")
                 save_data(); st.success(f"✅ {jwo_no} created! Input materials issued."); st.rerun()
